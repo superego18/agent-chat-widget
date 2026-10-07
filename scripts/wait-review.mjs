@@ -59,7 +59,12 @@ function check() {
     clearInterval(timer);
     cleanup();
     console.log(`CHAT round=${round}`);
-    for (const m of pending) console.log(`[${m.id}][${m.target === 'skill' ? '스킬' : '시스템'}]${m.context === 'app' ? '[앱 화면]' : ''} ${m.text}`);
+    for (const m of pending) {
+      console.log(`[${m.id}][${m.target === 'skill' ? '스킬' : '시스템'}]${m.context === 'app' ? '[앱 화면]' : ''} ${m.text}`);
+      if (m.where?.selector || m.where?.url) {
+        console.log(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
+      }
+    }
     process.exit(0);
   }
   let data = null;
