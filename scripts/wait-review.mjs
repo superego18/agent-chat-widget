@@ -2,6 +2,7 @@
 // 리뷰 완료 표시나 리뷰 페이지 대화 메시지를 기다린다. 의존성 없음 (Node 18+).
 // 사용: node wait-review.mjs --round <N> [--dir .ui-feedback] [--minutes 30] [--agent "Claude Code"] [--target system|skill|all]
 //   --target: 이 대상의 대화 메시지에만 깨어난다(기본 all). 여러 세션이 대상을 나눠 맡을 때 쓴다.
+//             skill 은 리뷰 완료 표시에는 깨어나지 않는다(완료 반영은 작업 세션 몫).
 //   기다리는 동안 <dir>/watch-r<N>.json 을 남겨 리뷰 페이지가 "자동 이어가기 켜짐"을 표시하게 한다.
 //   - 완료 표시: REVIEW_DONE 과 평가 JSON 을 출력하고 0으로 끝난다.
 //   - 답하지 않은 사용자 메시지(chat.json 의 마지막 메시지가 user): CHAT 과 그 메시지들을 출력하고 0으로 끝난다.
@@ -74,7 +75,8 @@ function check() {
   try {
     data = JSON.parse(fs.readFileSync(feedbackFile, 'utf8'));
   } catch {}
-  if (data?.done === true) {
+  // 완료 표시는 리뷰를 반영하는 쪽(시스템·전체 감시)만 받는다. 스킬 대상만 보는 감시는 대화에만 깨어난다.
+  if (data?.done === true && target !== 'skill') {
     clearInterval(timer);
     cleanup();
     console.log(`REVIEW_DONE round=${round}`);
