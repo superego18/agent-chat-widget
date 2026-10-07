@@ -47,9 +47,9 @@
   .box { position: fixed; pointer-events: none; outline: 2px solid #4f46e5; background: rgba(79,70,229,.08); border-radius: 3px; }
   .box[hidden] { display: none; }
 </style>
-<button class="btn" id="btn" type="button" aria-expanded="false">피드백<span class="badge" id="badge" hidden></span></button>
-<section class="panel" id="panel" hidden aria-label="피드백">
-  <header><b>피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
+<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="badge" id="badge" hidden></span></button>
+<section class="panel" id="panel" hidden aria-label="대화/피드백">
+  <header><b>대화/피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="row"><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
