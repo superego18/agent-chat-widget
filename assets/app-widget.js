@@ -29,6 +29,9 @@
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
   .empty { margin: auto; text-align: center; font-size: 12px; color: #8f8c84; line-height: 1.6; white-space: pre-line; }
+  .tabs { padding: 6px 0 2px !important; }
+  .tabs .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
+  .tabs .dot.on { background: #15803d; } .tabs .dot.off { background: #8f8c84; }
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
   .chipbtn { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
   .chipbtn[aria-pressed="true"] { background: #1c1b18; color: #fff; border-color: transparent; }
@@ -46,13 +49,9 @@
 </style>
 <button class="btn" id="btn" type="button" aria-expanded="false">피드백<span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="피드백">
-  <header><b>피드백 · 앱 화면</b><p id="mode" class="off"></p></header>
+  <header><b>피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="row" role="group" aria-label="고칠 대상">고칠 대상
-    <button class="chipbtn" type="button" data-target="system" aria-pressed="true">작업 중인 시스템</button>
-    <button class="chipbtn" type="button" data-target="skill" aria-pressed="false">스킬(리뷰 방식)</button>
-    <button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button>
-  </div>
+  <div class="row"><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button></form>
 </section>
@@ -61,12 +60,16 @@
 
   const $ = (s) => root.getElementById(s);
   let messages = [];
-  let transcript = { registered: false, items: [] };
-  let target = 'system';
+  let sessions = [];
+  const transcripts = {};
+  let activeTab = null;
+  try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
-  let watch = { active: false };
   let seen = '';
   try { seen = localStorage.getItem('__uifb_seenAt') || ''; } catch {}
+  const sessionById = (id) => sessions.find((x) => x.id === id);
+  const nameOf = (id) => sessionById(id)?.name || '세션';
+  const ownerOf = (m) => m.to || m.session || null;
 
   function mdLite(text) {
     const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -90,27 +93,56 @@
     return parts.join(' > ');
   }
 
+  function timeline(tab) {
+    return [...messages, ...Object.values(transcripts).flat()]
+      .filter((m) => tab === 'all' || ownerOf(m) === tab)
+      .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  }
+
+  function renderTabs() {
+    const box = $('tabs');
+    box.textContent = '';
+    const tabs = [...sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active })), { id: 'all', label: '전체' }];
+    if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || { id: 'all' }).id;
+    for (const t of tabs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chipbtn';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-pressed', String(t.id === activeTab));
+      if (t.id !== 'all') {
+        const dot = document.createElement('span');
+        dot.className = 'dot ' + (t.live ? 'on' : 'off');
+        b.append(dot);
+      }
+      b.append(t.label);
+      b.onclick = () => { activeTab = t.id; try { localStorage.setItem('__uifb_tab', activeTab); } catch {} render(); };
+      box.append(b);
+    }
+  }
+
   function render() {
+    renderTabs();
     const box = $('msgs');
     box.textContent = '';
-    if (!messages.length && !transcript.items.length) {
+    const items = timeline(activeTab);
+    if (!items.length) {
       const p = document.createElement('p');
       p.className = 'empty';
-      p.textContent = '앱을 쓰다가 생긴 질문이나 요청을 보내세요.\n"위치 찍기"로 화면의 한 곳을 함께 보낼 수 있습니다.';
+      p.textContent = sessions.length
+        ? '앱을 쓰다가 생긴 질문이나 요청을 보내세요.\n"위치 찍기"로 화면의 한 곳을 함께 보낼 수 있습니다.'
+        : '등록된 세션이 없습니다.\n작업 세션이 자기 세션을 등록하면 대화할 수 있습니다.';
       box.append(p);
     }
-    const items = [
-      ...(transcript.registered ? transcript.items.map((m) => ({ from: m.role, text: m.text, at: m.at, source: 'terminal', agent: transcript.agent })) : []),
-      ...messages.map((m) => ({ ...m, source: m.context === 'terminal' ? 'terminal' : m.context === 'app' ? 'app' : 'review' })),
-    ].sort((a, b) => String(a.at).localeCompare(String(b.at)));
     for (const m of items.slice(-80)) {
       const d = document.createElement('div');
       d.className = 'msg ' + m.from;
       const tag = document.createElement('span');
       tag.className = 'tag';
-      tag.textContent = m.source === 'terminal' ? '터미널' : (m.source === 'app' ? '앱' : '리뷰') + ' · ' + (m.target === 'skill' ? '스킬' : '시스템');
+      const src = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '리뷰';
+      tag.textContent = activeTab === 'all' && ownerOf(m) ? `${nameOf(ownerOf(m))} · ${src}` : src;
       const small = document.createElement('small');
-      small.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') +
+      small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
         (m.where?.url ? ' · ' + m.where.url : '');
       const body = document.createElement('span');
@@ -119,37 +151,48 @@
       box.append(d);
     }
     const last = items[items.length - 1];
-    if (last && last.from === 'user' && last.source !== 'terminal') {
+    if (last && last.from === 'user' && last.context !== 'terminal') {
       const w = document.createElement('p');
       w.className = 'empty';
       w.style.margin = '0';
-      w.textContent = watch.active ? '작업 세션이 읽고 답하는 중…' : '자동으로 전달되지 않습니다. 터미널에 "대화 확인해"라고 보내 주세요.';
+      const s = sessionById(ownerOf(last));
+      w.textContent = s?.watch?.active ? `${s.name}이(가) 읽고 답하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
     }
     box.scrollTop = box.scrollHeight;
-    $('mode').className = watch.active ? 'on' : 'off';
-    $('mode').textContent = watch.active
-      ? `${watch.agent}가 메시지를 바로 읽고 답합니다.`
-      : '작업 세션이 자동으로 읽지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.';
+    const target = activeTab === 'all' ? null : sessionById(activeTab);
+    $('mode').className = target?.watch?.active ? 'on' : 'off';
+    $('mode').textContent = !target
+      ? '모든 세션의 대화를 함께 봅니다. 보내려면 세션 탭을 고르세요.'
+      : target.watch?.active
+        ? `${target.name}에게 보냅니다. 바로 전달됩니다.`
+        : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
+    $('input').disabled = !target;
+    $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '보낼 세션 탭을 고르세요';
+    const all = timeline('all');
+    const lastAll = all[all.length - 1];
     const open = !$('panel').hidden;
-    if (!seen || open) { seen = last ? String(last.at) : '0'; try { localStorage.setItem('__uifb_seenAt', seen); } catch {} }
-    const unread = items.filter((m) => m.from === 'agent' && String(m.at) > seen).length;
+    if (!seen || open) { seen = lastAll ? String(lastAll.at) : '0'; try { localStorage.setItem('__uifb_seenAt', seen); } catch {} }
+    const unread = all.filter((m) => m.from === 'agent' && String(m.at) > seen).length;
     $('badge').hidden = unread === 0;
     $('badge').textContent = String(unread);
   }
 
+  let key = '';
   async function poll() {
     try {
-      const [c, w, t] = await Promise.all([
+      const [c, ss] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
-        fetch('/__uifb/api/watch').then((r) => r.json()),
-        fetch('/__uifb/api/transcript').then((r) => r.json()),
+        fetch('/__uifb/api/sessions').then((r) => r.json()),
       ]);
-      const changed = (c.messages || []).length !== messages.length || w.active !== watch.active || (t.items || []).length !== transcript.items.length;
       messages = c.messages || [];
-      watch = w;
-      transcript = t.items ? t : { registered: false, items: [] };
-      if (changed) render();
+      sessions = ss.sessions || [];
+      for (const x of sessions.filter((x) => x.tool === 'codex')) {
+        transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
+      }
+      const all = timeline('all');
+      const k = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0)).join(',');
+      if (k !== key) { key = k; render(); }
     } catch {}
   }
 
@@ -160,14 +203,6 @@
     render();
     if (open) $('input').focus();
   };
-
-  root.querySelectorAll('[data-target]').forEach((b) => {
-    b.onclick = () => {
-      target = b.dataset.target;
-      root.querySelectorAll('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-      $('input').placeholder = target === 'skill' ? '스킬에 대한 의견 · Enter 보내기' : '질문이나 요청 · Enter 보내기';
-    };
-  });
 
   function stopPick() {
     $('hint').hidden = true;
@@ -219,7 +254,8 @@
     const text = $('input').value.trim();
     if (!text) return;
     $('input').value = '';
-    const body = { from: 'user', text, target, context: 'app', where: where || { url: location.pathname + location.search } };
+    if (!activeTab || activeTab === 'all') return;
+    const body = { from: 'user', text, to: activeTab, context: 'app', where: where || { url: location.pathname + location.search } };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
