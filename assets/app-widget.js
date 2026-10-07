@@ -303,6 +303,7 @@
       const all = timeline('all');
       const k = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
       if (k !== key) { key = k; render(); }
+      else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();
     } catch {}
   }
