@@ -24,6 +24,7 @@
   .msg { max-width: 88%; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
   .msg.user { align-self: flex-end; background: #4f46e5; color: #fff; }
   .msg.agent { align-self: flex-start; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.1); }
+  .msg code { font-family: ui-monospace, monospace; font-size: 12px; background: rgba(127,127,127,.15); padding: 0 4px; border-radius: 4px; }
   .msg small { display: block; font-size: 10px; opacity: .7; margin-top: 2px; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
@@ -67,6 +68,14 @@
   let seen = '';
   try { seen = localStorage.getItem('__uifb_seenAt') || ''; } catch {}
 
+  function mdLite(text) {
+    const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    return esc
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>');
+  }
+
   function selectorOf(el) {
     const parts = [];
     for (let n = el; n && n.nodeType === 1 && n !== document.body && parts.length < 5; n = n.parentElement) {
@@ -104,7 +113,9 @@
       small.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
         (m.where?.url ? ' · ' + m.where.url : '');
-      d.append(tag, m.text, small);
+      const body = document.createElement('span');
+      body.innerHTML = mdLite(m.text);
+      d.append(tag, body, small);
       box.append(d);
     }
     const last = items[items.length - 1];
