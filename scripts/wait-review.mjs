@@ -52,7 +52,13 @@ function unansweredUserMessages() {
   try {
     messages = JSON.parse(fs.readFileSync(chatFile, 'utf8')).messages || [];
   } catch {}
-  if (target !== 'all') messages = messages.filter((m) => (m.target === 'skill' ? 'skill' : 'system') === target);
+  // 터미널 대화(훅이 넣은 context: terminal)는 이미 세션 안에 있으므로 깨울 대상이 아니다.
+  // 다만 터미널에 쓴 에이전트 답은 시스템 쪽 질문에 대한 답으로 친다.
+  messages = messages.filter((m) =>
+    m.context === 'terminal'
+      ? target !== 'skill' && m.from === 'agent'
+      : target === 'all' || (m.target === 'skill' ? 'skill' : 'system') === target,
+  );
   const lastAgent = messages.map((m) => m.from).lastIndexOf('agent');
   return messages.slice(lastAgent + 1).filter((m) => m.from === 'user');
 }

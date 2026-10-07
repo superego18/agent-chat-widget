@@ -101,7 +101,7 @@
     }
     const items = [
       ...(transcript.registered ? transcript.items.map((m) => ({ from: m.role, text: m.text, at: m.at, source: 'terminal', agent: transcript.agent })) : []),
-      ...messages.map((m) => ({ ...m, source: m.context === 'app' ? 'app' : 'review' })),
+      ...messages.map((m) => ({ ...m, source: m.context === 'terminal' ? 'terminal' : m.context === 'app' ? 'app' : 'review' })),
     ].sort((a, b) => String(a.at).localeCompare(String(b.at)));
     for (const m of items.slice(-80)) {
       const d = document.createElement('div');

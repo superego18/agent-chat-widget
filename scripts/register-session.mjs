@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // 지금 이 세션의 대화 기록 파일을 찾아 리뷰 서버에 등록한다. 의존성 없음 (Node 18+).
-// 사용: node register-session.mjs --marker <아무 글자 8자 이상> [--dir .ui-feedback] [--agent "Claude Code"]
+// 사용: node register-session.mjs --marker <아무 글자 8자 이상> [--dir .ui-feedback] [--agent "Claude Code"] [--port 4799]
 //   --marker 는 명령에 글자 그대로 적는다(예: uifb-k3x9q2m7). 셸 변수·$(...)를 쓰면 기록에 남는 글자와 달라져 못 찾는다.
 //   이 명령 자체가 세션 기록에 남으므로, 최근 기록 파일 중 marker 가 들어 있는 파일이 곧 이 세션의 파일이다.
-//   찾으면 <dir>/session.json 에 { tool, path, agent } 를 쓴다. 리뷰 서버는 이 파일을 읽어 터미널 대화를 페이지에 보여 준다.
+//   찾으면 <dir>/session.json 에 { tool, sessionId, path, agent, port } 를 쓴다.
+//   Claude: hook-relay.mjs 훅이 이 sessionId 의 대화만 리뷰 서버로 보낸다. Codex: 리뷰 서버가 path 의 기록을 읽어 보여 준다.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +18,7 @@ function arg(name, fallback) {
 const marker = arg('marker', '');
 const dir = path.resolve(arg('dir', '.ui-feedback'));
 const agent = arg('agent', '작업 세션');
+const port = Number(arg('port', '4799'));
 if (marker.length < 8) {
   console.error('--marker 에 8자 이상의 고유한 글자를 직접 적어 주세요(예: uifb-k3x9q2m7).');
   process.exit(2);
@@ -73,9 +75,10 @@ if (!found) {
 }
 
 const tool = found.includes(`${path.sep}.claude${path.sep}`) ? 'claude' : 'codex';
+const sessionId = tool === 'claude' ? path.basename(found, '.jsonl') : null;
 fs.mkdirSync(dir, { recursive: true });
 fs.writeFileSync(
   path.join(dir, 'session.json'),
-  JSON.stringify({ tool, path: found, agent, registeredAt: new Date().toISOString() }, null, 2) + '\n',
+  JSON.stringify({ tool, sessionId, path: found, agent, port, registeredAt: new Date().toISOString() }, null, 2) + '\n',
 );
 console.log(`등록함: ${tool} · ${found}`);
