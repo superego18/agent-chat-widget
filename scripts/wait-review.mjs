@@ -3,6 +3,8 @@
 // 사용: node wait-review.mjs --session <이름 또는 id> [--round <N> --done] [--dir .ui-feedback] [--minutes 30] [--agent "Claude Code"]
 //   --session: register-session.mjs 로 등록한 이 세션. 이 세션에게 온(to) 메시지에만 깨어난다.
 //   --done:    리뷰 완료 표시도 받는다(리뷰를 반영하는 작업 세션만 붙인다). --round 와 함께 쓴다.
+//   --seen <id>: 이 번호까지의 메시지는 이미 처리한 것으로 본다. 답을 턴의 마지막 문장으로 쓰고 감시를 먼저 다시 켤 때,
+//                답이 훅으로 전달되기 전에 같은 메시지로 다시 깨어나지 않게 한다.
 //   기다리는 동안 <dir>/watch-<세션 id>.json 을 남겨, 페이지가 이 세션의 "바로 읽음" 상태를 표시하게 한다.
 //   - 답하지 않은 메시지: CHAT 과 그 메시지들을 출력하고 0으로 끝난다(답하면 같은 명령으로 다시 켠다).
 //   - 완료 표시(--done): REVIEW_DONE 과 평가 JSON 을 출력하고 0으로 끝난다.
@@ -21,6 +23,7 @@ const round = arg('round', '');
 const handlesDone = process.argv.includes('--done');
 const minutes = Number(arg('minutes', '30'));
 const want = arg('session', '');
+const seen = Number(arg('seen', '0')) || 0;
 
 function findSession(key) {
   let files = [];
@@ -74,7 +77,7 @@ function pendingMessages() {
   } catch {}
   const mine = messages.filter((m) => (m.from === 'user' && m.to === sid && m.context !== 'terminal') || (m.from === 'agent' && m.session === sid));
   const lastAgent = mine.map((m) => m.from).lastIndexOf('agent');
-  return mine.slice(lastAgent + 1).filter((m) => m.from === 'user');
+  return mine.slice(lastAgent + 1).filter((m) => m.from === 'user' && m.id > seen);
 }
 
 let timer;
