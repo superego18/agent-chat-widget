@@ -60,11 +60,12 @@
 
   const $ = (s) => root.getElementById(s);
   let messages = [];
+  let transcript = { registered: false, items: [] };
   let target = 'system';
   let where = null;
   let watch = { active: false };
-  let seen = 0;
-  try { seen = Number(localStorage.getItem('__uifb_seen')) || 0; } catch {}
+  let seen = '';
+  try { seen = localStorage.getItem('__uifb_seenAt') || ''; } catch {}
 
   function selectorOf(el) {
     const parts = [];
@@ -83,18 +84,22 @@
   function render() {
     const box = $('msgs');
     box.textContent = '';
-    if (!messages.length) {
+    if (!messages.length && !transcript.items.length) {
       const p = document.createElement('p');
       p.className = 'empty';
       p.textContent = '앱을 쓰다가 생긴 질문이나 요청을 보내세요.\n"위치 찍기"로 화면의 한 곳을 함께 보낼 수 있습니다.';
       box.append(p);
     }
-    for (const m of messages.slice(-60)) {
+    const items = [
+      ...(transcript.registered ? transcript.items.map((m) => ({ from: m.role, text: m.text, at: m.at, source: 'terminal', agent: transcript.agent })) : []),
+      ...messages.map((m) => ({ ...m, source: m.context === 'app' ? 'app' : 'review' })),
+    ].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    for (const m of items.slice(-80)) {
       const d = document.createElement('div');
       d.className = 'msg ' + m.from;
       const tag = document.createElement('span');
       tag.className = 'tag';
-      tag.textContent = (m.target === 'skill' ? '스킬' : '시스템') + (m.context === 'app' ? ' · 앱' : ' · 리뷰');
+      tag.textContent = m.source === 'terminal' ? '터미널' : (m.source === 'app' ? '앱' : '리뷰') + ' · ' + (m.target === 'skill' ? '스킬' : '시스템');
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
@@ -102,8 +107,8 @@
       d.append(tag, m.text, small);
       box.append(d);
     }
-    const last = messages[messages.length - 1];
-    if (last && last.from === 'user') {
+    const last = items[items.length - 1];
+    if (last && last.from === 'user' && last.source !== 'terminal') {
       const w = document.createElement('p');
       w.className = 'empty';
       w.style.margin = '0';
@@ -116,22 +121,23 @@
       ? `${watch.agent}가 메시지를 바로 읽고 답합니다.`
       : '작업 세션이 자동으로 읽지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.';
     const open = !$('panel').hidden;
-    const lastId = last ? last.id : 0;
-    if (open) { seen = lastId; try { localStorage.setItem('__uifb_seen', String(seen)); } catch {} }
-    const unread = messages.filter((m) => m.from === 'agent' && m.id > seen).length;
+    if (!seen || open) { seen = last ? String(last.at) : '0'; try { localStorage.setItem('__uifb_seenAt', seen); } catch {} }
+    const unread = items.filter((m) => m.from === 'agent' && String(m.at) > seen).length;
     $('badge').hidden = unread === 0;
     $('badge').textContent = String(unread);
   }
 
   async function poll() {
     try {
-      const [c, w] = await Promise.all([
+      const [c, w, t] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
         fetch('/__uifb/api/watch').then((r) => r.json()),
+        fetch('/__uifb/api/transcript').then((r) => r.json()),
       ]);
-      const changed = (c.messages || []).length !== messages.length || w.active !== watch.active;
+      const changed = (c.messages || []).length !== messages.length || w.active !== watch.active || (t.items || []).length !== transcript.items.length;
       messages = c.messages || [];
       watch = w;
+      transcript = t.items ? t : { registered: false, items: [] };
       if (changed) render();
     } catch {}
   }
