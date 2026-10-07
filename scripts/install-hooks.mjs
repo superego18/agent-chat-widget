@@ -18,7 +18,7 @@ const project = path.resolve(arg('project', '.'));
 const remove = process.argv.includes('--remove');
 const relay = path.join(path.dirname(fileURLToPath(import.meta.url)), 'hook-relay.mjs');
 const file = path.join(project, '.claude', 'settings.local.json');
-const EVENTS = ['UserPromptSubmit', 'MessageDisplay'];
+const EVENTS = ['UserPromptSubmit', 'MessageDisplay', 'PreToolUse', 'Stop', 'Notification'];
 
 let settings = {};
 if (fs.existsSync(file)) settings = JSON.parse(fs.readFileSync(file, 'utf8'));

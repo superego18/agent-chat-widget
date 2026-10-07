@@ -32,6 +32,18 @@
   .tabs { padding: 6px 0 2px !important; }
   .tabs .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
   .tabs .dot.on { background: #15803d; } .tabs .dot.off { background: #8f8c84; }
+  .tabs .dot.busy { background: #4f46e5; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .typing { align-self: flex-start; display: flex; gap: 7px; align-items: center; font-size: 12px; color: #5a5852; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.1); border-radius: 10px; padding: 6px 10px; max-width: 88%; }
+  .typing.permission { color: #b45309; }
+  .typing .dots { display: inline-flex; gap: 3px; }
+  .typing .dots i { width: 5px; height: 5px; border-radius: 50%; background: #8f8c84; animation: blink 1.2s infinite; }
+  .typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .peek { position: fixed; left: 16px; bottom: 124px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+  .peek[hidden] { display: none; }
+  .peek b { display: block; font-size: 12px; color: #4f46e5; margin-bottom: 2px; }
+  @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
   .chipbtn { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
   .chipbtn[aria-pressed="true"] { background: #1c1b18; color: #fff; border-color: transparent; }
@@ -47,6 +59,7 @@
   .box { position: fixed; pointer-events: none; outline: 2px solid #4f46e5; background: rgba(79,70,229,.08); border-radius: 3px; }
   .box[hidden] { display: none; }
 </style>
+<div class="peek" id="peek" hidden role="status"></div>
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <header><b>대화/피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
@@ -111,8 +124,9 @@
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-pressed', String(t.id === activeTab));
       {
+        const st = sessionById(t.id)?.status?.state;
         const dot = document.createElement('span');
-        dot.className = 'dot ' + (t.live ? 'on' : 'off');
+        dot.className = 'dot ' + (st === 'working' || st === 'permission' ? 'busy' : t.live ? 'on' : 'off');
         b.append(dot);
       }
       b.append(t.label);
@@ -151,7 +165,18 @@
       box.append(d);
     }
     const last = items[items.length - 1];
-    if (last && last.from === 'user' && last.context !== 'terminal') {
+    const st = sessionById(activeTab)?.status;
+    if (st && (st.state === 'working' || st.state === 'permission')) {
+      const ty = document.createElement('div');
+      ty.className = 'typing' + (st.state === 'permission' ? ' permission' : '');
+      const dots = document.createElement('span');
+      dots.className = 'dots';
+      dots.innerHTML = '<i></i><i></i><i></i>';
+      const label = document.createElement('span');
+      label.textContent = st.state === 'permission' ? st.detail || '터미널에서 승인을 기다리는 중' : `작업 중 · ${st.detail || '생각하는 중'}`;
+      ty.append(dots, label);
+      box.append(ty);
+    } else if (last && last.from === 'user' && last.context !== 'terminal') {
       const w = document.createElement('p');
       w.className = 'empty';
       w.style.margin = '0';
@@ -178,6 +203,33 @@
     const unread = all.filter((m) => m.from === 'agent' && String(m.at) > seen).length;
     $('badge').hidden = unread === 0;
     $('badge').textContent = String(unread);
+    const base = document.title.replace(/^\(\d+\) /, '');
+    document.title = (unread ? `(${unread}) ` : '') + base;
+  }
+
+  // 창이 닫혀 있을 때 새 답이 오면 버튼 위에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
+  let peekedAt = '';
+  let peekTimer = null;
+  function peekNew() {
+    const all = timeline('all');
+    if (!peekedAt) { peekedAt = all.length ? String(all[all.length - 1].at) : '0'; return; }
+    const fresh = all.filter((m) => m.from === 'agent' && String(m.at) > peekedAt);
+    if (all.length) peekedAt = String(all[all.length - 1].at);
+    if (!fresh.length || !$('panel').hidden) return;
+    const m = fresh[fresh.length - 1];
+    const peek = $('peek');
+    peek.textContent = '';
+    const who = document.createElement('b');
+    who.textContent = nameOf(m.session);
+    peek.append(who, m.text.replace(/\s+/g, ' ').slice(0, 90) + (m.text.length > 90 ? '…' : ''));
+    peek.hidden = false;
+    peek.onclick = () => {
+      peek.hidden = true;
+      if (m.session) activeTab = m.session;
+      if ($('panel').hidden) $('btn').click();
+    };
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => { peek.hidden = true; }, 5000);
   }
 
   let key = '';
@@ -193,8 +245,9 @@
         transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
       }
       const all = timeline('all');
-      const k = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0)).join(',');
+      const k = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
       if (k !== key) { key = k; render(); }
+      peekNew();
     } catch {}
   }
 
