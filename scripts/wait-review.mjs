@@ -81,9 +81,20 @@ function pendingMessages() {
 }
 
 let timer;
+// 메시지나 완료 표시로 끝날 때는 감시 파일을 "처리 중"으로 바꿔 둔다. 에이전트가 처리하고 감시를 다시 켜는 동안
+// 페이지가 "자동으로 읽지 않음"이 아니라 "처리 중"으로 보이게 한다(그 사이 온 메시지는 다시 켠 감시가 받는다).
+// 10분 안에 다시 켜지지 않으면 꺼진 것으로 본다.
+function markHandling() {
+  try {
+    const w = JSON.parse(fs.readFileSync(watchFile, 'utf8'));
+    fs.writeFileSync(watchFile, JSON.stringify({ ...w, state: 'handling', pid: null, until: new Date(Date.now() + 10 * 60_000).toISOString() }, null, 2) + '\n');
+  } catch {}
+}
+
 function finish(code, lines) {
   clearInterval(timer);
-  cleanup();
+  if (code === 0) markHandling();
+  else cleanup();
   for (const l of lines) console.log(l);
   process.exit(code);
 }

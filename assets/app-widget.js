@@ -164,7 +164,9 @@
     $('mode').className = target?.watch?.active ? 'on' : 'off';
     $('mode').textContent = !target
       ? '등록된 세션이 없습니다.'
-      : target.watch?.active
+      : target.watch?.handling
+        ? `${target.name}이(가) 메시지를 처리하는 중입니다. 지금 보내도 처리가 끝나면 바로 받습니다.`
+        : target.watch?.active
         ? `${target.name}에게 보냅니다. 바로 전달됩니다.`
         : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
     $('input').disabled = !target;
