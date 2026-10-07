@@ -102,15 +102,15 @@
   function renderTabs() {
     const box = $('tabs');
     box.textContent = '';
-    const tabs = [...sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active })), { id: 'all', label: '전체' }];
-    if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || { id: 'all' }).id;
+    const tabs = sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active }));
+    if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || {}).id || null;
     for (const t of tabs) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'chipbtn';
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-pressed', String(t.id === activeTab));
-      if (t.id !== 'all') {
+      {
         const dot = document.createElement('span');
         dot.className = 'dot ' + (t.live ? 'on' : 'off');
         b.append(dot);
@@ -160,15 +160,15 @@
       box.append(w);
     }
     box.scrollTop = box.scrollHeight;
-    const target = activeTab === 'all' ? null : sessionById(activeTab);
+    const target = sessionById(activeTab);
     $('mode').className = target?.watch?.active ? 'on' : 'off';
     $('mode').textContent = !target
-      ? '모든 세션의 대화를 함께 봅니다. 보내려면 세션 탭을 고르세요.'
+      ? '등록된 세션이 없습니다.'
       : target.watch?.active
         ? `${target.name}에게 보냅니다. 바로 전달됩니다.`
         : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
     $('input').disabled = !target;
-    $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '보낼 세션 탭을 고르세요';
+    $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
     const all = timeline('all');
     const lastAll = all[all.length - 1];
     const open = !$('panel').hidden;
@@ -254,7 +254,7 @@
     const text = $('input').value.trim();
     if (!text) return;
     $('input').value = '';
-    if (!activeTab || activeTab === 'all') return;
+    if (!sessionById(activeTab)) return;
     const body = { from: 'user', text, to: activeTab, context: 'app', where: where || { url: location.pathname + location.search } };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
