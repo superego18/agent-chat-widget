@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 실제 앱 화면에 피드백 버튼을 끼워 보여 주는 프록시. 의존성 없음 (Node 18+).
-// 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4800] [--review http://localhost:4799]
+// 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799]
 //   http://localhost:<port>/ 로 열면 앱을 그대로 보여 주고, HTML 응답에만 피드백 위젯 스크립트를 넣는다.
 //   위젯이 보낸 메시지는 리뷰 서버(/api/chat)로 넘어가 리뷰 대화와 같은 기록(chat.json)에 쌓인다.
 //   앱 코드는 고치지 않는다. dev 서버의 실시간 갱신(HMR) 웹소켓도 그대로 앱으로 넘긴다
@@ -19,7 +19,7 @@ function arg(name, fallback) {
 
 const app = new URL(arg('app', 'http://localhost:3001'));
 const review = new URL(arg('review', 'http://localhost:4799'));
-const port = Number(arg('port', '4800'));
+const port = Number(arg('port', '4798'));
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
 const TAG = '<script src="/__uifb/widget.js" defer></script>';
 function forward(req, res, target, rewrite) {
