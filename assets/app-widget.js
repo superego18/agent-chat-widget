@@ -248,6 +248,8 @@
       saveSeen();
       renderTabs();
       updateBadges();
+      box.querySelectorAll('.unread').forEach((el) => el.classList.remove('unread'));
+      box.querySelectorAll('.newline').forEach((el) => el.remove());
     }
   }
   $('msgs').addEventListener('scroll', markReadIfAtBottom);
