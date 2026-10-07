@@ -152,6 +152,8 @@
   function render() {
     renderTabs();
     const box = $('msgs');
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    const prevTop = box.scrollTop;
     box.textContent = '';
     const items = timeline(activeTab);
     if (!items.length) {
@@ -174,6 +176,7 @@
       }
       const d = document.createElement('div');
       d.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '');
+      d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
       const src = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '리뷰';
@@ -210,8 +213,10 @@
     if (scrollToUnread && !$('panel').hidden) {
       box.scrollTop = newLine ? Math.max(0, newLine.offsetTop - 8) : box.scrollHeight;
       scrollToUnread = false;
-    } else if (box.scrollHeight - box.scrollTop - box.clientHeight < 80) {
+    } else if (nearBottom) {
       box.scrollTop = box.scrollHeight;
+    } else {
+      box.scrollTop = prevTop; // 다시 그려도 읽던 위치를 유지한다
     }
     const target = sessionById(activeTab);
     $('mode').className = target?.watch?.active ? 'on' : 'off';
@@ -224,7 +229,7 @@
         : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
     $('input').disabled = !target;
     $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
-    markReadIfAtBottom();
+    markSeenVisible();
     updateBadges();
   }
 
@@ -236,23 +241,26 @@
     document.title = (unread ? `(${unread}) ` : '') + base;
   }
 
-  // 지금 탭을 맨 아래까지 봤으면 그 세션만 읽음으로 바꾼다.
-  function markReadIfAtBottom() {
+  // 화면에 끝까지 보인(또는 지나간) 답을 읽음으로 바꾼다. 지금 탭의 세션만 바뀌고 다른 세션의 안 읽음은 그대로다.
+  function markSeenVisible() {
     const box = $('msgs');
-    if ($('panel').hidden || !sessionById(activeTab)) return;
-    if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) return;
-    const items = timeline(activeTab);
-    const last = items[items.length - 1];
-    if (last && String(last.at) > (seen[activeTab] || '')) {
-      seen[activeTab] = String(last.at);
-      saveSeen();
-      renderTabs();
-      updateBadges();
-      box.querySelectorAll('.unread').forEach((el) => el.classList.remove('unread'));
-      box.querySelectorAll('.newline').forEach((el) => el.remove());
+    if ($('panel').hidden || document.hidden || !sessionById(activeTab)) return;
+    const limit = box.getBoundingClientRect().bottom + 4;
+    let at = seen[activeTab] || '';
+    for (const el of box.querySelectorAll('.msg.unread')) {
+      if (el.getBoundingClientRect().bottom > limit) continue;
+      el.classList.remove('unread');
+      if (el.dataset.at > at) at = el.dataset.at;
     }
+    if (at === (seen[activeTab] || '')) return;
+    seen[activeTab] = at;
+    saveSeen();
+    if (!box.querySelector('.msg.unread')) box.querySelectorAll('.newline').forEach((el) => el.remove());
+    renderTabs();
+    updateBadges();
   }
-  $('msgs').addEventListener('scroll', markReadIfAtBottom);
+  $('msgs').addEventListener('scroll', markSeenVisible);
+  document.addEventListener('visibilitychange', markSeenVisible);
 
   // 창이 닫혀 있을 때 새 답이 오면 버튼 위에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
   let peekedAt = '';
