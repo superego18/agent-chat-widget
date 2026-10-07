@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 리뷰 완료 표시나 리뷰 페이지 대화 메시지를 기다린다. 의존성 없음 (Node 18+).
-// 사용: node wait-review.mjs --round <N> [--dir .ui-feedback] [--minutes 30] [--agent "Claude Code"]
+// 사용: node wait-review.mjs --round <N> [--dir .ui-feedback] [--minutes 30] [--agent "Claude Code"] [--target system|skill|all]
+//   --target: 이 대상의 대화 메시지에만 깨어난다(기본 all). 여러 세션이 대상을 나눠 맡을 때 쓴다.
 //   기다리는 동안 <dir>/watch-r<N>.json 을 남겨 리뷰 페이지가 "자동 이어가기 켜짐"을 표시하게 한다.
 //   - 완료 표시: REVIEW_DONE 과 평가 JSON 을 출력하고 0으로 끝난다.
 //   - 답하지 않은 사용자 메시지(chat.json 의 마지막 메시지가 user): CHAT 과 그 메시지들을 출력하고 0으로 끝난다.
@@ -19,6 +20,7 @@ const dir = path.resolve(arg('dir', '.ui-feedback'));
 const round = arg('round', '');
 const minutes = Number(arg('minutes', '30'));
 const agent = arg('agent', 'AI');
+const target = arg('target', 'all');
 
 if (!/^\d{1,3}$/.test(round)) {
   console.error('--round 에 라운드 번호(숫자)를 주세요.');
@@ -26,13 +28,13 @@ if (!/^\d{1,3}$/.test(round)) {
 }
 
 const feedbackFile = path.join(dir, `r${round}.json`);
-const watchFile = path.join(dir, `watch-r${round}.json`);
+const watchFile = path.join(dir, `watch-r${round}${target === 'all' ? '' : '-' + target}.json`);
 const chatFile = path.join(dir, 'chat.json');
 const expiresAt = Date.now() + minutes * 60_000;
 
 fs.writeFileSync(
   watchFile,
-  JSON.stringify({ round: Number(round), agent, pid: process.pid, startedAt: new Date().toISOString(), expiresAt: new Date(expiresAt).toISOString() }, null, 2) + '\n',
+  JSON.stringify({ round: Number(round), agent, target, pid: process.pid, startedAt: new Date().toISOString(), expiresAt: new Date(expiresAt).toISOString() }, null, 2) + '\n',
 );
 
 function cleanup() {
@@ -49,6 +51,7 @@ function unansweredUserMessages() {
   try {
     messages = JSON.parse(fs.readFileSync(chatFile, 'utf8')).messages || [];
   } catch {}
+  if (target !== 'all') messages = messages.filter((m) => (m.target === 'skill' ? 'skill' : 'system') === target);
   const lastAgent = messages.map((m) => m.from).lastIndexOf('agent');
   return messages.slice(lastAgent + 1).filter((m) => m.from === 'user');
 }
