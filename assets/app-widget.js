@@ -40,6 +40,9 @@
   .typing .dots i { width: 5px; height: 5px; border-radius: 50%; background: #8f8c84; animation: blink 1.2s infinite; }
   .typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .tbadge { display: inline-block; min-width: 15px; height: 15px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 10px; line-height: 15px; text-align: center; padding: 0 4px; margin-left: 4px; font-weight: 600; }
+  .newline { align-self: stretch; text-align: center; font-size: 11px; font-weight: 600; color: #4f46e5; margin: 4px 0; }
+  .msg.agent.unread { box-shadow: 0 0 0 1px rgba(0,0,0,.1), -3px 0 0 #4f46e5; }
   .peek { position: fixed; left: 16px; bottom: 124px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
   .peek[hidden] { display: none; }
   .peek b { display: block; font-size: 12px; color: #4f46e5; margin-bottom: 2px; }
@@ -78,11 +81,15 @@
   let activeTab = null;
   try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
-  let seen = '';
-  try { seen = localStorage.getItem('__uifb_seenAt') || ''; } catch {}
+  // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem('__uifb_seen') || '{}'); } catch {}
+  const saveSeen = () => { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} };
+  let scrollToUnread = true;
   const sessionById = (id) => sessions.find((x) => x.id === id);
   const nameOf = (id) => sessionById(id)?.name || '세션';
   const ownerOf = (m) => m.to || m.session || null;
+  const isUnread = (m) => m.from === 'agent' && !!m.session && String(m.at) > (seen[m.session] || '');
 
   function mdLite(text) {
     const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -130,7 +137,14 @@
         b.append(dot);
       }
       b.append(t.label);
-      b.onclick = () => { activeTab = t.id; try { localStorage.setItem('__uifb_tab', activeTab); } catch {} render(); };
+      const n = timeline(t.id).filter(isUnread).length;
+      if (n) {
+        const nb = document.createElement('span');
+        nb.className = 'tbadge';
+        nb.textContent = String(n);
+        b.append(nb);
+      }
+      b.onclick = () => { activeTab = t.id; scrollToUnread = true; try { localStorage.setItem('__uifb_tab', activeTab); } catch {} render(); };
       box.append(b);
     }
   }
@@ -148,9 +162,18 @@
         : '등록된 세션이 없습니다.\n작업 세션이 자기 세션을 등록하면 대화할 수 있습니다.';
       box.append(p);
     }
-    for (const m of items.slice(-80)) {
+    const shown = items.slice(-120);
+    const firstUnread = shown.findIndex(isUnread);
+    let newLine = null;
+    for (const [i, m] of shown.entries()) {
+      if (i === firstUnread) {
+        newLine = document.createElement('p');
+        newLine.className = 'newline';
+        newLine.textContent = '여기부터 새 메시지';
+        box.append(newLine);
+      }
       const d = document.createElement('div');
-      d.className = 'msg ' + m.from;
+      d.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '');
       const tag = document.createElement('span');
       tag.className = 'tag';
       const src = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '리뷰';
@@ -184,7 +207,12 @@
       w.textContent = s?.watch?.active ? `${s.name}이(가) 읽고 답하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
     }
-    box.scrollTop = box.scrollHeight;
+    if (scrollToUnread && !$('panel').hidden) {
+      box.scrollTop = newLine ? Math.max(0, newLine.offsetTop - 8) : box.scrollHeight;
+      scrollToUnread = false;
+    } else if (box.scrollHeight - box.scrollTop - box.clientHeight < 80) {
+      box.scrollTop = box.scrollHeight;
+    }
     const target = sessionById(activeTab);
     $('mode').className = target?.watch?.active ? 'on' : 'off';
     $('mode').textContent = !target
@@ -196,16 +224,33 @@
         : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
     $('input').disabled = !target;
     $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
-    const all = timeline('all');
-    const lastAll = all[all.length - 1];
-    const open = !$('panel').hidden;
-    if (!seen || open) { seen = lastAll ? String(lastAll.at) : '0'; try { localStorage.setItem('__uifb_seenAt', seen); } catch {} }
-    const unread = all.filter((m) => m.from === 'agent' && String(m.at) > seen).length;
+    markReadIfAtBottom();
+    updateBadges();
+  }
+
+  function updateBadges() {
+    const unread = timeline('all').filter(isUnread).length;
     $('badge').hidden = unread === 0;
     $('badge').textContent = String(unread);
     const base = document.title.replace(/^\(\d+\) /, '');
     document.title = (unread ? `(${unread}) ` : '') + base;
   }
+
+  // 지금 탭을 맨 아래까지 봤으면 그 세션만 읽음으로 바꾼다.
+  function markReadIfAtBottom() {
+    const box = $('msgs');
+    if ($('panel').hidden || !sessionById(activeTab)) return;
+    if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) return;
+    const items = timeline(activeTab);
+    const last = items[items.length - 1];
+    if (last && String(last.at) > (seen[activeTab] || '')) {
+      seen[activeTab] = String(last.at);
+      saveSeen();
+      renderTabs();
+      updateBadges();
+    }
+  }
+  $('msgs').addEventListener('scroll', markReadIfAtBottom);
 
   // 창이 닫혀 있을 때 새 답이 오면 버튼 위에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
   let peekedAt = '';
@@ -226,7 +271,9 @@
     peek.onclick = () => {
       peek.hidden = true;
       if (m.session) activeTab = m.session;
+      scrollToUnread = true;
       if ($('panel').hidden) $('btn').click();
+      else render();
     };
     clearTimeout(peekTimer);
     peekTimer = setTimeout(() => { peek.hidden = true; }, 5000);
@@ -244,6 +291,15 @@
       for (const x of sessions.filter((x) => x.tool === 'codex')) {
         transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
       }
+      let changedSeen = false;
+      for (const x of sessions) {
+        if (seen[x.id] === undefined) {
+          const it = timeline(x.id);
+          seen[x.id] = it.length ? String(it[it.length - 1].at) : '0';
+          changedSeen = true;
+        }
+      }
+      if (changedSeen) saveSeen();
       const all = timeline('all');
       const k = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
       if (k !== key) { key = k; render(); }
@@ -253,6 +309,7 @@
 
   $('btn').onclick = () => {
     const open = $('panel').hidden;
+    if (open) scrollToUnread = true;
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
     render();
