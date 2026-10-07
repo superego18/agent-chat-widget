@@ -59,7 +59,7 @@ function check() {
     clearInterval(timer);
     cleanup();
     console.log(`CHAT round=${round}`);
-    for (const m of pending) console.log(`[${m.id}] ${m.text}`);
+    for (const m of pending) console.log(`[${m.id}][${m.target === 'skill' ? '스킬' : '시스템'}]${m.context === 'app' ? '[앱 화면]' : ''} ${m.text}`);
     process.exit(0);
   }
   let data = null;
