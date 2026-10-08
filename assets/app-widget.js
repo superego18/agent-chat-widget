@@ -662,8 +662,26 @@
         const ls = document.createElement('select');
         ls.setAttribute('aria-label', '분류 바꾸기');
         for (const name of ['', ...allLabels()]) { const o = document.createElement('option'); o.value = name; o.textContent = name ? `분류: ${name}` : '분류: 미분류'; ls.append(o); }
+        { const o = document.createElement('option'); o.value = '\u0000new'; o.textContent = '+ 새 분류…'; ls.append(o); }
         ls.value = d.label || '';
-        ls.onchange = () => draftsApi({ action: 'update', id: d.id, label: ls.value });
+        // "+ 새 분류…"를 고르면 그 자리에 이름 칸을 띄운다(Enter 저장, Esc·바깥 누르면 취소)
+        ls.onchange = () => {
+          if (ls.value !== '\u0000new') return draftsApi({ action: 'update', id: d.id, label: ls.value });
+          const inp = document.createElement('input');
+          inp.className = 'newlb';
+          inp.placeholder = '새 분류 이름';
+          inp.maxLength = 30;
+          inp.style.cssText = 'font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid #4f46e5;width:110px';
+          const cancel = () => { inp.remove(); ls.hidden = false; ls.value = d.label || ''; };
+          inp.onkeydown = (e) => {
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) draftsApi({ action: 'update', id: d.id, label: v }); else cancel(); }
+            if (e.key === 'Escape') cancel();
+          };
+          inp.onblur = () => { if (inp.isConnected) cancel(); };
+          ls.hidden = true;
+          ls.after(inp);
+          inp.focus();
+        };
         acts.append(ls);
       }
       btn('지우기', () => draftsApi({ action: 'delete', ids: [d.id] }));
