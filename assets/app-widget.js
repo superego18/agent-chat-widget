@@ -84,6 +84,7 @@
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
   let seen = {};
   try { seen = JSON.parse(localStorage.getItem('__uifb_seen') || '{}'); } catch {}
+  if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {}; // 예전 버전은 숫자로 저장했다
   const saveSeen = () => { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} };
   let scrollToUnread = true;
   const sessionById = (id) => sessions.find((x) => x.id === id);
