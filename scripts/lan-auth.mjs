@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const COOKIE = 'uifb_k';
@@ -51,13 +52,19 @@ export function lanAuth({ dir, lan }) {
     },
     // 웹소켓 연결은 쿠키로만 확인한다.
     checkUpgrade: (req) => ok(req),
-    // 다른 기기에서 열 주소(이 컴퓨터의 네트워크 주소마다 하나)
+    // 다른 기기에서 열 주소. 맨 앞은 와이파이를 바꿔도 그대로인 이름 주소(<컴퓨터 이름>.local, macOS Bonjour)이고,
+    // 뒤는 지금 네트워크 주소다. 키 쿠키는 주소마다 따로라, 이름 주소로 한 번 들어오면 와이파이가 바뀌어도 다시 넣지 않는다.
     urls(port) {
       if (!lan) return [];
-      return Object.values(os.networkInterfaces())
+      const ips = Object.values(os.networkInterfaces())
         .flat()
         .filter((a) => a && a.family === 'IPv4' && !a.internal)
         .map((a) => `http://${a.address}:${port}/?k=${key}`);
+      let host = '';
+      if (process.platform === 'darwin') {
+        try { host = execFileSync('scutil', ['--get', 'LocalHostName'], { encoding: 'utf8' }).trim(); } catch {}
+      }
+      return [...(host ? [`http://${host}.local:${port}/?k=${key}`] : []), ...ips];
     },
   };
 }
