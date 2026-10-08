@@ -44,11 +44,24 @@ function walk(root, depth, out) {
   }
 }
 
+// Codex 기록 폴더: CODEX_HOME 과, 홈 폴더의 .codex 로 시작하는 폴더 중 sessions 가 있는 것(.codex, .codex-<계정> 등).
+// 계정 이름을 스크립트에 적지 않고 이 규칙으로 찾는다.
+function codexHomes() {
+  const out = new Set();
+  if (process.env.CODEX_HOME) out.add(path.resolve(process.env.CODEX_HOME));
+  let names = [];
+  try {
+    names = fs.readdirSync(home).filter((n) => n.startsWith('.codex'));
+  } catch {}
+  for (const n of names) if (fs.existsSync(path.join(home, n, 'sessions'))) out.add(path.join(home, n));
+  return [...out];
+}
+
 function candidates() {
   const files = [];
   const only = arg('tool', '');
   if (only !== 'codex') walk(path.join(home, '.claude', 'projects'), 1, files);
-  if (only !== 'claude') for (const h of ['.codex', '.codex-chanju']) walk(path.join(home, h, 'sessions'), 4, files);
+  if (only !== 'claude') for (const h of codexHomes()) walk(path.join(h, 'sessions'), 4, files);
   const now = Date.now();
   return files
     .map((p) => ({ p, m: fs.statSync(p).mtimeMs }))
