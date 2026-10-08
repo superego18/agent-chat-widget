@@ -56,9 +56,10 @@
   .where[hidden] { display: none; }
   .where span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .where button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; }
-  form { display: flex; gap: 6px; padding: 8px 10px 10px; }
+  form { display: flex; gap: 6px; padding: 8px 10px 10px; align-items: flex-end; }
   textarea { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
-  form button { flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
+  form textarea { resize: vertical; max-height: 50vh; }
+  form button { height: 40px; flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   .drafts { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #f6f5f1; }
   .drafts[hidden], .msgs[hidden], form[hidden], .chipbtn[hidden] { display: none; }
   .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
@@ -416,6 +417,7 @@
     const text = $('input').value.trim();
     if (!text) return;
     $('input').value = '';
+    autoGrow($('input'));
     if (!sessionById(activeTab)) return;
     const body = { from: 'user', text, to: activeTab, context: 'app', where: where || { url: location.pathname + location.search } };
     try {
@@ -428,6 +430,13 @@
       $('input').value = text;
     }
   };
+  // 입력칸: 글이 길어지면 자동으로 늘어나고(화면 절반까지), 오른쪽 아래 모서리를 끌어 직접 키우거나 줄일 수도 있다.
+  function autoGrow(el) {
+    const max = Math.round(innerHeight * 0.5);
+    if (!el.value) { el.style.height = ''; return; }
+    if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
+  }
+  $('input').addEventListener('input', () => autoGrow($('input')));
   $('input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); }
   });
@@ -566,6 +575,7 @@
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
     $('input').value = '';
+    autoGrow($('input'));
     try {
       await draftsApi({ action: 'add', to: activeTab, text, context: 'app', where: where || { url: location.pathname + location.search } });
       where = null;
