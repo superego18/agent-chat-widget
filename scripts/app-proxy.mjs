@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 실제 앱 화면에 피드백 버튼을 끼워 보여 주는 프록시. 의존성 없음 (Node 18+).
-// 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799]
+// 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799] [--lan --dir .ui-feedback]
+//   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, 키는 리뷰 서버와 같은 <dir>/lan-key, lan-auth.mjs).
 //   http://localhost:<port>/ 로 열면 앱을 그대로 보여 주고, HTML 응답에만 피드백 위젯 스크립트를 넣는다.
 //   위젯이 보낸 메시지는 리뷰 서버(/api/chat)로 넘어가 리뷰 대화와 같은 기록(chat.json)에 쌓인다.
 //   앱 코드는 고치지 않는다. dev 서버의 실시간 갱신(HMR) 웹소켓도 그대로 앱으로 넘긴다
@@ -11,6 +12,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { lanAuth } from './lan-auth.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -20,6 +22,7 @@ function arg(name, fallback) {
 const app = new URL(arg('app', 'http://localhost:3001'));
 const review = new URL(arg('review', 'http://localhost:4799'));
 const port = Number(arg('port', '4798'));
+const auth = lanAuth({ dir: path.resolve(arg('dir', '.ui-feedback')), lan: process.argv.includes('--lan') });
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
 const TAG = '<script src="/__uifb/widget.js" defer></script>';
 function forward(req, res, target, rewrite) {
@@ -55,6 +58,7 @@ function forward(req, res, target, rewrite) {
 }
 
 const server = http.createServer((req, res) => {
+  if (!auth.check(req, res)) return;
   if (req.url === '/__uifb/widget.js') {
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(fs.readFileSync(widgetPath));
@@ -67,6 +71,7 @@ const server = http.createServer((req, res) => {
 
 // WebSocket(HMR 등)은 앱 서버로 그대로 이어 준다.
 server.on('upgrade', (req, socket, head) => {
+  if (!auth.checkUpgrade(req)) return socket.destroy();
   const up = net.connect(Number(app.port) || 80, app.hostname, () => {
     const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
@@ -86,6 +91,7 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(port, '127.0.0.1', () => {
+server.listen(port, auth.host, () => {
   console.log(`피드백 버튼이 붙은 앱: http://localhost:${port}/  (원본 ${app.origin}, 리뷰 서버 ${review.origin})`);
+  for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
 });
