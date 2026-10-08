@@ -105,7 +105,8 @@ function check() {
     const lines = [`CHAT session=${session.name}`];
     for (const m of pending) {
       lines.push(`[${m.id}]${m.context === 'app' ? '[앱 화면]' : '[리뷰]'}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
-      if (m.where?.selector || m.where?.url) {
+      // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
+      if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
         lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
       }
     }

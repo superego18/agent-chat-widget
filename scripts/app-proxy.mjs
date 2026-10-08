@@ -27,6 +27,10 @@ const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..',
 const TAG = '<script src="/__uifb/widget.js" defer></script>';
 function forward(req, res, target, rewrite) {
   const headers = { ...req.headers, host: target.host };
+  // 폰 등 다른 주소로 열면 Origin·Referer 가 그 주소라서 dev 서버(Next 등)가 다른 출처 요청으로 막는다(403, 실시간 갱신이 끊겨 페이지가 계속 새로고침됨).
+  // 접속 확인은 이 프록시가 이미 했으므로 앱에는 같은 출처로 넘긴다.
+  if (headers.origin) headers.origin = target.origin;
+  if (headers.referer) headers.referer = headers.referer.replace(/^https?:\/\/[^/]+/, target.origin);
   delete headers['accept-encoding'];
   const upstream = http.request(
     { hostname: target.hostname, port: target.port, path: rewrite ?? req.url, method: req.method, headers },
@@ -76,7 +80,8 @@ server.on('upgrade', (req, socket, head) => {
     const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const k = req.rawHeaders[i];
-      lines.push(`${k}: ${k.toLowerCase() === 'host' ? app.host : req.rawHeaders[i + 1]}`);
+      const lk = k.toLowerCase();
+      lines.push(`${k}: ${lk === 'host' ? app.host : lk === 'origin' ? app.origin : req.rawHeaders[i + 1]}`);
     }
     up.write(lines.join('\r\n') + '\r\n\r\n');
     if (head && head.length) up.write(head);
