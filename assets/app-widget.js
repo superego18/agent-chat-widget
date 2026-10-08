@@ -58,7 +58,7 @@
   textarea { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
   form button { flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   .drafts { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #f6f5f1; }
-  .drafts[hidden], .msgs[hidden] { display: none; }
+  .drafts[hidden], .msgs[hidden], form[hidden], .chipbtn[hidden] { display: none; }
   .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
   .draft .top { display: flex; gap: 7px; align-items: flex-start; }
   .draft input[type=checkbox] { margin-top: 6px; flex-shrink: 0; }
