@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // 지금 이 세션의 대화 기록 파일을 찾아 리뷰 서버에 등록한다. 의존성 없음 (Node 18+).
-// 사용: node register-session.mjs --name "작업 세션" --marker <아무 글자 8자 이상> [--dir .ui-feedback] [--agent "Claude Code"] [--port 4799]
+// 사용: node register-session.mjs --name "작업 세션" --marker <아무 글자 8자 이상> [--dir .ui-feedback] [--agent "Claude Code"] [--port 4799] [--tool claude|codex]
 //   --name: 대화 창 탭에 보일 세션 이름(역할). 한 프로젝트에 여러 세션을 등록할 수 있다.
+//   --tool: 그 도구의 기록만 찾는다. 다른 세션이 대신 등록할 때(예: Claude 세션이 Codex 세션을 등록) 표시가 자기 기록에도 남으므로 꼭 붙인다.
 //   --marker 는 명령에 글자 그대로 적는다(예: uifb-k3x9q2m7). 셸 변수·$(...)를 쓰면 기록에 남는 글자와 달라져 못 찾는다.
 //   이 명령 자체가 세션 기록에 남으므로, 최근 기록 파일 중 marker 가 들어 있는 파일이 곧 이 세션의 파일이다.
 //   찾으면 <dir>/sessions/<세션 id>.json 에 { name, tool, sessionId, path, agent, port } 를 쓴다.
@@ -45,8 +46,9 @@ function walk(root, depth, out) {
 
 function candidates() {
   const files = [];
-  walk(path.join(home, '.claude', 'projects'), 1, files);
-  for (const h of ['.codex', '.codex-chanju']) walk(path.join(home, h, 'sessions'), 4, files);
+  const only = arg('tool', '');
+  if (only !== 'codex') walk(path.join(home, '.claude', 'projects'), 1, files);
+  if (only !== 'claude') for (const h of ['.codex', '.codex-chanju']) walk(path.join(home, h, 'sessions'), 4, files);
   const now = Date.now();
   return files
     .map((p) => ({ p, m: fs.statSync(p).mtimeMs }))
@@ -77,7 +79,10 @@ if (!found) {
 }
 
 const tool = found.includes(`${path.sep}.claude${path.sep}`) ? 'claude' : 'codex';
-const sessionId = path.basename(found, '.jsonl').replace(/[^\w.-]/g, '_');
+// Codex 기록 파일 이름(rollout-<시각>-<스레드 id>)에서는 스레드 id 만 쓴다. `codex queue --thread` 가 이 id 로 세션을 찾는다.
+const base = path.basename(found, '.jsonl');
+const thread = tool === 'codex' ? base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)?.[0] : null;
+const sessionId = (thread || base).replace(/[^\w.-]/g, '_');
 const sessionsDir = path.join(dir, 'sessions');
 fs.mkdirSync(sessionsDir, { recursive: true });
 // 같은 이름으로 등록된 다른(예전) 세션은 지운다. 한 이름 = 한 세션.
