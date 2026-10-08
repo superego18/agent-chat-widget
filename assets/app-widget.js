@@ -53,6 +53,17 @@
   .peek[hidden] { display: none; }
   .peek b { display: block; font-size: 12px; color: #4f46e5; margin-bottom: 2px; }
   @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
+  .close { display: none; float: right; border: 0; background: #f6f5f1; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #1c1b18; cursor: pointer; }
+  /* 모바일(768px 미만): 앱 위에 떠 있는 작은 창 대신 화면을 채우는 창으로 연다. 크기 조절 손잡이는 쓰지 않는다. */
+  @media (max-width: 767px) {
+    .panel { left: 0 !important; right: 0; top: 0; bottom: 0 !important; width: 100% !important; height: 100% !important; height: 100dvh !important; border-radius: 0; box-shadow: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+    .btn[aria-expanded="true"], .peek, .grip { display: none !important; }
+    .close { display: inline-block; }
+    header { padding: 10px 12px 8px; }
+    .msgs, .drafts { padding: 10px 10px 14px; }
+    .msg { font-size: 15px; max-width: 92%; }
+    textarea { font-size: 16px; }
+  }
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
   .chipbtn { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
   .chipbtn[aria-pressed="true"] { background: #1c1b18; color: #fff; border-color: transparent; }
@@ -101,7 +112,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
+  <header><button class="close" id="close" type="button">닫기</button><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="drafts" id="drafts" hidden></div>
   <div class="dfoot" id="dfoot" hidden><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div>
@@ -705,7 +716,7 @@
 
   // 오른쪽 위 손잡이를 끌어 창 크기를 바꾼다(창은 왼쪽 아래에 붙어 있다). 크기는 이 브라우저에 기억한다.
   function applySize(sz) {
-    if (!sz) return;
+    if (!sz || innerWidth < 768) return; // 모바일은 화면을 채우는 창이라 크기를 정하지 않는다
     const w = Math.min(Math.max(300, sz.w), innerWidth - 32);
     const h = Math.min(Math.max(320, sz.h), innerHeight - 140);
     $('panel').style.width = w + 'px';
@@ -834,6 +845,8 @@
     $('labels').hidden = showDrafts;
     renderLabels();
   }, 1000);
+
+  $('close').onclick = () => $('btn').click();
 
   poll();
   setInterval(poll, 3000);
