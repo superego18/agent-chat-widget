@@ -808,6 +808,8 @@
   function switchTab(id) {
     flushCompose();
     activeTab = id;
+    labelSetAt = 0;
+    draftLabel = prefs?.draftLabels?.[id] ?? null; // 그 세션에서 고른 분류로 바꾼다
     scrollToUnread = true;
     try { localStorage.setItem('__uifb_tab', activeTab); } catch {}
     render();
@@ -865,10 +867,11 @@
   let draftLabel = null;
   let labelSetAt = 0; // 방금 이 화면에서 고른 분류를 서버의 옛 값으로 되돌리지 않게
   const folded = new Set();
-  const allLabels = () => [...new Set([...drafts.map((d) => d.label).filter(Boolean), ...(draftLabel ? [draftLabel] : [])])].sort((a, b) => a.localeCompare(b, 'ko'));
+  // 분류와 고른 분류는 세션 탭마다 따로다(다른 세션의 분류가 섞이지 않게).
+  const allLabels = () => [...new Set([...mine().map((d) => d.label).filter(Boolean), ...(draftLabel ? [draftLabel] : [])])].sort((a, b) => a.localeCompare(b, 'ko'));
   function renderLabels() {
     const box = $('labels');
-    const key = JSON.stringify([draftLabel, allLabels()]);
+    const key = JSON.stringify([activeTab, draftLabel, allLabels()]);
     if (box.dataset.key === key || box.contains(root.activeElement)) return;
     box.dataset.key = key;
     box.textContent = '';
@@ -899,13 +902,14 @@
   function setDraftLabel(v) {
     draftLabel = v;
     labelSetAt = Date.now();
-    prefs.draftLabel = v;
-    savePrefs({ draftLabel: v });
+    prefs.draftLabels = { ...(prefs.draftLabels || {}), [activeTab]: v };
+    savePrefs({ draftLabel: v, session: activeTab });
     if ($('labels').contains(root.activeElement)) root.activeElement.blur();
     renderLabels();
   }
   setInterval(() => {
-    if (prefs && 'draftLabel' in prefs && prefs.draftLabel !== draftLabel && Date.now() - labelSetAt > 5000) draftLabel = prefs.draftLabel;
+    const saved = prefs?.draftLabels?.[activeTab] ?? null;
+    if (saved !== draftLabel && Date.now() - labelSetAt > 5000) draftLabel = saved;
     renderLabels();
   }, 1000);
 
