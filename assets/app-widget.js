@@ -1,6 +1,6 @@
 // 대화/피드백 위젯. 앱 화면(app-proxy.mjs 가 HTML 응답에 넣음)과 리뷰 페이지(review-template.html 이 불러옴)가 같은 이 파일을 쓴다.
 // 페이지 스타일과 섞이지 않게 Shadow DOM 안에 그린다. 메시지는 리뷰 대화 기록(chat.json)에 쌓인다.
-// 리뷰 페이지는 불러오기 전에 window.__uifbConfig = { context: 'review', round, label, pick: false } 를 둔다.
+// 리뷰 페이지는 불러오기 전에 window.__uifbConfig = { context: 'review', round, label } 를 둔다. pick: false 면 위치 찍기를 숨긴다.
 (() => {
   if (window.__uifb) return;
   window.__uifb = true;
@@ -101,7 +101,7 @@
 
   const $ = (s) => root.getElementById(s);
   $('heading').textContent = `대화/피드백 · ${CFG.label}`;
-  if (!CFG.pick) $('pick').classList.add('off'); // 리뷰 페이지는 이미지 핀으로 위치를 남긴다
+  if (!CFG.pick) $('pick').classList.add('off');
   let messages = [];
   let sessions = [];
   const transcripts = {};
