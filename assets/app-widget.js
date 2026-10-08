@@ -8,6 +8,8 @@
   const here = () => { const u = new URL(location.href); u.searchParams.delete('k'); return u.pathname + u.search; };
   // 터치 화면(폰·태블릿)에서는 창을 열 때 입력칸에 자동으로 들어가지 않는다(키보드가 바로 올라와 대화를 가린다).
   const touchScreen = () => matchMedia('(pointer: coarse)').matches;
+  // 메시지를 보낸 화면 구분. 창 크기·입력칸과 같은 기준(폭 768px)이다.
+  const deviceNow = () => (innerWidth < 768 ? 'mobile' : 'desktop');
   const CFG = { context: 'app', label: '앱 화면', pick: true, round: null, ...(window.__uifbConfig || {}) };
 
   const host = document.createElement('div');
@@ -242,7 +244,7 @@
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
-      const src = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '리뷰';
+      const src = (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '리뷰') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
       tag.textContent = activeTab === 'all' && ownerOf(m) ? `${nameOf(ownerOf(m))} · ${src}` : src;
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
@@ -494,7 +496,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
@@ -709,7 +711,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     try {
-      await draftsApi({ action: 'add', to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      await draftsApi({ action: 'add', to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
       where = null;
       $('where').hidden = true;
       updateDraftsBtn();
