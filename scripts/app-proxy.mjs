@@ -97,6 +97,6 @@ server.on('error', (err) => {
 });
 
 server.listen(port, auth.host, () => {
-  console.log(`피드백 버튼이 붙은 앱: http://localhost:${port}/  (원본 ${app.origin}, 리뷰 서버 ${review.origin})`);
+  console.log(`피드백 버튼이 붙은 앱: http://localhost:${port}/  (원본 ${app.origin}, 비교 페이지 서버 ${review.origin})`);
   for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
 });

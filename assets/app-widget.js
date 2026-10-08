@@ -256,7 +256,7 @@
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
-      const src = (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '리뷰') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
+      const src = (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
       tag.textContent = activeTab === 'all' && ownerOf(m) ? `${nameOf(ownerOf(m))} · ${src}` : src;
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
@@ -714,7 +714,7 @@
       const meta = document.createElement('div');
       meta.className = 'meta';
       const when = document.createElement('span');
-      when.textContent = new Date(d.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (d.round ? ` · ${d.round}차 리뷰` : '');
+      when.textContent = new Date(d.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (d.round ? ` · ${d.round}차 비교` : '');
       meta.append(when);
       const loc = locOf(d.where);
       if (loc) {
