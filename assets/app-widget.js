@@ -77,6 +77,17 @@
   .dfoot[hidden] { display: none; }
   .dfoot button { margin-left: auto; border: 0; border-radius: 7px; padding: 8px 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   .dfoot button:disabled { opacity: .4; cursor: default; }
+  .labels { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 10px 0; font-size: 11px; color: #8f8c84; }
+  .labels .lb { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px dashed rgba(0,0,0,.2); background: #fff; color: #5a5852; cursor: pointer; }
+  .labels .newlb { width: 84px; cursor: text; font: inherit; font-size: 11px; }
+  .labels .lb[aria-pressed="true"] { border-style: solid; border-color: #4f46e5; background: #eef0ff; color: #3730a3; font-weight: 600; }
+  .labels[hidden] { display: none; }
+  .dgroup { display: grid; gap: 6px; }
+  .dgroup > header { display: flex; gap: 6px; align-items: center; padding: 0; border: 0; font-size: 12px; font-weight: 600; color: #3730a3; }
+  .dgroup > header .fold { border: 0; background: none; cursor: pointer; font: inherit; color: inherit; padding: 0; }
+  .dgroup > header .n { font-weight: 400; color: #8f8c84; }
+  .dgroup > header .gsend { margin-left: auto; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 0; background: #1c1b18; color: #fff; cursor: pointer; }
+  .dgroup.folded .draft { display: none; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -94,6 +105,7 @@
   <div class="dfoot" id="dfoot" hidden><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
+  <div class="labels" id="labels" aria-label="보관 분류"></div>
   <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button><button type="submit">보내기</button></form>
 </section>
 <div class="hint" id="hint" hidden>의견을 남길 곳을 누르세요 · Esc 취소</div>
@@ -558,7 +570,33 @@
       p.textContent = '보관함이 비어 있습니다.\n글을 쓰고 "나중에"를 누르면 여기에 담깁니다.';
       box.append(p);
     }
-    for (const d of list) {
+    // 분류별로 묶는다. 최근에 담은 분류가 위로 온다.
+    const groups = new Map();
+    for (const d of [...list].sort((a, b) => String(b.at).localeCompare(String(a.at)))) {
+      const k = d.label || '';
+      groups.set(k, [...(groups.get(k) || []), d]);
+    }
+    for (const [label, items] of groups) {
+      const g = document.createElement('section');
+      g.className = 'dgroup' + (folded.has(label) ? ' folded' : '');
+      const head = document.createElement('header');
+      const fold = document.createElement('button');
+      fold.type = 'button';
+      fold.className = 'fold';
+      fold.textContent = (folded.has(label) ? '▸ ' : '▾ ') + (label || '미분류');
+      fold.onclick = () => { folded.has(label) ? folded.delete(label) : folded.add(label); renderDrafts(); };
+      const n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = `${items.length}개`;
+      const gs = document.createElement('button');
+      gs.type = 'button';
+      gs.className = 'gsend';
+      gs.textContent = items.length > 1 ? '이 분류 모두 보내기' : '보내기';
+      gs.onclick = () => sendDrafts(items.map((d) => d.id));
+      head.append(fold, n, gs);
+      g.append(head);
+      box.append(g);
+    for (const d of [...items].reverse()) {
       const card = document.createElement('div');
       card.className = 'draft';
       const top = document.createElement('div');
@@ -600,9 +638,18 @@
         sel.onchange = () => draftsApi({ action: 'update', id: d.id, to: sel.value });
         acts.append(sel);
       }
+      {
+        const ls = document.createElement('select');
+        ls.setAttribute('aria-label', '분류 바꾸기');
+        for (const name of ['', ...allLabels()]) { const o = document.createElement('option'); o.value = name; o.textContent = name ? `분류: ${name}` : '분류: 미분류'; ls.append(o); }
+        ls.value = d.label || '';
+        ls.onchange = () => draftsApi({ action: 'update', id: d.id, label: ls.value });
+        acts.append(ls);
+      }
       btn('지우기', () => draftsApi({ action: 'delete', ids: [d.id] }));
       card.append(top, meta, acts);
-      box.append(card);
+      g.append(card);
+    }
     }
     updateFoot();
   }
@@ -644,7 +691,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     try {
-      await draftsApi({ action: 'add', to: activeTab, text, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) });
+      await draftsApi({ action: 'add', to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) });
       where = null;
       $('where').hidden = true;
       updateDraftsBtn();
@@ -736,6 +783,55 @@
     composeT = setTimeout(() => { composeT = null; saveCompose(session, $('input').value); }, 400);
   });
   addEventListener('pagehide', flushCompose);
+
+  // ── 보관 분류: "나중에"로 담을 때 붙일 분류. 마지막으로 고른 분류가 두 화면에서 유지된다 ──
+  let draftLabel = null;
+  let labelSetAt = 0; // 방금 이 화면에서 고른 분류를 서버의 옛 값으로 되돌리지 않게
+  const folded = new Set();
+  const allLabels = () => [...new Set([...drafts.map((d) => d.label).filter(Boolean), ...(draftLabel ? [draftLabel] : [])])].sort((a, b) => a.localeCompare(b, 'ko'));
+  function renderLabels() {
+    const box = $('labels');
+    const key = JSON.stringify([draftLabel, allLabels()]);
+    if (box.dataset.key === key || box.contains(root.activeElement)) return;
+    box.dataset.key = key;
+    box.textContent = '';
+    const t = document.createElement('span');
+    t.textContent = '나중에 담을 분류';
+    box.append(t);
+    for (const name of allLabels()) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lb';
+      b.textContent = name;
+      b.setAttribute('aria-pressed', String(name === draftLabel));
+      b.onclick = () => setDraftLabel(name === draftLabel ? null : name);
+      box.append(b);
+    }
+    // 새 분류는 그 자리에서 이름을 쓰고 Enter(취소는 Esc)
+    const add = document.createElement('input');
+    add.className = 'lb newlb';
+    add.placeholder = '+ 새 분류';
+    add.setAttribute('aria-label', '새 분류 이름');
+    add.maxLength = 30;
+    add.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); if (v) setDraftLabel(v); }
+      if (e.key === 'Escape') add.value = '';
+    };
+    box.append(add);
+  }
+  function setDraftLabel(v) {
+    draftLabel = v;
+    labelSetAt = Date.now();
+    prefs.draftLabel = v;
+    savePrefs({ draftLabel: v });
+    if ($('labels').contains(root.activeElement)) root.activeElement.blur();
+    renderLabels();
+  }
+  setInterval(() => {
+    if (prefs && 'draftLabel' in prefs && prefs.draftLabel !== draftLabel && Date.now() - labelSetAt > 5000) draftLabel = prefs.draftLabel;
+    $('labels').hidden = showDrafts;
+    renderLabels();
+  }, 1000);
 
   poll();
   setInterval(poll, 3000);
