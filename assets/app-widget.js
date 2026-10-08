@@ -177,7 +177,7 @@
         nb.textContent = String(n);
         b.append(nb);
       }
-      b.onclick = () => { activeTab = t.id; scrollToUnread = true; try { localStorage.setItem('__uifb_tab', activeTab); } catch {} render(); };
+      b.onclick = () => { tabSetAt = Date.now(); switchTab(t.id); savePrefs({ tab: t.id }); };
       box.append(b);
     }
   }
@@ -209,6 +209,7 @@
       }
       const d = document.createElement('div');
       d.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '');
+      d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
@@ -244,7 +245,13 @@
       box.append(w);
     }
     if (scrollToUnread && !$('panel').hidden) {
-      box.scrollTop = newLine ? Math.max(0, newLine.offsetTop - 8) : box.scrollHeight;
+      // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
+      const pos = prefs.pos?.[activeTab];
+      const anchor = !newLine && pos && pos !== 'bottom' ? box.querySelector(`.msg[data-id="${CSS.escape(pos)}"]`) : null;
+      // offsetTop 은 창 기준이라 머리말 높이만큼 어긋난다. 목록 기준 위치로 바꿔 계산한다.
+      const topOf = (el) => el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      const target = newLine || anchor;
+      box.scrollTop = target ? Math.max(0, topOf(target) - 8) : box.scrollHeight;
       scrollToUnread = false;
     } else if (nearBottom) {
       box.scrollTop = box.scrollHeight;
@@ -295,6 +302,22 @@
     updateBadges();
   }
   $('msgs').addEventListener('scroll', markSeenVisible);
+  // 보고 있던 위치(맨 위에 보이는 메시지)를 세션마다 기억한다. 스크롤을 멈추고 0.8초 뒤에 저장한다.
+  let posT = null;
+  $('msgs').addEventListener('scroll', () => {
+    clearTimeout(posT);
+    posT = setTimeout(() => {
+      const box = $('msgs');
+      if ($('panel').hidden || !activeTab) return;
+      let id = 'bottom';
+      if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) {
+        const top = box.getBoundingClientRect().top;
+        const first = [...box.querySelectorAll('.msg')].find((el) => el.getBoundingClientRect().bottom > top + 4);
+        if (first) id = first.dataset.id;
+      }
+      if (prefs.pos?.[activeTab] !== id) { prefs.pos = { ...(prefs.pos || {}), [activeTab]: id }; savePrefs({ pos: { session: activeTab, id } }); }
+    }, 800);
+  });
   document.addEventListener('visibilitychange', markSeenVisible);
 
   // 창이 닫혀 있을 때 새 답이 오면 버튼 위에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
@@ -327,13 +350,15 @@
   let key = '';
   async function poll() {
     try {
-      const [c, ss, dd, sv, pf] = await Promise.all([
+      const [c, ss, dd, sv, pf, cp] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
         fetch('/__uifb/api/sessions').then((r) => r.json()),
         fetch('/__uifb/api/drafts').then((r) => r.json()),
         fetch('/__uifb/api/seen').then((r) => r.json()).catch(() => ({})),
         fetch('/__uifb/api/prefs').then((r) => r.json()).catch(() => null),
+        fetch('/__uifb/api/compose').then((r) => r.json()).catch(() => null),
       ]);
+      if (cp) { composed = cp; loadCompose(false); }
       if (pf && JSON.stringify(pf) !== JSON.stringify(prefs)) applyPrefs(pf);
       // 다른 화면에서 읽은 것을 가져온다(더 나중 시각만).
       let seenFromServer = false;
@@ -437,6 +462,7 @@
     if (!text) return;
     $('input').value = '';
     autoGrow($('input'));
+    clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
     const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) };
     try {
@@ -447,6 +473,7 @@
       render();
     } catch {
       $('input').value = text;
+      saveCompose(activeTab, text);
     }
   };
   // 입력칸: 글이 길어지면 자동으로 늘어나고(화면 절반까지), 오른쪽 아래 모서리를 끌어 직접 키우거나 줄일 수도 있다.
@@ -615,6 +642,7 @@
     if (!text || !sessionById(activeTab)) return;
     $('input').value = '';
     autoGrow($('input'));
+    clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     try {
       await draftsApi({ action: 'add', to: activeTab, text, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) });
       where = null;
@@ -622,6 +650,7 @@
       updateDraftsBtn();
     } catch {
       $('input').value = text;
+      saveCompose(activeTab, text);
     }
   };
 
@@ -637,6 +666,7 @@
   let size = null;
   let prefs = {};
   let dragging = false;
+  let tabSetAt = 0; // 이 화면에서 방금 탭을 바꿨으면 서버의 옛 값으로 되돌리지 않는다
   const device = () => (innerWidth < 768 ? 'mobile' : 'desktop');
   const savePrefs = (patch) => fetch('/__uifb/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device(), ...patch }) }).then((r) => r.json()).then((p) => { prefs = p; }).catch(() => {});
   function applyPrefs(p) {
@@ -648,6 +678,16 @@
     else { $('panel').style.width = ''; $('panel').style.height = ''; }
     inputBase = mine.inputH || null;
     if (!$('input').value) autoGrow($('input'));
+    // 다른 화면에서 고른 세션 탭을 따른다(지금 이 화면에서 글을 쓰는 중이 아닐 때만).
+    if (prefs.tab && prefs.tab !== activeTab && sessionById(prefs.tab) && Date.now() - tabSetAt > 5000 && Date.now() - typedAt > 3000 && !composeT) switchTab(prefs.tab);
+  }
+  function switchTab(id) {
+    flushCompose();
+    activeTab = id;
+    scrollToUnread = true;
+    try { localStorage.setItem('__uifb_tab', activeTab); } catch {}
+    render();
+    loadCompose(true);
   }
   addEventListener('resize', () => applyPrefs(prefs));
   $('grip').addEventListener('pointerdown', (e) => {
@@ -666,6 +706,36 @@
     $('grip').addEventListener('pointerup', up, { once: true });
   });
   $('grip').addEventListener('dblclick', () => { size = null; $('panel').style.width = ''; $('panel').style.height = ''; savePrefs({ panel: null }); });
+
+  // ── 쓰던 글: 세션 탭마다 보내지 않은 글을 리뷰 서버(compose.json)에 저장한다. 새로고침해도 남고 다른 화면에서 이어 쓴다 ──
+  let composed = {};
+  let composeT = null;
+  let typedAt = 0;
+  function flushCompose() {
+    if (!composeT) return;
+    clearTimeout(composeT);
+    composeT = null;
+    saveCompose(activeTab, $('input').value);
+  }
+  function saveCompose(session, text) {
+    if (!session) return;
+    composed[session] = text ? { text } : undefined;
+    fetch('/__uifb/api/compose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session, text }) }).catch(() => {});
+  }
+  // force: 탭을 바꿨을 때. 아니면 지금 쓰는 중(최근 3초 안에 입력)에는 덮어쓰지 않는다.
+  function loadCompose(force) {
+    const el = $('input');
+    const want = composed[activeTab]?.text || '';
+    if (!force && (Date.now() - typedAt < 3000 || composeT)) return;
+    if (el.value !== want) { el.value = want; autoGrow(el); }
+  }
+  $('input').addEventListener('input', () => {
+    typedAt = Date.now();
+    clearTimeout(composeT);
+    const session = activeTab;
+    composeT = setTimeout(() => { composeT = null; saveCompose(session, $('input').value); }, 400);
+  });
+  addEventListener('pagehide', flushCompose);
 
   poll();
   setInterval(poll, 3000);
