@@ -700,7 +700,7 @@
   }
 
   async function sendDrafts(ids) {
-    await draftsApi({ action: 'send', ids, combine: true });
+    await draftsApi({ action: 'send', ids, combine: true, device: deviceNow() });
     ids.forEach((id) => checked.delete(id));
     if (!mine().length) setDraftsView(false);
     else renderDrafts();
