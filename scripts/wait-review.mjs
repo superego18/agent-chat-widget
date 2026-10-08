@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 이 세션에 온 리뷰 페이지·앱 화면 메시지나 리뷰 완료 표시를 기다린다. 의존성 없음 (Node 18+).
-// 사용: node wait-review.mjs --session <이름 또는 id> [--round <N> --done] [--dir .ui-feedback] [--minutes 30] [--agent "Claude Code"]
+// 사용: node wait-review.mjs --session <이름 또는 id> [--round <N> --done] [--dir .ui-feedback] [--minutes <분>] [--agent "Claude Code"]
 //   --session: register-session.mjs 로 등록한 이 세션. 이 세션에게 온(to) 메시지에만 깨어난다.
 //   --done:    리뷰 완료 표시도 받는다(리뷰를 반영하는 작업 세션만 붙인다). --round 와 함께 쓴다.
 //   --seen <id>: 이 번호까지의 메시지는 이미 처리한 것으로 본다. 답을 턴의 마지막 문장으로 쓰고 감시를 먼저 다시 켤 때,
@@ -8,7 +8,7 @@
 //   기다리는 동안 <dir>/watch-<세션 id>.json 을 남겨, 페이지가 이 세션의 "바로 읽음" 상태를 표시하게 한다.
 //   - 답하지 않은 메시지: CHAT 과 그 메시지들을 출력하고 0으로 끝난다(답하면 같은 명령으로 다시 켠다).
 //   - 완료 표시(--done): REVIEW_DONE 과 평가 JSON 을 출력하고 0으로 끝난다.
-//   - 시간이 다 되면 TIMEOUT 을 출력하고 1로 끝난다.
+//   - 기본은 시간 제한 없이 기다린다. --minutes 를 주면 그 시간이 지났을 때 TIMEOUT 을 출력하고 1로 끝난다.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +21,7 @@ function arg(name, fallback) {
 const dir = path.resolve(arg('dir', '.ui-feedback'));
 const round = arg('round', '');
 const handlesDone = process.argv.includes('--done');
-const minutes = Number(arg('minutes', '30'));
+const minutes = Number(arg('minutes', '0')) || 0;
 const want = arg('session', '');
 const seen = Number(arg('seen', '0')) || 0;
 
@@ -54,11 +54,11 @@ const agent = arg('agent', session.agent || session.name);
 const feedbackFile = path.join(dir, `r${round}.json`);
 const chatFile = path.join(dir, 'chat.json');
 const watchFile = path.join(dir, `watch-${sid}.json`);
-const expiresAt = Date.now() + minutes * 60_000;
+const expiresAt = minutes ? Date.now() + minutes * 60_000 : null;
 
 fs.writeFileSync(
   watchFile,
-  JSON.stringify({ session: sid, name: session.name, agent, round: Number(round) || null, handlesDone, pid: process.pid, startedAt: new Date().toISOString(), expiresAt: new Date(expiresAt).toISOString() }, null, 2) + '\n',
+  JSON.stringify({ session: sid, name: session.name, agent, round: Number(round) || null, handlesDone, pid: process.pid, startedAt: new Date().toISOString(), expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null }, null, 2) + '\n',
 );
 
 function cleanup() {
@@ -118,7 +118,7 @@ function check() {
     } catch {}
     if (data?.done === true) finish(0, [`REVIEW_DONE round=${round}`, JSON.stringify(data, null, 2)]);
   }
-  if (Date.now() > expiresAt) finish(1, [`TIMEOUT: ${minutes}분 동안 메시지나 완료 표시가 없어 감시를 끝냈습니다.`]);
+  if (expiresAt && Date.now() > expiresAt) finish(1, [`TIMEOUT: ${minutes}분 동안 메시지나 완료 표시가 없어 감시를 끝냈습니다.`]);
 }
 
 timer = setInterval(check, 2000);
