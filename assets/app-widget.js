@@ -81,7 +81,14 @@
   textarea { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
   form textarea { resize: vertical; height: 80px; max-height: 50vh; }
   form button { height: 40px; flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
-  .drafts { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #f6f5f1; }
+  /* 보관함: 대화 목록을 바꾸지 않고 입력칸 위로 올라오는 시트(드롭업). 대화와 입력칸은 그대로 보인다. */
+  .dsheet { position: absolute; left: 0; right: 0; z-index: 3; max-height: 62%; display: flex; flex-direction: column; background: #f6f5f1; border-top: 1px solid rgba(0,0,0,.12); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 24px rgba(0,0,0,.14); animation: sheetup .16s ease-out; }
+  .dsheet[hidden] { display: none; }
+  .dsheet .dhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 0; font-size: 12px; font-weight: 600; color: #3730a3; }
+  .dsheet .dhead button { border: 0; background: none; font-size: 12px; color: #5a5852; cursor: pointer; padding: 2px 4px; }
+  @keyframes sheetup { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .dsheet { animation: none; } }
+  .drafts { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
   .drafts[hidden], .msgs[hidden], form[hidden], .chipbtn[hidden] { display: none; }
   .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
   .draft .top { display: flex; gap: 7px; align-items: flex-start; }
@@ -120,8 +127,8 @@
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
   <header><button class="close" id="close" type="button">닫기</button><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="drafts" id="drafts" hidden></div>
-  <div class="dfoot" id="dfoot" hidden><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div>
+  <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
+  <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <div class="labels" id="labels" aria-label="보관 분류"></div>
@@ -554,7 +561,8 @@
 
   function updateDraftsBtn() {
     const n = mine().length;
-    $('draftsBtn').textContent = showDrafts ? '대화로 돌아가기' : n ? `보관함 ${n}` : '보관함';
+    $('draftsBtn').textContent = (n ? `보관함 ${n}` : '보관함') + (showDrafts ? ' ▾' : ' ▴');
+    $('dtitle').textContent = n ? `보관함 ${n}개` : '보관함';
     $('draftsBtn').setAttribute('aria-pressed', String(showDrafts));
   }
 
@@ -706,18 +714,20 @@
     else renderDrafts();
   }
 
+  // 시트는 보관함 버튼 줄 바로 위에 붙는다. 입력칸이 커지면 따라 올라간다.
+  function placeSheet() {
+    if (!showDrafts) return;
+    const p = $('panel').getBoundingClientRect();
+    $('dsheet').style.bottom = Math.round(p.bottom - $('composeRow').getBoundingClientRect().top) + 'px';
+  }
+  new ResizeObserver(placeSheet).observe($('form'));
   function setDraftsView(on) {
     showDrafts = on;
-    $('msgs').hidden = on;
-    $('drafts').hidden = !on;
-    $('dfoot').hidden = !on;
-    $('form').hidden = on;
-    $('pick').hidden = on;
-    $('where').hidden = on || !where;
+    $('dsheet').hidden = !on;
     updateDraftsBtn();
-    if (on) renderDrafts();
-    else { scrollToUnread = true; render(); }
+    if (on) { placeSheet(); renderDrafts(); }
   }
+  $('dclose').onclick = () => setDraftsView(false);
   $('draftsBtn').onclick = () => setDraftsView(!showDrafts);
   $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
   $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
@@ -867,7 +877,6 @@
   }
   setInterval(() => {
     if (prefs && 'draftLabel' in prefs && prefs.draftLabel !== draftLabel && Date.now() - labelSetAt > 5000) draftLabel = prefs.draftLabel;
-    $('labels').hidden = showDrafts;
     renderLabels();
   }, 1000);
 
