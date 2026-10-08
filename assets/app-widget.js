@@ -84,6 +84,9 @@
   /* 보관함: 대화 목록을 바꾸지 않고 입력칸 위로 올라오는 시트(드롭업). 대화와 입력칸은 그대로 보인다. */
   .dsheet { position: absolute; left: 0; right: 0; z-index: 3; max-height: 62%; display: flex; flex-direction: column; background: #f6f5f1; border-top: 1px solid rgba(0,0,0,.12); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 24px rgba(0,0,0,.14); animation: sheetup .16s ease-out; }
   .dsheet[hidden] { display: none; }
+  .cats { display: contents; }
+  .cats .cat { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid #c7c9f5; background: #eef0ff; color: #3730a3; cursor: pointer; white-space: nowrap; }
+  .cats .cat[aria-pressed="true"] { background: #4f46e5; color: #fff; border-color: transparent; }
   .dsheet .dhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 0; font-size: 12px; font-weight: 600; color: #3730a3; }
   .dsheet .dhead button { border: 0; background: none; font-size: 12px; color: #5a5852; cursor: pointer; padding: 2px 4px; }
   @keyframes sheetup { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -129,7 +132,7 @@
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
-  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
+  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <div class="labels" id="labels" aria-label="보관 분류"></div>
   <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
@@ -561,9 +564,28 @@
 
   function updateDraftsBtn() {
     const n = mine().length;
-    $('draftsBtn').textContent = (n ? `보관함 ${n}` : '보관함') + (showDrafts ? ' ▾' : ' ▴');
-    $('dtitle').textContent = n ? `보관함 ${n}개` : '보관함';
-    $('draftsBtn').setAttribute('aria-pressed', String(showDrafts));
+    $('draftsBtn').textContent = (n ? `보관함 ${n}` : '보관함') + (showDrafts && sheetLabel === null ? ' ▾' : ' ▴');
+    $('draftsBtn').setAttribute('aria-pressed', String(showDrafts && sheetLabel === null));
+    const inLabel = sheetLabel === null ? n : mine().filter((d) => (d.label || '') === sheetLabel).length;
+    $('dtitle').textContent = sheetLabel === null ? (n ? `보관함 ${n}개` : '보관함') : `보관함 · ${sheetLabel || '미분류'} ${inLabel}개`;
+    // 분류마다 바로 여는 버튼(보관함 버튼 옆). 누르면 그 분류만 담긴 시트가 올라온다.
+    const counts = new Map();
+    for (const d of mine()) counts.set(d.label || '', (counts.get(d.label || '') || 0) + 1);
+    const key = JSON.stringify([...counts, sheetLabel, showDrafts]);
+    if ($('cats').dataset.key !== key) {
+      $('cats').dataset.key = key;
+      $('cats').textContent = '';
+      for (const [name, c] of [...counts].sort((a, b) => (a[0] ? a[0] : '\uffff').localeCompare(b[0] ? b[0] : '\uffff', 'ko'))) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cat';
+        const on = showDrafts && sheetLabel === name;
+        b.textContent = `${name || '미분류'} ${c}${on ? ' ▾' : ''}`;
+        b.setAttribute('aria-pressed', String(on));
+        b.onclick = () => (on ? setDraftsView(false) : openSheet(name));
+        $('cats').append(b);
+      }
+    }
   }
 
   // 저장한 위치가 지금 화면에서도 그대로인지. 같은 화면이 아니면 판단하지 않는다.
@@ -602,6 +624,7 @@
     const groups = new Map();
     for (const d of [...list].sort((a, b) => String(b.at).localeCompare(String(a.at)))) {
       const k = d.label || '';
+      if (sheetLabel !== null && k !== sheetLabel) continue; // 분류 버튼으로 열었으면 그 분류만
       groups.set(k, [...(groups.get(k) || []), d]);
     }
     for (const [label, items] of groups) {
@@ -721,14 +744,20 @@
     $('dsheet').style.bottom = Math.round(p.bottom - $('composeRow').getBoundingClientRect().top) + 'px';
   }
   new ResizeObserver(placeSheet).observe($('form'));
+  let sheetLabel = null; // null 이면 전체, '' 이면 미분류, 그 밖에는 그 분류만
+  function openSheet(label) {
+    sheetLabel = label;
+    if (showDrafts) { updateDraftsBtn(); renderDrafts(); } else setDraftsView(true);
+  }
   function setDraftsView(on) {
+    if (!on) sheetLabel = null;
     showDrafts = on;
     $('dsheet').hidden = !on;
     updateDraftsBtn();
     if (on) { placeSheet(); renderDrafts(); }
   }
   $('dclose').onclick = () => setDraftsView(false);
-  $('draftsBtn').onclick = () => setDraftsView(!showDrafts);
+  $('draftsBtn').onclick = () => (showDrafts && sheetLabel === null ? setDraftsView(false) : openSheet(null));
   $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
   $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
 
