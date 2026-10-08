@@ -57,6 +57,22 @@
   form { display: flex; gap: 6px; padding: 8px 10px 10px; }
   textarea { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
   form button { flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .drafts { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #f6f5f1; }
+  .drafts[hidden], .msgs[hidden] { display: none; }
+  .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
+  .draft .top { display: flex; gap: 7px; align-items: flex-start; }
+  .draft input[type=checkbox] { margin-top: 6px; flex-shrink: 0; }
+  .draft textarea { height: auto; min-height: 36px; background: #fff; }
+  .draft .meta { font-size: 11px; color: #8f8c84; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+  .draft .loc.same { color: #15803d; } .draft .loc.changed { color: #b45309; } .draft .loc.other { color: #5a5852; }
+  .draft .acts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .draft .acts button, .draft .acts select { font-size: 11px; padding: 3px 7px; border-radius: 6px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
+  .draft .acts .send1 { background: #1c1b18; color: #fff; border-color: transparent; }
+  .dfoot { display: flex; gap: 8px; align-items: center; padding: 8px 10px 10px; font-size: 12px; color: #5a5852; border-top: 1px solid rgba(0,0,0,.08); }
+  .dfoot[hidden] { display: none; }
+  .dfoot button { margin-left: auto; border: 0; border-radius: 7px; padding: 8px 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .dfoot button:disabled { opacity: .4; cursor: default; }
+  form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
   .hint[hidden] { display: none; }
   .box { position: fixed; pointer-events: none; outline: 2px solid #4f46e5; background: rgba(79,70,229,.08); border-radius: 3px; }
@@ -67,9 +83,11 @@
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <header><b>대화/피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="row"><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
+  <div class="drafts" id="drafts" hidden></div>
+  <div class="dfoot" id="dfoot" hidden><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div>
+  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button></form>
+  <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button><button type="submit">보내기</button></form>
 </section>
 <div class="hint" id="hint" hidden>의견을 남길 곳을 누르세요 · Esc 취소</div>
 <div class="box" id="box" hidden></div>`;
@@ -232,6 +250,8 @@
     $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
     markSeenVisible();
     updateBadges();
+    updateDraftsBtn();
+    if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts(); // 고치는 중인 글은 다시 그리지 않는다
   }
 
   function updateBadges() {
@@ -293,11 +313,18 @@
   let key = '';
   async function poll() {
     try {
-      const [c, ss] = await Promise.all([
+      const [c, ss, dd] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
         fetch('/__uifb/api/sessions').then((r) => r.json()),
+        fetch('/__uifb/api/drafts').then((r) => r.json()),
       ]);
       messages = c.messages || [];
+      const dk = JSON.stringify(dd.drafts || []);
+      if (dk !== draftsKey) {
+        draftsKey = dk;
+        drafts = dd.drafts || [];
+        if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts();
+      }
       sessions = ss.sessions || [];
       for (const x of sessions.filter((x) => x.tool === 'codex')) {
         transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
@@ -357,20 +384,28 @@
         rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
         viewport: { w: innerWidth, h: innerHeight },
       };
-      $('whereText').textContent = '위치: ' + (where.text || where.selector);
-      $('where').hidden = false;
+      if (pickFor) {
+        draftsApi({ action: 'update', id: pickFor, where });
+        where = null;
+      } else {
+        $('whereText').textContent = '위치: ' + (where.text || where.selector);
+        $('where').hidden = false;
+      }
     }
+    const repicked = pickFor;
+    pickFor = null;
     stopPick();
-    $('input').focus();
+    if (!repicked) $('input').focus();
   }
-  function onKey(e) { if (e.key === 'Escape') stopPick(); }
-  $('pick').onclick = () => {
+  function onKey(e) { if (e.key === 'Escape') { pickFor = null; stopPick(); } }
+  function startPick() {
     $('panel').hidden = true;
     $('hint').hidden = false;
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onPick, true);
     document.addEventListener('keydown', onKey, true);
-  };
+  }
+  $('pick').onclick = () => startPick();
   $('whereClear').onclick = () => { where = null; $('where').hidden = true; };
 
   $('form').onsubmit = async (e) => {
@@ -393,6 +428,150 @@
   $('input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); }
   });
+
+  // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(리뷰 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
+  let drafts = [];
+  let draftsKey = '';
+  let showDrafts = false;
+  let pickFor = null;
+  const checked = new Set();
+  const draftsApi = async (body) => {
+    const r = await fetch('/__uifb/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    await poll();
+    return r.json();
+  };
+  const mine = () => drafts.filter((d) => d.to === activeTab);
+
+  function updateDraftsBtn() {
+    const n = mine().length;
+    $('draftsBtn').textContent = showDrafts ? '대화로 돌아가기' : n ? `보관함 ${n}` : '보관함';
+    $('draftsBtn').setAttribute('aria-pressed', String(showDrafts));
+  }
+
+  // 저장한 위치가 지금 화면에서도 그대로인지. 같은 화면이 아니면 판단하지 않는다.
+  function locOf(w) {
+    if (!w?.selector) return null;
+    if (w.url !== location.pathname + location.search) return { k: 'other', label: `다른 화면 · ${w.url}` };
+    let el = null;
+    try { el = document.querySelector(w.selector); } catch {}
+    const now = el ? (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+    if (!el || (w.text && now !== w.text)) return { k: 'changed', label: '화면이 바뀜 · 다시 찍기 권장' };
+    return { k: 'same', label: '위치 그대로', el };
+  }
+
+  function flash(el) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setTimeout(() => {
+      const r = el.getBoundingClientRect();
+      Object.assign($('box').style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+      $('box').hidden = false;
+      setTimeout(() => { $('box').hidden = true; }, 1600);
+    }, 350);
+  }
+
+  function renderDrafts() {
+    const box = $('drafts');
+    box.textContent = '';
+    const list = mine();
+    for (const id of [...checked]) if (!list.some((d) => d.id === id)) checked.delete(id);
+    if (!list.length) {
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = '보관함이 비어 있습니다.\n글을 쓰고 "나중에"를 누르면 여기에 담깁니다.';
+      box.append(p);
+    }
+    for (const d of list) {
+      const card = document.createElement('div');
+      card.className = 'draft';
+      const top = document.createElement('div');
+      top.className = 'top';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = checked.has(d.id);
+      cb.setAttribute('aria-label', '보낼 항목으로 고르기');
+      cb.onchange = () => { cb.checked ? checked.add(d.id) : checked.delete(d.id); updateFoot(); };
+      const ta = document.createElement('textarea');
+      ta.value = d.text;
+      ta.rows = Math.min(5, d.text.split('\n').length + 1);
+      ta.setAttribute('aria-label', '보관한 메시지');
+      ta.onchange = () => { if (ta.value.trim()) draftsApi({ action: 'update', id: d.id, text: ta.value }); };
+      top.append(cb, ta);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const when = document.createElement('span');
+      when.textContent = new Date(d.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (d.round ? ` · ${d.round}차 리뷰` : '');
+      meta.append(when);
+      const loc = locOf(d.where);
+      if (loc) {
+        const l = document.createElement('span');
+        l.className = 'loc ' + loc.k;
+        l.textContent = loc.label;
+        meta.append(l);
+      }
+      const acts = document.createElement('div');
+      acts.className = 'acts';
+      const btn = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
+      btn('이것만 보내기', () => sendDrafts([d.id]), 'send1');
+      if (loc?.el) btn('위치 보기', () => flash(loc.el));
+      if (d.where?.selector) btn('다시 찍기', () => { pickFor = d.id; startPick(); });
+      if (sessions.length > 1) {
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', '받을 세션 바꾸기');
+        for (const x of sessions) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.id === d.to ? `${x.name}에게` : `${x.name}(으)로 옮기기`; sel.append(o); }
+        sel.value = d.to;
+        sel.onchange = () => draftsApi({ action: 'update', id: d.id, to: sel.value });
+        acts.append(sel);
+      }
+      btn('지우기', () => draftsApi({ action: 'delete', ids: [d.id] }));
+      card.append(top, meta, acts);
+      box.append(card);
+    }
+    updateFoot();
+  }
+
+  function updateFoot() {
+    const n = mine().filter((d) => checked.has(d.id)).length;
+    $('dsend').disabled = n === 0;
+    $('dsend').textContent = n > 1 ? `선택한 ${n}개 한 번에 보내기` : '선택한 것 보내기';
+    $('dall').checked = n > 0 && n === mine().length;
+  }
+
+  async function sendDrafts(ids) {
+    await draftsApi({ action: 'send', ids, combine: true });
+    ids.forEach((id) => checked.delete(id));
+    if (!mine().length) setDraftsView(false);
+    else renderDrafts();
+  }
+
+  function setDraftsView(on) {
+    showDrafts = on;
+    $('msgs').hidden = on;
+    $('drafts').hidden = !on;
+    $('dfoot').hidden = !on;
+    $('form').hidden = on;
+    $('pick').hidden = on;
+    $('where').hidden = on || !where;
+    updateDraftsBtn();
+    if (on) renderDrafts();
+    else { scrollToUnread = true; render(); }
+  }
+  $('draftsBtn').onclick = () => setDraftsView(!showDrafts);
+  $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
+  $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
+
+  $('later').onclick = async () => {
+    const text = $('input').value.trim();
+    if (!text || !sessionById(activeTab)) return;
+    $('input').value = '';
+    try {
+      await draftsApi({ action: 'add', to: activeTab, text, context: 'app', where: where || { url: location.pathname + location.search } });
+      where = null;
+      $('where').hidden = true;
+      updateDraftsBtn();
+    } catch {
+      $('input').value = text;
+    }
+  };
 
   poll();
   setInterval(poll, 3000);
