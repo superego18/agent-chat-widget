@@ -16,6 +16,8 @@
   .btn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: #4f46e5; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
   .panel { position: fixed; left: 16px; bottom: 124px; width: min(360px, calc(100vw - 32px)); height: min(520px, calc(100vh - 160px)); background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
   .panel[hidden] { display: none; }
+  .grip { position: absolute; right: 0; top: 0; width: 18px; height: 18px; cursor: nesw-resize; z-index: 2; touch-action: none; }
+  .grip::after { content: ''; position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-right: 2px solid rgba(0,0,0,.25); border-top: 2px solid rgba(0,0,0,.25); border-radius: 0 3px 0 0; }
   header { padding: 10px 12px; border-bottom: 1px solid rgba(0,0,0,.1); }
   header b { font-size: 14px; }
   header p { margin: 2px 0 0; font-size: 12px; line-height: 1.4; }
@@ -81,6 +83,7 @@
 <div class="peek" id="peek" hidden role="status"></div>
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
+  <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
   <header><b>대화/피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="drafts" id="drafts" hidden></div>
@@ -572,6 +575,33 @@
       $('input').value = text;
     }
   };
+
+  // 오른쪽 위 손잡이를 끌어 창 크기를 바꾼다(창은 왼쪽 아래에 붙어 있다). 크기는 이 브라우저에 기억한다.
+  function applySize(sz) {
+    if (!sz) return;
+    const w = Math.min(Math.max(300, sz.w), innerWidth - 32);
+    const h = Math.min(Math.max(320, sz.h), innerHeight - 140);
+    $('panel').style.width = w + 'px';
+    $('panel').style.height = h + 'px';
+  }
+  let size = null;
+  try { size = JSON.parse(localStorage.getItem('__uifb_size') || 'null'); } catch {}
+  applySize(size);
+  addEventListener('resize', () => applySize(size));
+  $('grip').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const r = $('panel').getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+    $('grip').setPointerCapture(e.pointerId);
+    const move = (ev) => { size = { w: start.w + (ev.clientX - start.x), h: start.h - (ev.clientY - start.y) }; applySize(size); };
+    const up = () => {
+      $('grip').removeEventListener('pointermove', move);
+      try { localStorage.setItem('__uifb_size', JSON.stringify(size)); } catch {}
+    };
+    $('grip').addEventListener('pointermove', move);
+    $('grip').addEventListener('pointerup', up, { once: true });
+  });
+  $('grip').addEventListener('dblclick', () => { size = null; $('panel').style.width = ''; $('panel').style.height = ''; try { localStorage.removeItem('__uifb_size'); } catch {} });
 
   poll();
   setInterval(poll, 3000);
