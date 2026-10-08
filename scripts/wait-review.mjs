@@ -91,6 +91,14 @@ function markHandling() {
   } catch {}
 }
 
+// 세션이 어디까지 받아 갔는지(delivered.json). 대화창이 사용자 메시지 옆에 "읽음"을 붙이는 근거다.
+function markDelivered(id) {
+  const file = path.join(dir, 'delivered.json');
+  let d = {};
+  try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  if (!(d[sid] >= id)) fs.writeFileSync(file, JSON.stringify({ ...d, [sid]: id }, null, 2) + '\n');
+}
+
 function finish(code, lines) {
   clearInterval(timer);
   if (code === 0) markHandling();
@@ -111,6 +119,7 @@ function check() {
         lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
       }
     }
+    markDelivered(Math.max(...pending.map((m) => m.id)));
     finish(0, lines);
   }
   if (handlesDone) {

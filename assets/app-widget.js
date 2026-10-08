@@ -261,7 +261,7 @@
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
-        (m.where?.url ? ' · ' + m.where.url : '');
+        (m.where?.url ? ' · ' + m.where.url : '') + readMark(m);
       const body = document.createElement('span');
       body.innerHTML = mdLite(m.text);
       d.append(tag, body, small);
@@ -284,7 +284,7 @@
       w.className = 'empty';
       w.style.margin = '0';
       const s = sessionById(ownerOf(last));
-      w.textContent = s?.watch?.active ? `${s.name}이(가) 읽고 답하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
+      w.textContent = last.id <= (delivered[ownerOf(last)] || 0) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
     }
     if (scrollToUnread && !$('panel').hidden) {
@@ -409,6 +409,7 @@
         if (typeof at === 'string' && (!seen[id] || at > seen[id])) { seen[id] = at; seenFromServer = true; }
       }
       messages = c.messages || [];
+      delivered = c.delivered || {};
       const dk = JSON.stringify(dd.drafts || []);
       if (dk !== draftsKey) {
         draftsKey = dk;
@@ -563,6 +564,15 @@
     return r.json();
   };
   const mine = () => drafts.filter((d) => d.to === activeTab);
+  // 사용자 메시지에 붙는 읽음 표시. 세션이 받아 갔으면(delivered) "읽음", 아직이면 세션 상태에 따라 언제 읽는지 적는다.
+  let delivered = {};
+  function readMark(m) {
+    if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
+    if (m.id <= (delivered[m.to] || 0)) return ' · 읽음';
+    const s = sessionById(m.to);
+    if (s?.status?.state === 'working' || s?.status?.state === 'permission') return ' · 안 읽음(작업 중이라 끝나면 읽음)';
+    return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';
+  }
 
   function updateDraftsBtn() {
     const n = mine().length;
