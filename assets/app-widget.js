@@ -4,6 +4,8 @@
 (() => {
   if (window.__uifb) return;
   window.__uifb = true;
+  // 지금 주소(접속 키 k 는 빼고). 위치 기록에 키가 남지 않게 한다.
+  const here = () => { const u = new URL(location.href); u.searchParams.delete('k'); return u.pathname + u.search; };
   const CFG = { context: 'app', label: '앱 화면', pick: true, round: null, ...(window.__uifbConfig || {}) };
 
   const host = document.createElement('div');
@@ -438,7 +440,7 @@
     if (el) {
       const r = el.getBoundingClientRect();
       where = {
-        url: location.pathname + location.search,
+        url: here(),
         selector: selectorOf(el),
         text: (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80),
         rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
@@ -476,7 +478,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
@@ -541,7 +543,7 @@
   // 저장한 위치가 지금 화면에서도 그대로인지. 같은 화면이 아니면 판단하지 않는다.
   function locOf(w) {
     if (!w?.selector) return null;
-    if (w.url !== location.pathname + location.search) return { k: 'other', label: `다른 화면 · ${w.url}` };
+    if (w.url !== here()) return { k: 'other', label: `다른 화면 · ${w.url}` };
     let el = null;
     try { el = document.querySelector(w.selector); } catch {}
     const now = el ? (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80) : '';
@@ -691,7 +693,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     try {
-      await draftsApi({ action: 'add', to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) });
+      await draftsApi({ action: 'add', to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: here() } } : {}) });
       where = null;
       $('where').hidden = true;
       updateDraftsBtn();

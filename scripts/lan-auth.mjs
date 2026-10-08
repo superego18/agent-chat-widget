@@ -33,9 +33,9 @@ export function lanAuth({ dir, lan }) {
     host: lan ? '0.0.0.0' : '127.0.0.1',
     // 요청을 계속 처리해도 되면 true. 아니면 응답(키 저장 후 이동 또는 거절)을 끝내고 false.
     check(req, res) {
-      if (ok(req)) return true;
       const url = new URL(req.url, 'http://x');
-      if (url.searchParams.get('k') === key) {
+      // 키가 주소에 남으면 대화 위치·브라우저 기록에 키가 새므로, 이미 등록된 브라우저라도 키를 떼고 다시 보낸다.
+      if (lan && !isLocal(req) && url.searchParams.has('k') && (hasCookie(req) || url.searchParams.get('k') === key)) {
         url.searchParams.delete('k');
         res.writeHead(302, {
           'Set-Cookie': `${COOKIE}=${key}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax`,
@@ -44,6 +44,7 @@ export function lanAuth({ dir, lan }) {
         res.end();
         return false;
       }
+      if (ok(req)) return true;
       res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('접속 키가 필요합니다. 이 서버를 켠 컴퓨터의 터미널에 나온 주소(?k=…)로 한 번 열어 주세요.');
       return false;
