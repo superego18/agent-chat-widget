@@ -428,6 +428,7 @@
     if (open) scrollToUnread = true;
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
+    try { localStorage.setItem('__uifb_open', open ? '1' : '0'); } catch {}
     render();
     if (open) { autoGrow($('input')); if (!touchScreen()) $('input').focus(); }
   };
@@ -852,6 +853,9 @@
 
   $('close').onclick = () => $('btn').click();
 
-  poll();
+  // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
+  let wasOpen = false;
+  try { wasOpen = localStorage.getItem('__uifb_open') === '1'; } catch {}
+  poll().then(() => { if (wasOpen && $('panel').hidden) $('btn').click(); });
   setInterval(poll, 3000);
 })();
