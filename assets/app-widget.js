@@ -112,7 +112,12 @@
   let seen = {};
   try { seen = JSON.parse(localStorage.getItem('__uifb_seen') || '{}'); } catch {}
   if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {}; // 예전 버전은 숫자로 저장했다
-  const saveSeen = () => { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} };
+  // 읽음 상태는 리뷰 서버(seen.json)에 두어 앱 화면과 리뷰 페이지가 함께 쓴다. 브라우저 저장소는 서버가 꺼졌을 때의 예비다.
+  const saveSeen = (ids) => {
+    try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {}
+    const up = Object.fromEntries((ids || Object.keys(seen)).map((id) => [id, seen[id]]));
+    fetch('/__uifb/api/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(up) }).catch(() => {});
+  };
   let scrollToUnread = true;
   const sessionById = (id) => sessions.find((x) => x.id === id);
   const nameOf = (id) => sessionById(id)?.name || '세션';
@@ -284,7 +289,7 @@
     }
     if (at === (seen[activeTab] || '')) return;
     seen[activeTab] = at;
-    saveSeen();
+    saveSeen([activeTab]);
     if (!box.querySelector('.msg.unread')) box.querySelectorAll('.newline').forEach((el) => el.remove());
     renderTabs();
     updateBadges();
@@ -322,11 +327,17 @@
   let key = '';
   async function poll() {
     try {
-      const [c, ss, dd] = await Promise.all([
+      const [c, ss, dd, sv] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
         fetch('/__uifb/api/sessions').then((r) => r.json()),
         fetch('/__uifb/api/drafts').then((r) => r.json()),
+        fetch('/__uifb/api/seen').then((r) => r.json()).catch(() => ({})),
       ]);
+      // 다른 화면에서 읽은 것을 가져온다(더 나중 시각만).
+      let seenFromServer = false;
+      for (const [id, at] of Object.entries(sv || {})) {
+        if (typeof at === 'string' && (!seen[id] || at > seen[id])) { seen[id] = at; seenFromServer = true; }
+      }
       messages = c.messages || [];
       const dk = JSON.stringify(dd.drafts || []);
       if (dk !== draftsKey) {
@@ -338,17 +349,18 @@
       for (const x of sessions.filter((x) => x.tool === 'codex')) {
         transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
       }
-      let changedSeen = false;
+      const fresh = [];
       for (const x of sessions) {
         if (seen[x.id] === undefined) {
           const it = timeline(x.id);
           seen[x.id] = it.length ? String(it[it.length - 1].at) : '0';
-          changedSeen = true;
+          fresh.push(x.id);
         }
       }
-      if (changedSeen) saveSeen();
+      if (fresh.length) saveSeen(fresh);
+      if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
+      const k = JSON.stringify(seen) + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
       if (k !== key) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();
