@@ -6,6 +6,8 @@
   window.__uifb = true;
   // 지금 주소(접속 키 k 는 빼고). 위치 기록에 키가 남지 않게 한다.
   const here = () => { const u = new URL(location.href); u.searchParams.delete('k'); return u.pathname + u.search; };
+  // 터치 화면(폰·태블릿)에서는 창을 열 때 입력칸에 자동으로 들어가지 않는다(키보드가 바로 올라와 대화를 가린다).
+  const touchScreen = () => matchMedia('(pointer: coarse)').matches;
   const CFG = { context: 'app', label: '앱 화면', pick: true, round: null, ...(window.__uifbConfig || {}) };
 
   const host = document.createElement('div');
@@ -427,7 +429,7 @@
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
     render();
-    if (open) { autoGrow($('input')); $('input').focus(); }
+    if (open) { autoGrow($('input')); if (!touchScreen()) $('input').focus(); }
   };
 
   function stopPick() {
@@ -470,7 +472,7 @@
     const repicked = pickFor;
     pickFor = null;
     stopPick();
-    if (!repicked) $('input').focus();
+    if (!repicked && !touchScreen()) $('input').focus();
   }
   function onKey(e) { if (e.key === 'Escape') { pickFor = null; stopPick(); } }
   function startPick() {
