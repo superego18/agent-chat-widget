@@ -58,7 +58,7 @@
   .where button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; }
   form { display: flex; gap: 6px; padding: 8px 10px 10px; align-items: flex-end; }
   textarea { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
-  form textarea { resize: vertical; max-height: 50vh; }
+  form textarea { resize: vertical; height: 80px; max-height: 50vh; }
   form button { height: 40px; flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   .drafts { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #f6f5f1; }
   .drafts[hidden], .msgs[hidden], form[hidden], .chipbtn[hidden] { display: none; }
@@ -356,7 +356,7 @@
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
     render();
-    if (open) $('input').focus();
+    if (open) { autoGrow($('input')); $('input').focus(); }
   };
 
   function stopPick() {
@@ -433,14 +433,26 @@
   // 입력칸: 글이 길어지면 자동으로 늘어나고(화면 절반까지), 오른쪽 아래 모서리를 끌어 직접 키우거나 줄일 수도 있다.
   // 입력칸은 대화 창 높이의 40%까지만 커진다. 커진 만큼 대화 목록이 줄어들 뿐 겹치지 않고, 아래 끝을 보던 중이면 계속 아래 끝을 보여 준다.
   const inputMax = () => Math.round($('panel').getBoundingClientRect().height * 0.4) || 200;
+  // 직접 끌어 정한 높이는 기억해서 다음에도 그 높이로 시작하고, 글을 비우면 그 높이로 돌아간다(기본 80px).
+  let inputBase = null;
+  try { inputBase = Number(localStorage.getItem('__uifb_inputH')) || null; } catch {}
   function autoGrow(el) {
     const max = inputMax();
     el.style.maxHeight = max + 'px';
-    if (!el.value) { el.style.height = ''; return; }
+    if (!el.value) { el.style.height = inputBase ? Math.min(inputBase, max) + 'px' : ''; return; }
     if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
   }
   $('input').addEventListener('input', () => autoGrow($('input')));
-  $('input').addEventListener('pointerdown', () => { $('input').style.maxHeight = inputMax() + 'px'; });
+  $('input').addEventListener('pointerdown', () => {
+    const el = $('input');
+    el.style.maxHeight = inputMax() + 'px';
+    const before = el.offsetHeight;
+    addEventListener('pointerup', () => {
+      if (el.offsetHeight === before) return;
+      inputBase = el.offsetHeight;
+      try { localStorage.setItem('__uifb_inputH', String(inputBase)); } catch {}
+    }, { once: true });
+  });
   {
     let gap = 0;
     $('msgs').addEventListener('scroll', () => { const b = $('msgs'); gap = b.scrollHeight - b.scrollTop - b.clientHeight; });
