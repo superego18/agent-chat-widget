@@ -62,7 +62,9 @@
     header { padding: 10px 12px 8px; }
     .msgs, .drafts { padding: 10px 10px 14px; }
     .msg { font-size: 15px; max-width: 92%; }
-    textarea { font-size: 16px; }
+    /* iPhone 은 16px 보다 작은 입력칸을 누르면 화면을 확대하므로, 모든 입력칸·선택칸을 16px 로 둔다(아래 일반 규칙보다 앞에 있어 !important) */
+    textarea, input, select { font-size: 16px !important; }
+    .labels .newlb { width: 110px; }
   }
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
   .chipbtn { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
