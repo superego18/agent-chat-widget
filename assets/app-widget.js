@@ -327,12 +327,14 @@
   let key = '';
   async function poll() {
     try {
-      const [c, ss, dd, sv] = await Promise.all([
+      const [c, ss, dd, sv, pf] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
         fetch('/__uifb/api/sessions').then((r) => r.json()),
         fetch('/__uifb/api/drafts').then((r) => r.json()),
         fetch('/__uifb/api/seen').then((r) => r.json()).catch(() => ({})),
+        fetch('/__uifb/api/prefs').then((r) => r.json()).catch(() => null),
       ]);
+      if (pf && JSON.stringify(pf) !== JSON.stringify(prefs)) applyPrefs(pf);
       // 다른 화면에서 읽은 것을 가져온다(더 나중 시각만).
       let seenFromServer = false;
       for (const [id, at] of Object.entries(sv || {})) {
@@ -452,7 +454,6 @@
   const inputMax = () => Math.round($('panel').getBoundingClientRect().height * 0.4) || 200;
   // 직접 끌어 정한 높이는 기억해서 다음에도 그 높이로 시작하고, 글을 비우면 그 높이로 돌아간다(기본 80px).
   let inputBase = null;
-  try { inputBase = Number(localStorage.getItem('__uifb_inputH')) || null; } catch {}
   function autoGrow(el) {
     const max = inputMax();
     el.style.maxHeight = max + 'px';
@@ -467,7 +468,7 @@
     addEventListener('pointerup', () => {
       if (el.offsetHeight === before) return;
       inputBase = el.offsetHeight;
-      try { localStorage.setItem('__uifb_inputH', String(inputBase)); } catch {}
+      savePrefs({ inputH: inputBase });
     }, { once: true });
   });
   {
@@ -632,24 +633,39 @@
     $('panel').style.width = w + 'px';
     $('panel').style.height = h + 'px';
   }
+  // 창 크기와 입력칸 높이는 리뷰 서버(prefs.json)에 두어 앱 화면·리뷰 페이지가 함께 쓰고, 데스크톱(768px 이상)과 모바일은 따로 기억한다.
   let size = null;
-  try { size = JSON.parse(localStorage.getItem('__uifb_size') || 'null'); } catch {}
-  applySize(size);
-  addEventListener('resize', () => applySize(size));
+  let prefs = {};
+  let dragging = false;
+  const device = () => (innerWidth < 768 ? 'mobile' : 'desktop');
+  const savePrefs = (patch) => fetch('/__uifb/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device(), ...patch }) }).then((r) => r.json()).then((p) => { prefs = p; }).catch(() => {});
+  function applyPrefs(p) {
+    prefs = p || {};
+    if (dragging) return;
+    const mine = prefs[device()] || {};
+    size = mine.panel || null;
+    if (size) applySize(size);
+    else { $('panel').style.width = ''; $('panel').style.height = ''; }
+    inputBase = mine.inputH || null;
+    if (!$('input').value) autoGrow($('input'));
+  }
+  addEventListener('resize', () => applyPrefs(prefs));
   $('grip').addEventListener('pointerdown', (e) => {
     e.preventDefault();
     const r = $('panel').getBoundingClientRect();
     const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
     $('grip').setPointerCapture(e.pointerId);
+    dragging = true;
     const move = (ev) => { size = { w: start.w + (ev.clientX - start.x), h: start.h - (ev.clientY - start.y) }; applySize(size); };
     const up = () => {
       $('grip').removeEventListener('pointermove', move);
-      try { localStorage.setItem('__uifb_size', JSON.stringify(size)); } catch {}
+      dragging = false;
+      savePrefs({ panel: size });
     };
     $('grip').addEventListener('pointermove', move);
     $('grip').addEventListener('pointerup', up, { once: true });
   });
-  $('grip').addEventListener('dblclick', () => { size = null; $('panel').style.width = ''; $('panel').style.height = ''; try { localStorage.removeItem('__uifb_size'); } catch {} });
+  $('grip').addEventListener('dblclick', () => { size = null; $('panel').style.width = ''; $('panel').style.height = ''; savePrefs({ panel: null }); });
 
   poll();
   setInterval(poll, 3000);
