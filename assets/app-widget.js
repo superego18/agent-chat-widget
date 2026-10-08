@@ -68,7 +68,7 @@
     .msg { font-size: 15px; max-width: 92%; }
     /* iPhone 은 16px 보다 작은 입력칸을 누르면 화면을 확대하므로, 모든 입력칸·선택칸을 16px 로 둔다(아래 일반 규칙보다 앞에 있어 !important) */
     textarea, input, select { font-size: 16px !important; }
-    .labels .newlb { width: 110px; }
+    .cats .newlb { width: 110px; }
   }
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
   .chipbtn { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
@@ -85,8 +85,16 @@
   .dsheet { position: absolute; left: 0; right: 0; z-index: 3; max-height: 62%; display: flex; flex-direction: column; background: #f6f5f1; border-top: 1px solid rgba(0,0,0,.12); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 24px rgba(0,0,0,.14); animation: sheetup .16s ease-out; }
   .dsheet[hidden] { display: none; }
   .cats { display: contents; }
-  .cats .cat { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid #c7c9f5; background: #eef0ff; color: #3730a3; cursor: pointer; white-space: nowrap; }
+  /* 분류 칩 한 줄: 짧게 누르면 "나중에" 담을 분류(진한 색), 꾹 누르면 그 분류 보관함 열기(▾). 누르는 동안 칩이 차오른다. */
+  .cats .cat { position: relative; overflow: hidden; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid #c7c9f5; background: #eef0ff; color: #3730a3; cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform .12s; }
   .cats .cat[aria-pressed="true"] { background: #4f46e5; color: #fff; border-color: transparent; }
+  .cats .cat.open { box-shadow: 0 0 0 2px #fff, 0 0 0 3px #4f46e5; }
+  .cats .cat .fill { position: absolute; inset: 0; background: rgba(79,70,229,.35); transform-origin: left; transform: scaleX(0); pointer-events: none; }
+  .cats .cat.pressing { transform: scale(.95); }
+  .cats .cat.pressing .fill { transform: scaleX(1); transition: transform .5s linear; }
+  .cats .cat.pop { animation: catpop .25s; }
+  @keyframes catpop { 50% { transform: scale(1.12); } }
+  .cats .newlb { width: 84px; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px dashed rgba(0,0,0,.2); background: #fff; color: #5a5852; }
   .dsheet .dhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 0; font-size: 12px; font-weight: 600; color: #3730a3; }
   .dsheet .dhead button { border: 0; background: none; font-size: 12px; color: #5a5852; cursor: pointer; padding: 2px 4px; }
   @keyframes sheetup { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -106,11 +114,6 @@
   .dfoot[hidden] { display: none; }
   .dfoot button { margin-left: auto; border: 0; border-radius: 7px; padding: 8px 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   .dfoot button:disabled { opacity: .4; cursor: default; }
-  .labels { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 10px 0; font-size: 11px; color: #8f8c84; }
-  .labels .lb { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px dashed rgba(0,0,0,.2); background: #fff; color: #5a5852; cursor: pointer; }
-  .labels .newlb { width: 84px; cursor: text; font: inherit; font-size: 11px; }
-  .labels .lb[aria-pressed="true"] { border-style: solid; border-color: #4f46e5; background: #eef0ff; color: #3730a3; font-weight: 600; }
-  .labels[hidden] { display: none; }
   .dgroup { display: grid; gap: 6px; }
   .dgroup > header { display: flex; gap: 6px; align-items: center; padding: 0; border: 0; font-size: 12px; font-weight: 600; color: #3730a3; }
   .dgroup > header .fold { border: 0; background: none; cursor: pointer; font: inherit; color: inherit; padding: 0; }
@@ -134,7 +137,6 @@
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <div class="labels" id="labels" aria-label="보관 분류"></div>
   <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
 <div class="hint" id="hint" hidden>의견을 남길 곳을 누르세요 · Esc 취소</div>
@@ -568,24 +570,70 @@
     $('draftsBtn').setAttribute('aria-pressed', String(showDrafts && sheetLabel === null));
     const inLabel = sheetLabel === null ? n : mine().filter((d) => (d.label || '') === sheetLabel).length;
     $('dtitle').textContent = sheetLabel === null ? (n ? `보관함 ${n}개` : '보관함') : `보관함 · ${sheetLabel || '미분류'} ${inLabel}개`;
-    // 분류마다 바로 여는 버튼(보관함 버튼 옆). 누르면 그 분류만 담긴 시트가 올라온다.
-    const counts = new Map();
+    renderCats();
+  }
+
+  // 분류 칩 한 줄(보관함 버튼 옆). 한 번에 한 가지 일만 하도록 누르는 길이로 나눈다.
+  // 짧게 = "나중에"로 담을 분류 정하기(진한 색), 꾹(0.5초) = 그 분류 보관함 열기. 열린 칩은 짧게 눌러도 닫힌다.
+  const HOLD = 500;
+  function renderCats() {
+    const counts = new Map([['', 0], ...allLabels().map((l) => [l, 0])]);
     for (const d of mine()) counts.set(d.label || '', (counts.get(d.label || '') || 0) + 1);
-    const key = JSON.stringify([...counts, sheetLabel, showDrafts]);
-    if ($('cats').dataset.key !== key) {
-      $('cats').dataset.key = key;
-      $('cats').textContent = '';
-      for (const [name, c] of [...counts].sort((a, b) => (a[0] ? a[0] : '\uffff').localeCompare(b[0] ? b[0] : '\uffff', 'ko'))) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'cat';
-        const on = showDrafts && sheetLabel === name;
-        b.textContent = `${name || '미분류'} ${c}${on ? ' ▾' : ''}`;
-        b.setAttribute('aria-pressed', String(on));
-        b.onclick = () => (on ? setDraftsView(false) : openSheet(name));
-        $('cats').append(b);
-      }
+    const box = $('cats');
+    const key = JSON.stringify([activeTab, [...counts], sheetLabel, showDrafts, draftLabel]);
+    if (box.dataset.key === key || root.activeElement?.classList.contains('newlb') || box.querySelector('.pressing')) return; // 새 분류 이름을 쓰는 중이거나 누르는 중이면 다시 그리지 않는다
+    box.dataset.key = key;
+    box.textContent = '';
+    for (const [name, c] of [...counts].sort((a, b) => (a[0] ? a[0] : '\uffff').localeCompare(b[0] ? b[0] : '\uffff', 'ko'))) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cat' + (showDrafts && sheetLabel === name ? ' open' : '');
+      b.title = '짧게: 나중에 담을 분류 · 꾹: 이 분류 보관함 열기';
+      b.innerHTML = '<span class="fill"></span>';
+      b.append(`${name || '미분류'} ${c}${showDrafts && sheetLabel === name ? ' ▾' : ''}`);
+      b.setAttribute('aria-pressed', String((draftLabel || '') === name));
+      holdable(b, () => setDraftLabel(name || null), () => (showDrafts && sheetLabel === name ? setDraftsView(false) : openSheet(name)), () => showDrafts && sheetLabel === name);
+      box.append(b);
     }
+    // 새 분류는 그 자리에서 이름을 쓰고 Enter(취소는 Esc). 만들면 그 분류가 담을 분류가 된다.
+    const add = document.createElement('input');
+    add.className = 'newlb';
+    add.placeholder = '+ 새 분류';
+    add.setAttribute('aria-label', '새 분류 이름');
+    add.maxLength = 30;
+    add.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); if (v) setDraftLabel(v); }
+      if (e.key === 'Escape') add.value = '';
+    };
+    box.append(add);
+  }
+  // 짧게 누르면 tap, 꾹 누르면 hold. 누르는 동안 칩이 차오르고, 다 차면 튀어 오르며 (안드로이드는) 짧게 진동한다.
+  // isOpen 이 참이면 짧게 눌러도 hold(닫기)를 한다. 칩 줄을 스크롤하느라 움직이면 취소한다.
+  function holdable(el, tap, hold, isOpen) {
+    let t = null, start = null, long = false;
+    const cancel = () => { clearTimeout(t); t = null; el.classList.remove('pressing'); };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button) return;
+      start = { x: e.clientX, y: e.clientY }; long = false;
+      el.classList.add('pressing');
+      t = setTimeout(() => {
+        t = null; long = true;
+        el.classList.remove('pressing'); el.classList.add('pop');
+        navigator.vibrate?.(15);
+        hold();
+      }, HOLD);
+    });
+    el.addEventListener('pointermove', (e) => { if (t && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) { cancel(); start = null; } });
+    el.addEventListener('pointercancel', () => { cancel(); start = null; });
+    el.addEventListener('pointerleave', () => { if (t) { cancel(); start = null; } });
+    el.addEventListener('pointerup', () => {
+      const was = !!t; cancel();
+      if (!start || long || !was) return;
+      start = null;
+      if (isOpen()) hold(); else tap();
+    });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.shiftKey || isOpen() ? hold() : tap(); } }); // 키보드: Enter 짧게, Shift+Enter 열기
   }
 
   // 저장한 위치가 지금 화면에서도 그대로인지. 같은 화면이 아니면 판단하지 않는다.
@@ -757,6 +805,8 @@
     if (on) { placeSheet(); renderDrafts(); }
   }
   $('dclose').onclick = () => setDraftsView(false);
+  // 보관함이 열려 있을 때 대화 목록(시트 바깥)을 누르면 닫는다.
+  $('msgs').addEventListener('pointerdown', () => { if (showDrafts) setDraftsView(false); });
   $('draftsBtn').onclick = () => (showDrafts && sheetLabel === null ? setDraftsView(false) : openSheet(null));
   $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
   $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
@@ -869,48 +919,18 @@
   const folded = new Set();
   // 분류와 고른 분류는 세션 탭마다 따로다(다른 세션의 분류가 섞이지 않게).
   const allLabels = () => [...new Set([...mine().map((d) => d.label).filter(Boolean), ...(draftLabel ? [draftLabel] : [])])].sort((a, b) => a.localeCompare(b, 'ko'));
-  function renderLabels() {
-    const box = $('labels');
-    const key = JSON.stringify([activeTab, draftLabel, allLabels()]);
-    if (box.dataset.key === key || box.contains(root.activeElement)) return;
-    box.dataset.key = key;
-    box.textContent = '';
-    const t = document.createElement('span');
-    t.textContent = '나중에 담을 분류';
-    box.append(t);
-    for (const name of allLabels()) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'lb';
-      b.textContent = name;
-      b.setAttribute('aria-pressed', String(name === draftLabel));
-      b.onclick = () => setDraftLabel(name === draftLabel ? null : name);
-      box.append(b);
-    }
-    // 새 분류는 그 자리에서 이름을 쓰고 Enter(취소는 Esc)
-    const add = document.createElement('input');
-    add.className = 'lb newlb';
-    add.placeholder = '+ 새 분류';
-    add.setAttribute('aria-label', '새 분류 이름');
-    add.maxLength = 30;
-    add.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); if (v) setDraftLabel(v); }
-      if (e.key === 'Escape') add.value = '';
-    };
-    box.append(add);
-  }
   function setDraftLabel(v) {
     draftLabel = v;
     labelSetAt = Date.now();
     prefs.draftLabels = { ...(prefs.draftLabels || {}), [activeTab]: v };
     savePrefs({ draftLabel: v, session: activeTab });
-    if ($('labels').contains(root.activeElement)) root.activeElement.blur();
-    renderLabels();
+    if ($('cats').contains(root.activeElement)) root.activeElement.blur();
+    updateDraftsBtn();
   }
   setInterval(() => {
     const saved = prefs?.draftLabels?.[activeTab] ?? null;
     if (saved !== draftLabel && Date.now() - labelSetAt > 5000) draftLabel = saved;
-    renderLabels();
+    renderCats();
   }, 1000);
 
   $('close').onclick = () => $('btn').click();
