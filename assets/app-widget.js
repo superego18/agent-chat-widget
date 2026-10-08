@@ -1,8 +1,10 @@
-// 실제 앱 화면에 붙는 피드백 위젯. app-proxy.mjs 가 HTML 응답에 넣는다.
-// 앱 스타일과 섞이지 않게 Shadow DOM 안에 그린다. 메시지는 리뷰 대화 기록(chat.json)에 쌓인다.
+// 대화/피드백 위젯. 앱 화면(app-proxy.mjs 가 HTML 응답에 넣음)과 리뷰 페이지(review-template.html 이 불러옴)가 같은 이 파일을 쓴다.
+// 페이지 스타일과 섞이지 않게 Shadow DOM 안에 그린다. 메시지는 리뷰 대화 기록(chat.json)에 쌓인다.
+// 리뷰 페이지는 불러오기 전에 window.__uifbConfig = { context: 'review', round, label, pick: false } 를 둔다.
 (() => {
   if (window.__uifb) return;
   window.__uifb = true;
+  const CFG = { context: 'app', label: '앱 화면', pick: true, round: null, ...(window.__uifbConfig || {}) };
 
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;inset:auto;z-index:2147483647;';
@@ -76,6 +78,7 @@
   .dfoot button { margin-left: auto; border: 0; border-radius: 7px; padding: 8px 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   .dfoot button:disabled { opacity: .4; cursor: default; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+  .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
   .hint[hidden] { display: none; }
   .box { position: fixed; pointer-events: none; outline: 2px solid #4f46e5; background: rgba(79,70,229,.08); border-radius: 3px; }
@@ -85,7 +88,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><b>대화/피드백 · 앱 화면</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
+  <header><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="drafts" id="drafts" hidden></div>
   <div class="dfoot" id="dfoot" hidden><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div>
@@ -97,6 +100,8 @@
 <div class="box" id="box" hidden></div>`;
 
   const $ = (s) => root.getElementById(s);
+  $('heading').textContent = `대화/피드백 · ${CFG.label}`;
+  if (!CFG.pick) $('pick').classList.add('off'); // 리뷰 페이지는 이미지 핀으로 위치를 남긴다
   let messages = [];
   let sessions = [];
   const transcripts = {};
@@ -419,7 +424,7 @@
     $('input').value = '';
     autoGrow($('input'));
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: 'app', where: where || { url: location.pathname + location.search } };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
@@ -598,7 +603,7 @@
     $('input').value = '';
     autoGrow($('input'));
     try {
-      await draftsApi({ action: 'add', to: activeTab, text, context: 'app', where: where || { url: location.pathname + location.search } });
+      await draftsApi({ action: 'add', to: activeTab, text, context: CFG.context, round: CFG.round, ...(CFG.pick ? { where: where || { url: location.pathname + location.search } } : {}) });
       where = null;
       $('where').hidden = true;
       updateDraftsBtn();
