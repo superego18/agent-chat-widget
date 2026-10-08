@@ -123,7 +123,7 @@
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <div class="labels" id="labels" aria-label="보관 분류"></div>
-  <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button><button type="submit">보내기</button></form>
+  <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
 <div class="hint" id="hint" hidden>의견을 남길 곳을 누르세요 · Esc 취소</div>
 <div class="box" id="box" hidden></div>`;
