@@ -200,7 +200,13 @@
   function timeline(tab) {
     return [...messages, ...Object.values(transcripts).flat()]
       .filter((m) => tab === 'all' || ownerOf(m) === tab)
-      .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      .sort((a, b) => orderAt(a).localeCompare(orderAt(b)));
+  }
+  // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
+  function orderAt(m) {
+    if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
+    if (m.id <= (delivered[m.to] || 0)) return String(delivered._at?.[m.id] || m.at);
+    return '\uffff' + m.at;
   }
 
   function renderTabs() {

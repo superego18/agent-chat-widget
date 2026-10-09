@@ -91,12 +91,17 @@ function markHandling() {
   } catch {}
 }
 
-// 세션이 어디까지 받아 갔는지(delivered.json). 대화창이 사용자 메시지 옆에 "읽음"을 붙이는 근거다.
-function markDelivered(id) {
+// 세션이 어디까지 받아 갔는지(delivered.json). 대화창이 사용자 메시지 옆에 "읽음"을 붙이고,
+// 받아 간 시각(_at)에 맞춰 그 메시지를 대화 순서에 놓는 근거다.
+function markDelivered(ids) {
   const file = path.join(dir, 'delivered.json');
   let d = {};
   try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-  if (!(d[sid] >= id)) fs.writeFileSync(file, JSON.stringify({ ...d, [sid]: id }, null, 2) + '\n');
+  const now = new Date().toISOString();
+  const at = { ...(d._at || {}) };
+  for (const id of ids) at[id] ||= now;
+  const keep = Object.fromEntries(Object.entries(at).sort((a, b) => b[0] - a[0]).slice(0, 500));
+  fs.writeFileSync(file, JSON.stringify({ ...d, [sid]: Math.max(d[sid] || 0, ...ids), _at: keep }, null, 2) + '\n');
 }
 
 function finish(code, lines) {
@@ -119,7 +124,7 @@ function check() {
         lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
       }
     }
-    markDelivered(Math.max(...pending.map((m) => m.id)));
+    markDelivered(pending.map((m) => m.id));
     finish(0, lines);
   }
   if (handlesDone) {
