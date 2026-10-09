@@ -52,7 +52,7 @@ export function lanAuth({ dir, lan }) {
     },
     // 웹소켓 연결은 쿠키로만 확인한다.
     checkUpgrade: (req) => ok(req),
-    // 다른 기기에서 열 주소. 맨 앞은 와이파이를 바꿔도 그대로인 이름 주소(<컴퓨터 이름>.local, macOS Bonjour)이고,
+    // 다른 기기에서 열 주소. Tailscale 주소 다음은 와이파이를 바꿔도 그대로인 이름 주소(<컴퓨터 이름>.local, macOS Bonjour)이고,
     // 뒤는 지금 네트워크 주소다. 키 쿠키는 주소마다 따로라, 이름 주소로 한 번 들어오면 와이파이가 바뀌어도 다시 넣지 않는다.
     urls(port) {
       if (!lan) return [];
@@ -64,7 +64,20 @@ export function lanAuth({ dir, lan }) {
       if (process.platform === 'darwin') {
         try { host = execFileSync('scutil', ['--get', 'LocalHostName'], { encoding: 'utf8' }).trim(); } catch {}
       }
-      return [...(host ? [`http://${host}.local:${port}/?k=${key}`] : []), ...ips];
+      // Tailscale이 켜져 있으면 밖(LTE 등)에서도 열리는 이름 주소(<기기>.<tailnet>.ts.net)를 맨 앞에 둔다.
+      let ts = '';
+      for (const bin of ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']) {
+        try {
+          const d = JSON.parse(execFileSync(bin, ['status', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+          if (d.BackendState === 'Running' && d.Self?.DNSName) ts = d.Self.DNSName.replace(/\.$/, '');
+          break;
+        } catch {}
+      }
+      return [
+        ...(ts ? [`http://${ts}:${port}/?k=${key}`] : []),
+        ...(host ? [`http://${host}.local:${port}/?k=${key}`] : []),
+        ...ips,
+      ];
     },
   };
 }
