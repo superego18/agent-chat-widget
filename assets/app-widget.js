@@ -124,6 +124,13 @@
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
   .hint[hidden] { display: none; }
+  .hint { display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+  .seg { display: flex; background: rgba(255,255,255,.14); border-radius: 7px; padding: 2px; }
+  .seg button { border: 0; background: none; color: #fff; font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 5px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: #fff; color: #1c1b18; font-weight: 600; }
+  .hcancel { border: 0; background: none; color: #c7c4bc; font: inherit; font-size: 12px; cursor: pointer; padding: 4px 2px; }
+  .hint.bottom { top: auto; bottom: 16px; }
+  @media (max-width: 767px) { .panel.picking { height: calc(100dvh - 64px) !important; } }
   .box { position: fixed; pointer-events: none; outline: 2px solid #4f46e5; background: rgba(79,70,229,.08); border-radius: 3px; }
   .box[hidden] { display: none; }
 </style>
@@ -139,7 +146,7 @@
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
-<div class="hint" id="hint" hidden>의견을 남길 곳을 누르세요 · Esc 취소</div>
+<div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="box" id="box" hidden></div>`;
 
   const $ = (s) => root.getElementById(s);
@@ -151,6 +158,7 @@
   let activeTab = null;
   try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
+  const WIDGET_PREFIX = '대화창 › '; // 대화창 안을 찍은 위치의 선택자 앞에 붙인다
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
   let seen = {};
   try { seen = JSON.parse(localStorage.getItem('__uifb_seen') || '{}'); } catch {}
@@ -448,31 +456,59 @@
     if (open) { autoGrow($('input')); if (!touchScreen()) $('input').focus(); }
   };
 
+  // 찍을 화면: 'app'(대화창을 숨기고 앱을 찍음) 또는 'widget'(대화창만 보이고 그 안을 찍음). 한 번에 하나만 보인다.
+  let pickTarget = 'app';
+  function setPickTarget(t) {
+    pickTarget = t;
+    $('panel').hidden = t === 'app';
+    $('hint').classList.toggle('bottom', t === 'widget'); // 대화창 머리를 가리지 않게 아래로
+    $('panel').classList.toggle('picking', t === 'widget'); // 폰: 안내줄 자리만큼 대화창을 줄여 입력칸을 가리지 않게
+    $('box').hidden = true;
+    root.querySelectorAll('.seg [data-t]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.t === t)));
+  }
+  root.querySelectorAll('.seg [data-t]').forEach((b) => { b.onclick = () => setPickTarget(b.dataset.t); });
+  // 대화창을 찍는 동안에는 대화창 버튼·칩이 눌리지 않게 한다(안내줄은 제외).
+  function blockWidget(e) {
+    if (pickTarget !== 'widget') return;
+    const path = e.composedPath();
+    if (!path.includes(host) || path.includes($('hint'))) return;
+    e.stopPropagation();
+    if (e.type === 'mousedown') e.preventDefault();
+  }
+  function pickedEl(e) {
+    const path = e.composedPath();
+    if (path.includes($('hint'))) return null;
+    if (pickTarget === 'widget') return path.includes(host) && path[0]?.nodeType === 1 ? path[0] : null;
+    return path.includes(host) ? null : document.elementFromPoint(e.clientX, e.clientY);
+  }
   function stopPick() {
     $('hint').hidden = true;
     $('box').hidden = true;
     document.removeEventListener('mousemove', onMove, true);
     document.removeEventListener('click', onPick, true);
     document.removeEventListener('keydown', onKey, true);
+    for (const t of ['pointerdown', 'mousedown']) document.removeEventListener(t, blockWidget, true);
+    setPickTarget('app');
     $('panel').hidden = false;
   }
   function onMove(e) {
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el || el === host) return;
+    const el = pickTarget === 'widget' ? root.elementFromPoint(e.clientX, e.clientY) : document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === host || (pickTarget === 'widget' && $('hint').contains(el))) { $('box').hidden = true; return; }
     const r = el.getBoundingClientRect();
     Object.assign($('box').style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
     $('box').hidden = false;
   }
   function onPick(e) {
-    if (e.composedPath().includes(host)) return;
+    if (e.composedPath().includes($('hint'))) return;
+    if (pickTarget === 'app' && e.composedPath().includes(host)) return;
     e.preventDefault();
     e.stopPropagation();
-    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const el = pickedEl(e);
     if (el) {
       const r = el.getBoundingClientRect();
       where = {
         url: here(),
-        selector: selectorOf(el),
+        selector: (pickTarget === 'widget' ? WIDGET_PREFIX : '') + selectorOf(el),
         text: (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80),
         rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
         viewport: { w: innerWidth, h: innerHeight },
@@ -481,7 +517,7 @@
         draftsApi({ action: 'update', id: pickFor, where });
         where = null;
       } else {
-        $('whereText').textContent = '위치: ' + (where.text || where.selector);
+        $('whereText').textContent = '위치: ' + (pickTarget === 'widget' ? '대화창 › ' : '') + (where.text || where.selector.replace(WIDGET_PREFIX, ''));
         $('where').hidden = false;
       }
     }
@@ -491,9 +527,11 @@
     if (!repicked && !touchScreen()) $('input').focus();
   }
   function onKey(e) { if (e.key === 'Escape') { pickFor = null; stopPick(); } }
+  $('pickCancel').onclick = () => { pickFor = null; stopPick(); };
   function startPick() {
-    $('panel').hidden = true;
+    setPickTarget('app');
     $('hint').hidden = false;
+    for (const t of ['pointerdown', 'mousedown']) document.addEventListener(t, blockWidget, true);
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onPick, true);
     document.addEventListener('keydown', onKey, true);
@@ -651,7 +689,7 @@
     if (!w?.selector) return null;
     if (w.url !== here()) return { k: 'other', label: `다른 화면 · ${w.url}` };
     let el = null;
-    try { el = document.querySelector(w.selector); } catch {}
+    try { el = w.selector.startsWith(WIDGET_PREFIX) ? root.querySelector(w.selector.slice(WIDGET_PREFIX.length)) : document.querySelector(w.selector); } catch {}
     const now = el ? (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80) : '';
     if (!el || (w.text && now !== w.text)) return { k: 'changed', label: '화면이 바뀜 · 다시 찍기 권장' };
     return { k: 'same', label: '위치 그대로', el };
