@@ -52,6 +52,13 @@
   @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
   .tbadge { display: inline-block; min-width: 15px; height: 15px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 10px; line-height: 15px; text-align: center; padding: 0 4px; margin-left: 4px; font-weight: 600; }
   .newline { align-self: stretch; text-align: center; font-size: 11px; font-weight: 600; color: #4f46e5; margin: 4px 0; }
+  /* 세션이 아직 안 읽은 메시지: 맨 아래에 붙잡혀 떠 있다가, 읽히면 대화 흐름으로 떨어진다. */
+  .msg.user.held { background: #eef0ff; color: #3730a3; box-shadow: inset 0 0 0 1.5px rgba(79,70,229,.45); animation: hold 1.6s ease-in-out infinite; }
+  .msg.user.held .tag { background: rgba(79,70,229,.12); }
+  .msg.user.drop { animation: drop .45s cubic-bezier(.3,1.4,.5,1); }
+  @keyframes hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  @keyframes drop { from { transform: translateY(-16px); opacity: .55; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .msg.user.held, .msg.user.drop { animation: none; } }
   .msg.agent.unread { box-shadow: 0 0 0 1px rgba(0,0,0,.1), -3px 0 0 #4f46e5; }
   .peek { position: fixed; left: 16px; bottom: 124px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
   .peek[hidden] { display: none; }
@@ -205,10 +212,18 @@
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
   // 일하는 중에 받아 갔으면(_after) 그 일이 끝난 시각(_read)에 놓고, 아직 안 끝났으면 맨 아래에 둔다.
   const waitingTurn = (m) => delivered._after?.[m.id] && !delivered._read?.[m.id];
+  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && (!(m.id <= (delivered[m.to] || 0)) || waitingTurn(m));
+  let wasHeld = new Set();
   function orderAt(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
-    if (!(m.id <= (delivered[m.to] || 0)) || waitingTurn(m)) return '\uffff' + m.at;
-    return String(delivered._read?.[m.id] || delivered._at?.[m.id] || m.at);
+    if (isHeld(m)) return '\uffff' + m.at;
+    const read = delivered._read?.[m.id];
+    if (!read) return String(delivered._at?.[m.id] || m.at);
+    // 일이 끝날 때(Stop) 마지막 답이 거의 같은 순간에 기록되므로, 몇 초 안의 그 세션 답 뒤에 놓는다.
+    let key = read;
+    const limit = new Date(Date.parse(read) + 5000).toISOString();
+    for (const x of messages) if (x.from === 'agent' && x.session === m.to && x.at > key && x.at <= limit) key = x.at;
+    return key + '~';
   }
 
   function renderTabs() {
@@ -259,6 +274,8 @@
     const shown = items.slice(-120);
     const firstUnread = shown.findIndex(isUnread);
     let newLine = null;
+    const heldEls = [];
+    const nowHeld = new Set();
     for (const [i, m] of shown.entries()) {
       if (i === firstUnread) {
         newLine = document.createElement('p');
@@ -281,8 +298,11 @@
       const body = document.createElement('span');
       body.innerHTML = mdLite(m.text);
       d.append(tag, body, small);
+      if (isHeld(m)) { d.classList.add('held'); nowHeld.add(m.id); heldEls.push(d); continue; }
+      if (wasHeld.has(m.id)) d.classList.add('drop');
       box.append(d);
     }
+    wasHeld = nowHeld;
     const last = items[items.length - 1];
     const st = sessionById(activeTab)?.status;
     if (st && (st.state === 'working' || st.state === 'permission')) {
@@ -303,6 +323,7 @@
       w.textContent = last.id <= (delivered[ownerOf(last)] || 0) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
     }
+    box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
     if (scrollToUnread && !$('panel').hidden) {
       // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
       const pos = prefs.pos?.[activeTab];
@@ -447,7 +468,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
       if (k !== key) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();
