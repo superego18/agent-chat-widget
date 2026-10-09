@@ -80,6 +80,16 @@ try {
 
   if (input.hook_event_name === 'Stop') {
     await status('idle');
+    // 일하는 중에 받아 간 메시지(_after)는 지금 일이 끝났으니 이제 읽는다. 대화창이 그 시각(_read)에 메시지를 놓는다.
+    const file = path.join(dir, 'delivered.json');
+    const d = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const ids = Object.entries(d._after || {}).filter(([id, s]) => s === session.sessionId && !d._read?.[id]).map(([id]) => id);
+    if (ids.length) {
+      const now = new Date().toISOString();
+      const read = { ...(d._read || {}) };
+      for (const id of ids) read[id] = now;
+      fs.writeFileSync(file, JSON.stringify({ ...d, _read: Object.fromEntries(Object.entries(read).sort((a, b) => b[0] - a[0]).slice(0, 500)) }, null, 2) + '\n');
+    }
   }
 
   if (input.hook_event_name === 'Notification') {

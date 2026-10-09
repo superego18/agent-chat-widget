@@ -98,10 +98,14 @@ function markDelivered(ids) {
   let d = {};
   try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   const now = new Date().toISOString();
+  // 세션이 일하는 중에 받아 갔으면 하던 일을 끝낸 뒤에야 읽는다(_after: 메시지 → 세션). 끝난 시각은 중계 훅(Stop)이 _read 에 적는다.
+  let busy = false;
+  try { busy = ['working', 'permission'].includes(JSON.parse(fs.readFileSync(path.join(dir, `status-${sid}.json`), 'utf8')).state); } catch {}
+  const recent = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[0] - a[0]).slice(0, 500));
   const at = { ...(d._at || {}) };
-  for (const id of ids) at[id] ||= now;
-  const keep = Object.fromEntries(Object.entries(at).sort((a, b) => b[0] - a[0]).slice(0, 500));
-  fs.writeFileSync(file, JSON.stringify({ ...d, [sid]: Math.max(d[sid] || 0, ...ids), _at: keep }, null, 2) + '\n');
+  const after = { ...(d._after || {}) };
+  for (const id of ids) { at[id] ||= now; if (busy) after[id] = sid; }
+  fs.writeFileSync(file, JSON.stringify({ ...d, [sid]: Math.max(d[sid] || 0, ...ids), _at: recent(at), _after: recent(after) }, null, 2) + '\n');
 }
 
 function finish(code, lines) {

@@ -203,10 +203,12 @@
       .sort((a, b) => orderAt(a).localeCompare(orderAt(b)));
   }
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
+  // 일하는 중에 받아 갔으면(_after) 그 일이 끝난 시각(_read)에 놓고, 아직 안 끝났으면 맨 아래에 둔다.
+  const waitingTurn = (m) => delivered._after?.[m.id] && !delivered._read?.[m.id];
   function orderAt(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
-    if (m.id <= (delivered[m.to] || 0)) return String(delivered._at?.[m.id] || m.at);
-    return '\uffff' + m.at;
+    if (!(m.id <= (delivered[m.to] || 0)) || waitingTurn(m)) return '\uffff' + m.at;
+    return String(delivered._read?.[m.id] || delivered._at?.[m.id] || m.at);
   }
 
   function renderTabs() {
@@ -612,7 +614,7 @@
   let delivered = {};
   function readMark(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
-    if (m.id <= (delivered[m.to] || 0)) return ' · 읽음';
+    if (m.id <= (delivered[m.to] || 0)) return waitingTurn(m) ? ' · 받음(하던 일 끝나면 읽음)' : ' · 읽음';
     const s = sessionById(m.to);
     if (s?.status?.state === 'working' || s?.status?.state === 'permission') return ' · 안 읽음(작업 중이라 끝나면 읽음)';
     return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';
