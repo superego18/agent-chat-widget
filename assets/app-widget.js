@@ -59,6 +59,7 @@
   @keyframes hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @keyframes drop { from { transform: translateY(-16px); opacity: .55; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .msg.user.held, .msg.user.drop { animation: none; } }
+  .typing.stale { color: #b45309; }
   .msg.agent.unread { box-shadow: 0 0 0 1px rgba(0,0,0,.1), -3px 0 0 #4f46e5; }
   .peek { position: fixed; left: 16px; bottom: 124px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
   .peek[hidden] { display: none; }
@@ -313,6 +314,12 @@
       dots.innerHTML = '<i></i><i></i><i></i>';
       const label = document.createElement('span');
       label.textContent = st.state === 'permission' ? st.detail || '터미널에서 승인을 기다리는 중' : `작업 중 · ${st.detail || '생각하는 중'}`;
+      // 상태가 5분 넘게 그대로면 멈췄을 수 있다(긴 명령이거나, 답이 대화창으로 안 넘어왔거나). 사용자가 알 수 있게 적는다.
+      const still = Math.floor((Date.now() - Date.parse(st.at)) / 60_000);
+      if (st.state === 'working' && still >= 5) {
+        ty.classList.add('stale');
+        label.textContent += ` · ${still}분째 그대로예요. 답이 안 오면 터미널을 확인해 주세요`;
+      }
       ty.append(dots, label);
       box.append(ty);
     } else if (last && last.from === 'user' && last.context !== 'terminal') {
@@ -468,7 +475,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
       if (k !== key) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();

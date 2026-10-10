@@ -60,8 +60,13 @@ function isAutomatic(text) {
 
 try {
   const input = JSON.parse(await readStdin());
-  const dir = path.join(input.cwd || process.cwd(), '.ui-feedback');
   if (!/^[\w.-]+$/.test(String(input.session_id))) process.exit(0);
+  // 세션이 하위 폴더(.ui-feedback 안 포함)로 cd 해 있어도 찾도록, 위로 올라가며 이 세션이 등록된 .ui-feedback 을 찾는다.
+  let dir = null;
+  for (let d = path.resolve(input.cwd || process.cwd()); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.ui-feedback', 'sessions', `${input.session_id}.json`))) { dir = path.join(d, '.ui-feedback'); break; }
+    if (path.dirname(d) === d) process.exit(0);
+  }
   const session = JSON.parse(fs.readFileSync(path.join(dir, 'sessions', `${input.session_id}.json`), 'utf8'));
   const port = session.port || 4799;
   const base = { context: 'terminal', session: session.sessionId, agent: session.agent };
