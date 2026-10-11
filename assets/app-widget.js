@@ -20,7 +20,7 @@
 <style>
   :host { all: initial; }
   * { box-sizing: border-box; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
-  .btn { position: fixed; left: 16px; bottom: 72px; padding: 10px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; gap: 6px; align-items: center; }
+  .btn { position: fixed; left: 16px; bottom: 112px; padding: 10px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; gap: 6px; align-items: center; }
   /* 세션이 작업 중이면 버튼에 움직이는 점 세 개(승인 대기면 주황). 안 읽은 개수 배지와 따로 보인다. */
   .btn .work { display: inline-flex; gap: 2px; align-items: center; padding: 0 2px; }
   .btn .work[hidden] { display: none; }
@@ -30,7 +30,7 @@
   .rbtn { position: fixed; width: 34px; height: 34px; border-radius: 50%; border: 0; background: #fff; color: #1c1b18; font-size: 16px; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 4px 12px rgba(0,0,0,.18); }
   .btn[aria-expanded="true"] + .rbtn { display: none; }
   .btn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: #4f46e5; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
-  .panel { position: fixed; left: 16px; bottom: 124px; width: min(360px, calc(100vw - 32px)); height: min(520px, calc(100vh - 160px)); background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
+  .panel { position: fixed; left: 16px; bottom: 164px; width: min(360px, calc(100vw - 32px)); height: min(520px, calc(100vh - 200px)); background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
   .panel[hidden] { display: none; }
   .grip { position: absolute; right: 0; top: 0; width: 18px; height: 18px; cursor: nesw-resize; z-index: 2; touch-action: none; }
   .grip::after { content: ''; position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-right: 2px solid rgba(0,0,0,.25); border-top: 2px solid rgba(0,0,0,.25); border-radius: 0 3px 0 0; }
@@ -125,7 +125,7 @@
   @media (prefers-reduced-motion: reduce) { .msg.user.held, .msg.user.drop, .tabs .flow { animation: none; } }
   .typing.stale { color: #b45309; }
   .msg.agent.unread { box-shadow: 0 0 0 1px rgba(0,0,0,.1), -3px 0 0 #4f46e5; }
-  .peek { position: fixed; left: 16px; bottom: 124px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+  .peek { position: fixed; left: 16px; bottom: 164px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
   .peek[hidden] { display: none; }
   .peek b { display: block; font-size: 12px; color: #4f46e5; margin-bottom: 2px; }
   @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
@@ -1746,7 +1746,7 @@
   function applySize(sz) {
     if (!sz || innerWidth < 768) return; // 모바일은 화면을 채우는 창이라 크기를 정하지 않는다
     const w = Math.min(Math.max(300, sz.w), innerWidth - 32);
-    const h = Math.min(Math.max(320, sz.h), innerHeight - 140);
+    const h = Math.min(Math.max(320, sz.h), innerHeight - 180);
     $('panel').style.width = w + 'px';
     $('panel').style.height = h + 'px';
   }
@@ -1964,8 +1964,8 @@
   $('rbtn').onclick = () => location.reload();
   const placeRbtn = () => {
     const b = $('btn').getBoundingClientRect();
-    // 아래 오른쪽 끝에 맞춘다(왼쪽 아래 구석의 앱 개발 도구 단추, 예: Next.js 의 N 과 겹치지 않게).
-    $('rbtn').style.left = b.right - 34 + 'px';
+    // 여는 단추 바로 아래 왼쪽 정렬. 여는 단추를 바닥에서 112px 띄워, 왼쪽 아래 구석의 앱 개발 도구 단추(예: Next.js 의 N)와 겹치지 않는다.
+    $('rbtn').style.left = b.left + 'px';
     $('rbtn').style.top = b.bottom + 6 + 'px';
   };
   new ResizeObserver(placeRbtn).observe($('btn'));
