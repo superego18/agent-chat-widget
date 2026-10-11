@@ -1886,7 +1886,7 @@
       if (!r?.id) throw new Error('add');
       doneCid(kind, text);
       sentTexts.set(text, Date.now());
-      flyToDrafts(text, toDrafts ? () => $('draftsBtn') : () => [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
+      flyToDrafts(text, toDrafts ? () => $('draftsBtn') : () => (folded.has(HOLD_FOLD) && $('msgs').querySelector('.holdhead')) || [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
       if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
       render();
       $('msgs').scrollTop = $('msgs').scrollHeight;
