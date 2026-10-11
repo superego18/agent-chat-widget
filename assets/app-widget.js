@@ -2228,7 +2228,14 @@
   // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
   // 새로고침: 대화창 머리말과, 대화창을 닫았을 때 여는 단추 아래(화면 전체를 새로 읽는다).
   // 누르면 바로 돌기 시작해서 새로고침 중임을 보인다(화면이 다시 뜰 때까지 돈다).
-  const reloadNow = (b) => { b.classList.add('reloading'); requestAnimationFrame(() => setTimeout(() => location.reload(), 120)); };
+  // 직접 누른 새로고침도 세션이 부른 새로고침과 같은 "새로 고치는 중" 안내를 띄운다.
+  const reloadNow = (b) => {
+    b.classList.add('reloading');
+    flushCompose();
+    $('reloadCover').querySelector('span').textContent = '대화창을 새로 고치는 중이에요 · 잠시 손대지 마세요';
+    $('reloadCover').hidden = false;
+    requestAnimationFrame(() => setTimeout(() => location.reload(), 300));
+  };
   $('reload').onclick = () => reloadNow($('reload'));
   $('rbtn').onclick = () => reloadNow($('rbtn'));
   const placeRbtn = () => {
