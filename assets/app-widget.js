@@ -260,6 +260,11 @@
   form .bcol button { height: 38px; padding: 0 10px; font-size: 12.5px; }
   form .bcol button[type="submit"] { height: auto; flex: 1; min-height: 38px; } /* 끼워넣기가 없으면 보내기가 칸 높이를 다 채운다 */
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+  /* 보류 = 대화창 맨 아래 점선 말풍선과 같은 남색 점선, 보관함 = 보관함 창과 같은 베이지 상자 */
+  form #later, .msg.user.hold .hacts .tohold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #818cf8; }
+  form #stash, .msg.user.hold .hacts .tostash { background: #ece9e1; color: #57534e; box-shadow: inset 0 0 0 1px #d6d3cb, inset 0 -3px 0 #d6d3cb; }
+  form #later::before, form #stash::before, .msg.user.hold .hacts .tostash::before { margin-right: 3px; }
+  form #stash::before, .msg.user.hold .hacts .tostash::before { content: '▤'; }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
   .hint[hidden] { display: none; }
@@ -989,7 +994,7 @@
         acts.append(Object.assign(document.createElement('i'), { className: 'brk' })); // 고치기 단추와 나머지 단추를 두 줄로 나눈다
       } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; render(); editEl?.focus(); });
       mk('지우기', '', async () => { if (ed) holdEdit = null; await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
-      mk('보관함으로', '', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
+      mk('보관함으로', 'tostash', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
       // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
       const tgt = sessionById(d.to);
       if (tgt && tgt.tool !== 'codex' && ['working', 'permission'].includes(tgt.status?.state)) {
