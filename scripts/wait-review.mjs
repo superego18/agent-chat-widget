@@ -135,5 +135,5 @@ function check() {
   if (expiresAt && Date.now() > expiresAt) finish(1, [`TIMEOUT: ${minutes}분 동안 메시지나 완료 표시가 없어 감시를 끝냈습니다.`]);
 }
 
-timer = setInterval(check, 2000);
+timer = setInterval(check, 1000);
 check();

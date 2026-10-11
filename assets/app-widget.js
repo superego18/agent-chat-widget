@@ -740,6 +740,8 @@
       $('where').hidden = true;
       setReply(null);
       await poll();
+      // 세션이 쉬는 중이면 감시 명령이 1초 안에 받아 간다. 3초마다 확인하면 그동안 "안 읽음"으로 보여서, 보낸 직후 몇 초는 자주 확인한다.
+      for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500);
       render();
     } catch {
       $('input').value = text;
