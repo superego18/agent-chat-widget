@@ -48,6 +48,14 @@
   .msg.user.cancelled { background: #e7e5e0; color: #6b6860; box-shadow: none; }
   .msg.user.cancelled > span:not(.tag):not(.quote) { text-decoration: line-through; }
   .msg.user.cancelled .tag { background: rgba(0,0,0,.08); }
+  .msg .dh { display: block; font-size: 11px; opacity: .85; margin-bottom: 4px; }
+  .msg .ditem { display: block; }
+  .msg .ditem + .ditem { margin-top: 8px; }
+  .msg .meta { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .msg .meta span { font-size: 10.5px; line-height: 1.35; padding: 1px 6px; border-radius: 5px; background: rgba(255,255,255,.2); }
+  .msg.user.held .meta span, .msg.user.cancelled .meta span { background: rgba(79,70,229,.1); }
+  .msg .editdraft { display: block; }
+  .msg .editdraft .meta { margin: 3px 0 8px; }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .85; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
@@ -205,9 +213,10 @@
   let editing = null; // 말풍선 안에서 고치는 중인 내 메시지 { id, text }
   let editEl = null;
   async function resend(m) {
-    const text = (editing?.text || '').trim();
+    const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
+    const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
     if (!text) return;
-    const body = { from: 'user', text, to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.where ? { where: m.where } : {}) };
+    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.where ? { where: m.where } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       editing = null;
@@ -259,6 +268,41 @@
     replyTo = m ? m.id : null;
     $('reply').hidden = !m;
     if (m) { $('replyText').textContent = '↩ 답장 · ' + quoteOf(m); $('input').focus(); }
+  }
+
+  // 보관함에서 보낸 메시지: 사용자가 쓴 글과, 서버가 덧붙인 정보(위치·저장 시각·커밋·담은 화면)를 나눠 보인다.
+  const shortAt = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  function draftMeta(it) {
+    const parts = [];
+    if (it.where?.url || it.where?.selector) parts.push('📍 ' + (it.where.url || '') + (it.where.text ? ` · "${it.where.text}"` : it.where.selector ? ' · ' + it.where.selector.replace(WIDGET_PREFIX, '대화창 › ') : ''));
+    const when = [it.at ? shortAt(it.at) + ' 담음' : '', it.commit ? '커밋 ' + it.commit : ''].filter(Boolean).join(' · ');
+    if (when) parts.push(when);
+    const from = [it.round ? `${it.round}차 비교 페이지` : '', it.device === 'mobile' ? '모바일' : it.device === 'desktop' ? '데스크톱' : ''].filter(Boolean).join(' · ');
+    if (from) parts.push(from + '에서');
+    return parts;
+  }
+  function metaEl(it) {
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    for (const p of draftMeta(it)) { const x = document.createElement('span'); x.textContent = p; meta.append(x); }
+    return meta;
+  }
+  function renderDraftBody(body, draft) {
+    body.textContent = '';
+    if (draft.items.length > 1) {
+      const h = document.createElement('span');
+      h.className = 'dh';
+      h.textContent = `보관함에서 모아 보낸 ${draft.items.length}개`;
+      body.append(h);
+    }
+    draft.items.forEach((it, i) => {
+      const item = document.createElement('span');
+      item.className = 'ditem';
+      const t = document.createElement('span');
+      t.innerHTML = (draft.items.length > 1 ? `${i + 1}. ` : '') + mdLite(it.text);
+      item.append(t, metaEl(it));
+      body.append(item);
+    });
   }
 
   function timeline(tab) {
@@ -366,9 +410,10 @@
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
-        (m.where?.url ? ' · ' + m.where.url : '') + readMark(m);
+        (m.where?.url && !m.draft ? ' · ' + m.where.url : '') + readMark(m);
       const body = document.createElement('span');
-      body.innerHTML = mdLite(m.text);
+      if (m.draft) renderDraftBody(body, m.draft);
+      else body.innerHTML = mdLite(m.text);
       if (m.from === 'peer') {
         const route = document.createElement('span');
         route.className = 'route';
@@ -395,6 +440,7 @@
       }
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
+        if (m.draft) tag.textContent += ' · 보관함 ' + m.draft.label;
         if (m.resendOf) tag.textContent += ' · 다시 보냄';
         if (m.cancelled) d.classList.add('cancelled');
         // 세션이 아직 안 받아 간 메시지는 보내기를 취소할 수 있다.
@@ -414,11 +460,26 @@
         if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
         if (editing?.id === m.id) {
           d.classList.add('editing');
-          const ta = document.createElement('textarea');
-          ta.className = 'edit';
-          ta.value = editing.text;
-          ta.setAttribute('aria-label', '고쳐서 다시 보낼 글');
-          ta.oninput = () => { editing.text = ta.value; };
+          // 보관함 메시지는 항목마다 글만 고친다(위치 같은 덧붙인 정보는 그대로 따라간다).
+          let ta;
+          if (m.draft) {
+            ta = document.createElement('span');
+            ta.className = 'editdraft';
+            m.draft.items.forEach((it, i) => {
+              const one = document.createElement('textarea');
+              one.className = 'edit';
+              one.value = editing.items[i];
+              one.setAttribute('aria-label', `고쳐서 다시 보낼 글 ${i + 1}`);
+              one.oninput = () => { editing.items[i] = one.value; };
+              ta.append(one, metaEl(it));
+            });
+          } else {
+            ta = document.createElement('textarea');
+            ta.className = 'edit';
+            ta.value = editing.text;
+            ta.setAttribute('aria-label', '고쳐서 다시 보낼 글');
+            ta.oninput = () => { editing.text = ta.value; };
+          }
           const bar = document.createElement('span');
           bar.className = 'editbar';
           const cancel = document.createElement('button');
@@ -433,13 +494,13 @@
           bar.append(cancel, go);
           body.replaceWith(ta);
           small.after(bar);
-          editEl = ta;
+          editEl = ta.matches('textarea') ? ta : ta.querySelector('textarea');
         } else {
           const again = document.createElement('button');
           again.type = 'button';
           again.className = 'rp';
           again.textContent = '다시 보내기';
-          again.onclick = () => { editing = { id: m.id, text: m.text }; render(); editEl?.focus(); };
+          again.onclick = () => { editing = m.draft ? { id: m.id, items: m.draft.items.map((it) => it.text) } : { id: m.id, text: m.text }; render(); editEl?.focus(); };
           small.append(again);
         }
       }
@@ -625,7 +686,7 @@
       const all = timeline('all');
       const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
-      if (k !== key && !(editing && root.activeElement === editEl)) { key = k; render(); }
+      if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();
     } catch {}
