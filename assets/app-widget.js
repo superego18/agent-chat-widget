@@ -30,6 +30,10 @@
   /* Next.js 개발 도구 단추(왼쪽 20px·바닥 20px, 36px)와 크기·왼쪽 끝을 맞춘다 */
   .rbtn { position: fixed; width: 36px; height: 36px; border-radius: 50%; border: 0; background: #fff; color: #1c1b18; font-size: 16px; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 4px 12px rgba(0,0,0,.18); }
   .btn[aria-expanded="true"] + .rbtn { display: none; }
+  .ri { display: inline-block; }
+  .reloading { pointer-events: none; background: #eef2ff !important; color: #4f46e5 !important; }
+  .reloading .ri { animation: rspin .7s linear infinite; }
+  @keyframes rspin { to { transform: rotate(360deg); } }
   .btn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: #4f46e5; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
   .panel { position: fixed; left: 16px; bottom: 164px; width: min(360px, calc(100vw - 32px)); height: min(520px, calc(100vh - 200px)); background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
   .panel[hidden] { display: none; }
@@ -262,10 +266,10 @@
   .box[hidden] { display: none; }
 </style>
 <div class="peek" id="peek" hidden role="status"></div>
-<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침">↻</button>
+<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침"><span class="ri">↻</span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="reload" type="button" title="새로고침">↻</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
@@ -1997,8 +2001,10 @@
 
   // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
   // 새로고침: 대화창 머리말과, 대화창을 닫았을 때 여는 단추 아래(화면 전체를 새로 읽는다).
-  $('reload').onclick = () => location.reload();
-  $('rbtn').onclick = () => location.reload();
+  // 누르면 바로 돌기 시작해서 새로고침 중임을 보인다(화면이 다시 뜰 때까지 돈다).
+  const reloadNow = (b) => { b.classList.add('reloading'); requestAnimationFrame(() => setTimeout(() => location.reload(), 120)); };
+  $('reload').onclick = () => reloadNow($('reload'));
+  $('rbtn').onclick = () => reloadNow($('rbtn'));
   const placeRbtn = () => {
     const b = $('btn').getBoundingClientRect();
     // 여는 단추 바로 아래 왼쪽 정렬. 여는 단추를 바닥에서 112px 띄워, 왼쪽 아래 구석의 앱 개발 도구 단추(예: Next.js 의 N)와 겹치지 않는다.
