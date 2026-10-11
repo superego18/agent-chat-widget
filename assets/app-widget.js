@@ -58,6 +58,7 @@
   .msg .editdraft .meta { margin: 3px 0 8px; }
   .msg.flashing { animation: flashm 2s ease-out; }
   @keyframes flashm { 0%, 70% { outline: 3px solid #f59e0b; outline-offset: 2px; } 100% { outline: 3px solid transparent; outline-offset: 2px; } }
+  .msg .lnk { font: inherit; font-size: 10px; color: inherit; background: rgba(127,127,127,.14); border: 0; border-radius: 4px; padding: 0 5px; margin-left: 6px; cursor: pointer; }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
@@ -425,6 +426,34 @@
     });
   }
 
+  // 답 잇기: 대화 순서(세션이 읽은 시각 기준)대로 보며, 세션이 읽은 사용자 메시지들 다음에 나온 그 세션의 답(이어지는 여러 답 포함)을
+  // 그 메시지들에 대한 답으로 본다. 세션이 무엇에 답했는지 따로 적지 않으므로 읽은 순서로 짐작한 연결이다.
+  function answerLinks(items) {
+    const ans = new Map();
+    const by = new Map();
+    let pending = [];
+    let cur = [];
+    for (const m of items) {
+      if (m.from === 'user' && !m.cancelled && !isHeld(m)) pending.push(m.id);
+      else if (m.from === 'agent') {
+        if (pending.length) { cur = pending; pending = []; }
+        if (!cur.length) continue;
+        ans.set(m.id, cur);
+        for (const u of cur) by.set(u, [...(by.get(u) || []), m.id]);
+      }
+    }
+    return { ans, by };
+  }
+  function goMsg(id) {
+    const el = $('msgs').querySelector(`.msg[data-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.remove('flashing');
+    void el.offsetWidth;
+    el.classList.add('flashing');
+    setTimeout(() => el.classList.remove('flashing'), 2000);
+  }
+
   function timeline(tab) {
     return [...messages, ...Object.values(transcripts).flat()]
       .filter((m) => tab === 'all' || ownerOf(m) === tab || (m.from === 'peer' && m.session === tab))
@@ -509,6 +538,7 @@
       box.append(p);
     }
     const shown = items.slice(-120);
+    const links = activeTab === 'all' ? { ans: new Map(), by: new Map() } : answerLinks(items); // 여러 세션을 함께 보는 탭에서는 잇지 않는다
     const firstUnread = shown.findIndex(isUnread);
     let newLine = null;
     const heldEls = [];
@@ -579,6 +609,16 @@
         // 그려진 뒤 잘렸는지 보고, 잘렸거나 펼친 상태일 때만 "펼치기/접기"를 보인다.
         requestAnimationFrame(() => { toggle.hidden = !(openQuotes.has(m.id) || qt.scrollHeight > qt.clientHeight + 1); });
         body.before(q);
+      }
+      // 어느 메시지에 대한 답인지(답 쪽), 어느 답을 받았는지(질문 쪽) 이어 보여 준다. 누르면 그 메시지로 간다.
+      const pair = m.from === 'agent' ? links.ans.get(m.id) : links.by.get(m.id);
+      if (pair?.length) {
+        const ln = document.createElement('button');
+        ln.type = 'button';
+        ln.className = 'lnk';
+        ln.textContent = m.from === 'agent' ? `↩ #${pair.join(' #')}에 대한 답` : `↪ 답 #${pair[0]}${pair.length > 1 ? ` 외 ${pair.length - 1}` : ''}`;
+        ln.onclick = () => goMsg(pair[0]);
+        small.append(ln);
       }
       if (typeof m.id === 'number' && !isHeld(m)) {
         const rp = document.createElement('button');
