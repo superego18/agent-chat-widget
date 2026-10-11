@@ -34,6 +34,7 @@
   .msg { max-width: 88%; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
   .msg.user { align-self: flex-end; background: #4f46e5; color: #fff; }
   .msg.agent { align-self: flex-start; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.1); }
+  .msg a { color: inherit; text-decoration: underline; word-break: break-all; }
   .msg code { font-family: ui-monospace, monospace; font-size: 12px; background: rgba(127,127,127,.15); padding: 0 4px; border-radius: 4px; }
   .msg small { display: block; font-size: 10px; opacity: .7; margin-top: 2px; }
   /* 답장: 메시지마다 작은 "답장" 버튼(마우스가 있으면 올렸을 때만), 답장 메시지 위에는 원문 인용. */
@@ -298,7 +299,9 @@
     return esc
       .replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>');
+      .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>')
+      // 주소는 누르면 새 탭으로 열리게 한다(끝의 문장부호는 주소에서 뺀다).
+      .replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
   }
 
   function selectorOf(el) {
