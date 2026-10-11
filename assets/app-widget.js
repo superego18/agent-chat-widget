@@ -242,6 +242,7 @@
   let activeTab = null;
   try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
+  let prefsReady = false; // 서버 설정(prefs)을 한 번이라도 받았는지
   let replyTo = null; // 답장할 메시지 번호
   let editing = null; // 말풍선 안에서 고치는 중인 내 메시지 { id, text }
   let editEl = null;
@@ -813,7 +814,8 @@
         fetch('/__uifb/api/compose').then((r) => r.json()).catch(() => null),
       ]);
       if (cp) { composed = cp; loadCompose(false); }
-      if (pf && JSON.stringify(pf) !== JSON.stringify(prefs)) applyPrefs(pf);
+      if (pf && (!prefsReady || JSON.stringify(pf) !== JSON.stringify(prefs))) applyPrefs(pf);
+      else if (!pf && !prefsReady) applyPrefs({});
       // 다른 화면에서 읽은 것을 가져온다(더 나중 시각만).
       let seenFromServer = false;
       for (const [id, at] of Object.entries(sv || {})) {
@@ -1067,6 +1069,7 @@
   // 짧게 = "나중에"로 담을 분류 정하기(진한 색), 꾹(0.5초) = 그 분류 보관함 열기. 열린 칩은 짧게 눌러도 닫힌다.
   const HOLD = 500;
   function renderCats() {
+    if (!prefsReady) return; // 서버에 저장된 분류를 받기 전에 그리면 잠깐 "미분류"가 골라진 것처럼 보인다
     const counts = new Map([['', 0], ...allLabels().map((l) => [l, 0])]);
     for (const d of mine()) counts.set(d.label || '', (counts.get(d.label || '') || 0) + 1);
     const box = $('cats');
@@ -1428,6 +1431,10 @@
   const savePrefs = (patch) => fetch('/__uifb/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device(), ...patch }) }).then((r) => r.json()).then((p) => { prefs = p; }).catch(() => {});
   function applyPrefs(p) {
     prefs = p || {};
+    // 처음 받을 때와, 이 화면에서 방금 고르지 않았을 때는 서버에 저장된 담을 분류를 바로 따른다.
+    if (!prefsReady || Date.now() - labelSetAt > 5000) draftLabel = prefs.draftLabels?.[activeTab] ?? null;
+    prefsReady = true;
+    renderCats();
     if (dragging) return;
     const mine = prefs[device()] || {};
     size = mine.panel || null;
