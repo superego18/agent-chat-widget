@@ -2147,10 +2147,26 @@
     const v = await fetch('/__uifb/api/widget-version').then((r) => r.json()).then((j) => j.v).catch(() => null);
     if (v == null) return;
     if (widgetV == null) widgetV = v;
-    else if (v !== widgetV) { widgetV = v; toast('대화창이 새로 바뀌었어요', { label: '새로고침', fn: () => location.reload() }); }
+    else if (v !== widgetV) { widgetV = v; reloadWhenIdle(); }
   };
+  // 대화창 파일이 바뀌면 알아서 새로고침한다. 다만 쓰거나 고치는 중·답장/위치를 붙여 둔 중·단추가 도는 중·글을 고른 중·방금 스크롤한 중에는
+  // 기다렸다가(2초마다 다시 봄) 손을 뗐을 때 한다. 입력칸 글과 보던 위치는 서버에 남아 새로고침 뒤에도 그대로다.
+  let lastScrollAt = 0;
+  $('msgs').addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
+  let reloadT = null;
+  function reloadWhenIdle() {
+    clearTimeout(reloadT);
+    let selecting = false;
+    try { selecting = !!(((root.getSelection && root.getSelection()) || getSelection())?.toString()); } catch {}
+    const busy = editing || holdEdit || replyTo || where || selecting || root.querySelector('button.busy') || Date.now() - typedAt < 8000 || Date.now() - lastScrollAt < 3000 || (root.activeElement?.tagName === 'TEXTAREA' && root.activeElement.value.trim() && document.visibilityState === 'visible');
+    if (busy) { reloadT = setTimeout(reloadWhenIdle, 2000); return; }
+    flushCompose();
+    $('reload').classList.add('reloading');
+    $('rbtn').classList.add('reloading');
+    setTimeout(() => location.reload(), 300);
+  }
   checkVersion();
-  setInterval(checkVersion, 60_000);
+  setInterval(checkVersion, 10_000);
 
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
