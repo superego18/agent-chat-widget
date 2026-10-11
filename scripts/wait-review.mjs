@@ -77,7 +77,7 @@ function pendingMessages() {
   } catch {}
   const mine = messages.filter((m) => (m.from === 'user' && m.to === sid && m.context !== 'terminal') || (m.from === 'agent' && m.session === sid));
   const lastAgent = mine.map((m) => m.from).lastIndexOf('agent');
-  return mine.slice(lastAgent + 1).filter((m) => m.from === 'user' && m.id > seen);
+  return mine.slice(lastAgent + 1).filter((m) => m.from === 'user' && m.id > seen).map((m) => ({ ...m, orig: m.replyTo ? messages.find((x) => x.id === m.replyTo) : null }));
 }
 
 let timer;
@@ -123,6 +123,9 @@ function check() {
     for (const m of pending) {
       const dev = m.device === 'mobile' ? '·모바일' : m.device === 'desktop' ? '·데스크톱' : '';
       lines.push(`[${m.id}]${m.context === 'app' ? `[앱 화면${dev}]` : `[비교 페이지${dev}]`}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
+      // 이전 메시지에 단 답장이면 원문을 붙인다.
+      const orig = m.orig;
+      if (orig) lines.push(`    답장 대상 [${orig.id}] ${orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트'}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
       // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
       if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
         lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);

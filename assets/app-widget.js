@@ -36,6 +36,10 @@
   .msg.agent { align-self: flex-start; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.1); }
   .msg code { font-family: ui-monospace, monospace; font-size: 12px; background: rgba(127,127,127,.15); padding: 0 4px; border-radius: 4px; }
   .msg small { display: block; font-size: 10px; opacity: .7; margin-top: 2px; }
+  /* 답장: 메시지마다 작은 "답장" 버튼(마우스가 있으면 올렸을 때만), 답장 메시지 위에는 원문 인용. */
+  .msg .rp { font: inherit; font-size: 10px; color: inherit; background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; text-decoration: underline; opacity: .8; }
+  @media (hover: hover) { .msg .rp { opacity: 0; } .msg:hover .rp, .msg .rp:focus-visible { opacity: .8; } }
+  .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .85; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
   .empty { margin: auto; text-align: center; font-size: 12px; color: #8f8c84; line-height: 1.6; white-space: pre-line; }
@@ -160,6 +164,7 @@
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
+  <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
@@ -175,6 +180,7 @@
   let activeTab = null;
   try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
+  let replyTo = null; // 답장할 메시지 번호
   const WIDGET_PREFIX = '대화창 › '; // 대화창 안을 찍은 위치의 선택자 앞에 붙인다
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
   let seen = {};
@@ -212,6 +218,13 @@
       parts.unshift(p);
     }
     return parts.join(' > ');
+  }
+
+  const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
+  function setReply(m) {
+    replyTo = m ? m.id : null;
+    $('reply').hidden = !m;
+    if (m) { $('replyText').textContent = '↩ 답장 · ' + quoteOf(m); $('input').focus(); }
   }
 
   function timeline(tab) {
@@ -331,6 +344,23 @@
         small.textContent = new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (m.readAt ? ' · 받음' : '');
         d.append(tag, route, body, small);
       } else d.append(tag, body, small);
+      const orig = m.replyTo && messages.find((x) => x.id === m.replyTo);
+      if (orig) {
+        const q = document.createElement('span');
+        q.className = 'quote';
+        q.textContent = '↩ ' + quoteOf(orig);
+        q.title = '원래 메시지로 가기';
+        q.onclick = () => { const el = box.querySelector(`.msg[data-id="${m.replyTo}"]`); if (el) flash(el); };
+        body.before(q);
+      }
+      if (typeof m.id === 'number' && !isHeld(m)) {
+        const rp = document.createElement('button');
+        rp.type = 'button';
+        rp.className = 'rp';
+        rp.textContent = '답장';
+        rp.onclick = () => setReply(m);
+        small.append(rp);
+      }
       if (isHeld(m)) { d.classList.add('held'); nowHeld.add(m.id); heldEls.push(d); continue; }
       if (wasHeld.has(m.id)) d.classList.add('drop');
       box.append(d);
@@ -606,6 +636,7 @@
   }
   $('pick').onclick = () => startPick();
   $('whereClear').onclick = () => { where = null; $('where').hidden = true; };
+  $('replyClear').onclick = () => setReply(null);
 
   $('form').onsubmit = async (e) => {
     e.preventDefault();
@@ -615,11 +646,12 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(replyTo ? { replyTo } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
       $('where').hidden = true;
+      setReply(null);
       await poll();
       render();
     } catch {
@@ -973,6 +1005,7 @@
   }
   function switchTab(id) {
     flushCompose();
+    if (id !== activeTab) setReply(null);
     activeTab = id;
     labelSetAt = 0;
     draftLabel = prefs?.draftLabels?.[id] ?? null; // 그 세션에서 고른 분류로 바꾼다
