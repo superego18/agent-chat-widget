@@ -51,8 +51,8 @@
   .msg .dh { display: block; font-size: 11px; opacity: .85; margin-bottom: 4px; }
   .msg .ditem { display: block; }
   .msg .ditem + .ditem { margin-top: 8px; }
-  .msg .meta { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
-  .msg .meta span { font-size: 10.5px; line-height: 1.35; padding: 1px 6px; border-radius: 5px; background: rgba(255,255,255,.2); }
+  .msg .meta { display: flex; margin-top: 4px; min-width: 0; }
+  .msg .meta span { font-size: 10.5px; line-height: 1.35; padding: 1px 6px; border-radius: 5px; background: rgba(255,255,255,.2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .msg.user.held .meta span, .msg.user.cancelled .meta span { background: rgba(79,70,229,.1); }
   .msg .editdraft { display: block; }
   .msg .editdraft .meta { margin: 3px 0 8px; }
@@ -381,19 +381,24 @@
 
   // 보관함에서 보낸 메시지: 사용자가 쓴 글과, 서버가 덧붙인 정보(위치·저장 시각·커밋·담은 화면)를 나눠 보인다.
   const shortAt = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // 덧붙인 정보는 폰에서도 한 줄로 보이게 짧게 이어 붙인다(넘치면 끝을 … 로 줄임). 전체는 title 로 볼 수 있다.
+  const compactAt = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   function draftMeta(it) {
     const parts = [];
-    if (it.where?.url || it.where?.selector) parts.push('📍 ' + (it.where.url || '') + (it.where.text ? ` · "${it.where.text}"` : it.where.selector ? ' · ' + it.where.selector.replace(WIDGET_PREFIX, '대화창 › ') : ''));
-    const when = [it.at ? shortAt(it.at) + ' 담음' : '', it.commit ? '커밋 ' + it.commit : ''].filter(Boolean).join(' · ');
-    if (when) parts.push(when);
-    const from = [it.round ? `${it.round}차 비교 페이지` : '', it.device === 'mobile' ? '모바일' : it.device === 'desktop' ? '데스크톱' : ''].filter(Boolean).join(' · ');
-    if (from) parts.push(from + '에서');
+    if (it.where?.url || it.where?.selector) parts.push('📍 ' + (it.where.url || '') + (it.where.text ? ` "${it.where.text}"` : ''));
+    if (it.at) parts.push(compactAt(it.at) + ' 담음');
+    if (it.round) parts.push(`${it.round}차`);
+    if (it.device) parts.push(it.device === 'mobile' ? '모바일' : '데스크톱');
+    if (it.commit) parts.push(it.commit);
     return parts;
   }
   function metaEl(it) {
     const meta = document.createElement('span');
     meta.className = 'meta';
-    for (const p of draftMeta(it)) { const x = document.createElement('span'); x.textContent = p; meta.append(x); }
+    const x = document.createElement('span');
+    x.textContent = draftMeta(it).join(' · ');
+    x.title = x.textContent;
+    meta.append(x);
     return meta;
   }
   function renderDraftBody(body, draft) {
