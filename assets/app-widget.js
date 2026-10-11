@@ -58,7 +58,16 @@
   .msg.user.drop { animation: drop .45s cubic-bezier(.3,1.4,.5,1); }
   @keyframes hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @keyframes drop { from { transform: translateY(-16px); opacity: .55; } to { transform: none; opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { .msg.user.held, .msg.user.drop { animation: none; } }
+  /* 세션끼리 주고받은 메시지: 사람이 쓴 글이 아니라는 게 한눈에 보이게 점선 테두리·다른 색으로 둔다. 보낸 세션 탭에서는 오른쪽, 받은 세션 탭에서는 왼쪽. */
+  .msg.peer { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
+  .msg.peer.out { align-self: flex-end; }
+  .msg.peer .tag { background: #fed7aa; color: #9a3412; }
+  .msg.peer .route { display: block; font-size: 11px; font-weight: 600; color: #c2410c; margin-bottom: 3px; }
+  .tabs .flow { display: inline-block; align-self: center; font-weight: 700; color: #d97706; animation: flow .9s ease-in-out infinite; }
+  .tabs .flow.back { animation-name: flowback; }
+  @keyframes flow { 0%, 100% { transform: translateX(-3px); opacity: .5; } 50% { transform: translateX(3px); opacity: 1; } }
+  @keyframes flowback { 0%, 100% { transform: translateX(3px); opacity: .5; } 50% { transform: translateX(-3px); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .msg.user.held, .msg.user.drop, .tabs .flow { animation: none; } }
   .typing.stale { color: #b45309; }
   .msg.agent.unread { box-shadow: 0 0 0 1px rgba(0,0,0,.1), -3px 0 0 #4f46e5; }
   .peek { position: fixed; left: 16px; bottom: 124px; max-width: min(300px, calc(100vw - 32px)); background: #fff; color: #1c1b18; border-radius: 10px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 8px 24px rgba(0,0,0,.2); padding: 9px 11px; font-size: 13px; line-height: 1.45; cursor: pointer; }
@@ -207,7 +216,7 @@
 
   function timeline(tab) {
     return [...messages, ...Object.values(transcripts).flat()]
-      .filter((m) => tab === 'all' || ownerOf(m) === tab)
+      .filter((m) => tab === 'all' || ownerOf(m) === tab || (m.from === 'peer' && m.session === tab))
       .sort((a, b) => orderAt(a).localeCompare(orderAt(b)));
   }
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
@@ -225,6 +234,19 @@
     const limit = new Date(Date.parse(read) + 5000).toISOString();
     for (const x of messages) if (x.from === 'agent' && x.session === m.to && x.at > key && x.at <= limit) key = x.at;
     return key + '~';
+  }
+
+  // 세션끼리 메시지를 보내는 중(보낸 쪽이 SendMessage 를 쓰는 중)이거나 방금(8초 안) 보냈으면 [보낸 세션, 받는 세션] 쌍을 돌려준다.
+  // 방금 보낸 것은 이 화면이 처음 본 시각으로 잰다(폰과 컴퓨터 시계가 달라도 맞게).
+  const peerSeenAt = {};
+  let peerPrimed = false;
+  function flows() {
+    const now = Date.now();
+    for (const m of messages) if (m.from === 'peer' && !peerSeenAt[m.id]) peerSeenAt[m.id] = peerPrimed ? now : 1;
+    peerPrimed = true;
+    const pairs = sessions.filter((x) => x.status?.state === 'working' && x.status.peerTo).map((x) => [x.id, x.status.peerTo]);
+    for (const m of messages) if (m.from === 'peer' && m.session && m.to && now - peerSeenAt[m.id] < 8000) pairs.push([m.session, m.to]);
+    return pairs.filter(([a, b], i) => a !== b && pairs.findIndex(([c, d]) => c === a && d === b) === i);
   }
 
   function renderTabs() {
@@ -254,6 +276,18 @@
       }
       b.onclick = () => { tabSetAt = Date.now(); switchTab(t.id); savePrefs({ tab: t.id }); };
       box.append(b);
+    }
+    // 이웃한 두 탭 사이에 보내는 방향으로 움직이는 화살표를 넣는다. 이웃하지 않으면 보낸 탭 뒤에 "→ 받는 세션"을 붙인다.
+    const btns = [...box.children];
+    for (const [a, b] of flows()) {
+      const ia = tabs.findIndex((t) => t.id === a);
+      const ib = tabs.findIndex((t) => t.id === b);
+      if (ia < 0 || ib < 0) continue;
+      const f = document.createElement('span');
+      f.className = 'flow' + (ib < ia ? ' back' : '');
+      f.title = `${nameOf(a)} → ${nameOf(b)} 메시지 보내는 중`;
+      if (Math.abs(ia - ib) === 1) { f.textContent = ib > ia ? '→' : '←'; btns[Math.min(ia, ib)].after(f); }
+      else { f.textContent = '→ ' + nameOf(b); btns[ia].after(f); }
     }
   }
 
@@ -285,26 +319,32 @@
         box.append(newLine);
       }
       const d = document.createElement('div');
-      d.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '');
+      d.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' && activeTab !== 'all' ? (m.session === activeTab ? ' out' : ' in') : '');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
-      const src = (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
-      tag.textContent = activeTab === 'all' && ownerOf(m) ? `${nameOf(ownerOf(m))} · ${src}` : src;
+      const src = m.from === 'peer' ? '세션끼리' : (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
+      tag.textContent = activeTab === 'all' && ownerOf(m) && m.from !== 'peer' ? `${nameOf(ownerOf(m))} · ${src}` : src;
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
         (m.where?.url ? ' · ' + m.where.url : '') + readMark(m);
       const body = document.createElement('span');
       body.innerHTML = mdLite(m.text);
-      d.append(tag, body, small);
+      if (m.from === 'peer') {
+        const route = document.createElement('span');
+        route.className = 'route';
+        route.textContent = `${m.session ? nameOf(m.session) : m.fromName || '다른 세션'} → ${m.to ? nameOf(m.to) : m.toName || '다른 세션'}`;
+        small.textContent = new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (m.readAt ? ' · 받음' : '');
+        d.append(tag, route, body, small);
+      } else d.append(tag, body, small);
       if (isHeld(m)) { d.classList.add('held'); nowHeld.add(m.id); heldEls.push(d); continue; }
       if (wasHeld.has(m.id)) d.classList.add('drop');
       box.append(d);
     }
     wasHeld = nowHeld;
-    const last = items[items.length - 1];
+    const last = items.filter((m) => m.from !== 'peer').at(-1);
     const st = sessionById(activeTab)?.status;
     if (st && (st.state === 'working' || st.state === 'permission')) {
       const ty = document.createElement('div');
@@ -475,7 +515,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer').map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
       if (k !== key) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();

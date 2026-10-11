@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Claude Code 훅에서 불려, 터미널 대화를 리뷰 서버 대화 기록(chat.json)으로 보낸다. 의존성 없음 (Node 18+).
 // 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, Stop, Notification 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
-//   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답을 chat.json 으로 보낸다.
+//   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답, 세션끼리 주고받은 메시지(SendMessage)를 chat.json 으로 보낸다.
 //   - 상태: 작업 시작·도구 사용·응답 끝·승인 대기를 /api/status 로 보내, 대화 창에 "작업 중" 표시를 한다.
 //   - 입력 JSON 은 표준 입력으로 받는다. 표준 출력에는 아무것도 쓰지 않는다(MessageDisplay 는 출력이 없으면 원문을 그대로 표시한다).
 //   - <cwd>/.ui-feedback/sessions/<session_id>.json 으로 등록된 세션일 때만 보낸다.
@@ -77,10 +77,19 @@ try {
     const text = String(input.prompt_text ?? input.prompt ?? '').trim();
     await status('working', '생각하는 중');
     if (text && !isAutomatic(text)) await post(port, { ...base, from: 'user', text });
+    // 다른 세션이 보낸 메시지를 받았으면 알린다. 서버가 보낸 쪽 기록과 맞춰 "받음"을 적는다.
+    for (const m of text.matchAll(/<cross-session-message\b([^>]*)>([\s\S]*?)<\/cross-session-message>/g)) {
+      const fromName = /from-name="([^"]*)"/.exec(m[1])?.[1] || '';
+      if (m[2].trim()) await post(port, { from: 'peer', to: session.sessionId, fromName, text: m[2].trim() });
+    }
   }
 
   if (input.hook_event_name === 'PreToolUse') {
-    await status('working', toolLabel(input.tool_name, input.tool_input));
+    const ti = input.tool_input || {};
+    const peer = input.tool_name === 'SendMessage' && typeof ti.message === 'string' ? String(ti.to || '') : '';
+    await post(port, { session: session.sessionId, state: 'working', detail: toolLabel(input.tool_name, ti), ...(peer ? { peer } : {}) }, 'status');
+    // 세션끼리 보내는 메시지도 대화창에 남긴다(보낸 세션 기준).
+    if (peer) await post(port, { from: 'peer', session: session.sessionId, toName: peer, text: ti.message });
   }
 
   if (input.hook_event_name === 'Stop') {
