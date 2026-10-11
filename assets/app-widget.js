@@ -160,6 +160,9 @@
   .draft .acts { display: flex; flex-wrap: wrap; gap: 4px; }
   .draft .acts button, .draft .acts select { font-size: 11px; padding: 3px 7px; border-radius: 6px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
   .draft .acts .send1 { background: #1c1b18; color: #fff; border-color: transparent; }
+  /* 맨 아래로: 위쪽 기록을 보고 있을 때만 대화 목록 오른쪽 아래에 뜬다. */
+  .tobottom { position: fixed; z-index: 2147483646; width: 38px; height: 38px; border-radius: 50%; border: 0; background: #fff; color: #1c1b18; font-size: 18px; font-weight: 700; box-shadow: 0 0 0 1px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.18); cursor: pointer; }
+  .tobottom[hidden] { display: none; }
   .toast { position: fixed; z-index: 2147483647; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; max-width: min(340px, calc(100vw - 32px)); font-size: 12px; line-height: 1.4; padding: 8px 12px; border-radius: 10px; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
   .toast[hidden] { display: none; }
   .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #fde68a; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
@@ -221,6 +224,7 @@
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <button type="button" class="selreply" id="selReply" hidden>↩ 고른 부분에 답장</button>
   <div class="toast" id="toast" hidden role="status"></div>
+  <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
@@ -685,6 +689,7 @@
       box.scrollTop = prevTop; // 다시 그려도 읽던 위치를 유지한다
     }
     markQuote(replyTo, replyQuote); // 다시 그리면 범위가 사라지므로 음영을 다시 칠한다
+    placeToBottom();
     const target = sessionById(activeTab);
     // 세션이 일하는 중이고 Claude 세션(중계 훅이 끼워 넣음)일 때만 "끼워넣기"를 보인다.
     $('now').hidden = !(target && target.tool !== 'codex' && ['working', 'permission'].includes(target.status?.state));
@@ -731,6 +736,19 @@
     updateBadges();
   }
   $('msgs').addEventListener('scroll', markSeenVisible);
+  function placeToBottom() {
+    const b = $('msgs');
+    const far = b.scrollHeight - b.scrollTop - b.clientHeight > 200;
+    const btn = $('toBottom');
+    btn.hidden = !far || $('panel').hidden || showDrafts;
+    if (btn.hidden) return;
+    const r = b.getBoundingClientRect();
+    btn.style.left = r.right - 50 + 'px';
+    btn.style.top = r.bottom - 50 + 'px';
+  }
+  $('msgs').addEventListener('scroll', placeToBottom);
+  new ResizeObserver(placeToBottom).observe($('msgs'));
+  $('toBottom').onclick = () => { const b = $('msgs'); b.scrollTo({ top: b.scrollHeight, behavior: 'smooth' }); };
   // 보고 있던 위치(맨 위에 보이는 메시지)를 세션마다 기억한다. 스크롤을 멈추고 0.8초 뒤에 저장한다.
   let posT = null;
   $('msgs').addEventListener('scroll', () => {
@@ -1307,6 +1325,7 @@
     if (!on) sheetLabel = null;
     if (on && !showDrafts) loadFold();
     showDrafts = on;
+    placeToBottom();
     $('dsheet').hidden = !on;
     updateDraftsBtn();
     if (on) { placeSheet(); renderDrafts(); }
