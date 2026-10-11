@@ -231,10 +231,10 @@
   #draftsBtn.got { animation: got .7s ease-out; }
   @keyframes got { 0% { transform: scale(1); } 30% { transform: scale(1.18); background: #4f46e5; color: #fff; } 100% { transform: scale(1); } }
   @media (prefers-reduced-motion: reduce) { #draftsBtn.got { animation: gotc 1s; } @keyframes gotc { 0%, 60% { background: #4f46e5; color: #fff; } } }
-  form .later { position: relative; overflow: hidden; }
-  form .later .fill { position: absolute; inset: 0; background: rgba(79,70,229,.25); transform-origin: left; transform: scaleX(0); pointer-events: none; }
-  form .later.pressing { transform: scale(.96); }
-  form .later.pressing .fill { transform: scaleX(1); transition: transform .5s linear; }
+  /* 오른쪽 단추는 두 줄로 묶는다: [보내기 / 끼워넣기] [보류하기 / 보관함 담기] */
+  form .bcol { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; align-self: stretch; justify-content: flex-end; }
+  form .bcol button { height: 38px; padding: 0 10px; font-size: 12.5px; }
+  form .bcol button[type="submit"] { height: auto; flex: 1; min-height: 38px; } /* 끼워넣기가 없으면 보내기가 칸 높이를 다 채운다 */
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -263,7 +263,7 @@
   <div class="toast" id="toast" hidden role="status"></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="짧게: 보류(맨 아래에 잠깐 대기) · 꾹: 바로 보관함"><span class="fill"></span>나중에</button></form>
+  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류하기</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함 담기</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="box" id="box" hidden></div>`;
@@ -1660,7 +1660,7 @@
     requestAnimationFrame(step);
   }
 
-  // 나중에: 짧게 누르면 보류(대화창 맨 아래에 잠깐 대기), 꾹 누르면 바로 보관함(완전 나중).
+  // 보류하기: 대화창 맨 아래에 잠깐 대기. 보관함 담기: 바로 보관함(완전 나중).
   async function saveLater(toDrafts) {
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
@@ -1681,7 +1681,8 @@
       saveCompose(activeTab, text);
     }
   }
-  holdable($('later'), () => saveLater(false), () => saveLater(true), () => false);
+  $('later').onclick = () => saveLater(false);
+  $('stash').onclick = () => saveLater(true);
 
   // 오른쪽 위 손잡이를 끌어 창 크기를 바꾼다(창은 왼쪽 아래에 붙어 있다). 크기는 이 브라우저에 기억한다.
   function applySize(sz) {
