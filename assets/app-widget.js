@@ -155,7 +155,7 @@
   .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
   .draft .top { display: flex; gap: 7px; align-items: flex-start; }
   .draft input[type=checkbox] { margin-top: 6px; flex-shrink: 0; }
-  .draft textarea { height: auto; min-height: 36px; background: #fff; }
+  .draft textarea { height: auto; min-height: 36px; max-height: none; overflow: hidden; background: #fff; }
   .draft .meta { font-size: 11px; color: #8f8c84; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
   .draft .loc.same { color: #15803d; } .draft .loc.changed { color: #b45309; } .draft .loc.other { color: #5a5852; }
   .draft .acts { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1228,7 +1228,11 @@
       cb.onchange = () => { cb.checked ? checked.add(d.id) : checked.delete(d.id); updateFoot(); };
       const ta = document.createElement('textarea');
       ta.value = d.text;
-      ta.rows = Math.min(5, d.text.split('\n').length + 1);
+      // 글이 잘려 보이지 않게, 그려진 뒤와 고칠 때마다 글 높이에 맞춘다.
+      ta.rows = 1;
+      const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
+      ta.addEventListener('input', fit);
+      requestAnimationFrame(fit);
       ta.setAttribute('aria-label', '보관한 메시지');
       ta.onchange = () => { if (ta.value.trim()) draftsApi({ action: 'update', id: d.id, text: ta.value }); };
       top.append(cb, ta);
