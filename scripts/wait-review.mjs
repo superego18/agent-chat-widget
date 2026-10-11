@@ -120,7 +120,7 @@ function finish(code, lines) {
 function check() {
   const pending = pendingMessages();
   if (pending.length > 0) {
-    const lines = [`CHAT session=${session.name}`];
+    const lines = [`CHAT session=${session.name} (답은 맨 앞에 <re ${pending.map((m) => m.id).join(' ')}>처럼 무엇에 답하는지 메시지 번호를 붙이면 대화창이 잇는다. 따로 답하면 각 답에 그 번호만)`];
     for (const m of pending) lines.push(...m.lines);
     markDelivered(pending.map((m) => m.id));
     finish(0, lines);

@@ -446,17 +446,24 @@
   function answerLinks(items) {
     const ans = new Map();
     const by = new Map();
+    const link = (a, us) => { if (!us.length) return; ans.set(a, us); for (const u of us) by.set(u, [...(by.get(u) || []), a]); };
+    const shown = new Set(items.filter((m) => m.from === 'user' && !m.cancelled && !isHeld(m)).map((m) => m.id));
+    // 세션이 답 맨 앞에 <re 번호>로 무엇에 답했는지 적었으면(re) 그대로 잇는다. 적은 답이 있는 묶음에서는 적지 않은 답(중간 안내 등)을 잇지 않는다.
+    // 적은 것이 없는 묶음만 순서로 짐작한다: 세션이 읽은 메시지들 다음에 나온 그 세션의 답(이어지는 여러 답 포함)을 그 메시지들에 대한 답으로 본다.
     let pending = [];
-    let cur = [];
+    let run = [];
+    const flush = () => {
+      if (!run.length) return;
+      if (run.some((a) => a.re?.length)) for (const a of run) link(a.id, (a.re || []).filter((u) => shown.has(u)));
+      else for (const a of run) link(a.id, pending);
+      if (run.length) pending = [];
+      run = [];
+    };
     for (const m of items) {
-      if (m.from === 'user' && !m.cancelled && !isHeld(m)) pending.push(m.id);
-      else if (m.from === 'agent') {
-        if (pending.length) { cur = pending; pending = []; }
-        if (!cur.length) continue;
-        ans.set(m.id, cur);
-        for (const u of cur) by.set(u, [...(by.get(u) || []), m.id]);
-      }
+      if (m.from === 'agent') run.push(m);
+      else if (m.from === 'user' && shown.has(m.id)) { flush(); pending.push(m.id); }
     }
+    flush();
     return { ans, by };
   }
   // 질문과 답을 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 묶음이 겹치면 선을 한 칸씩 안쪽으로 옮긴다.

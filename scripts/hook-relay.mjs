@@ -109,7 +109,7 @@ try {
       const recent = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[0] - a[0]).slice(0, 500));
       // 받은 번호(_at)와 읽은 시각(_read)만 적는다. 마지막 번호는 올리지 않는다(그 앞의 끼워넣지 않은 메시지는 감시 명령이 넘겨야 한다).
       fs.writeFileSync(file, JSON.stringify({ ...d, _at: recent({ ...(d._at || {}), ...stamp }), _read: recent({ ...(d._read || {}), ...stamp }) }, null, 2) + '\n');
-      const lines = ['[대화창 · 작업 중에 끼워넣은 메시지] 사용자가 작업하는 동안 대화창에서 "끼워넣기"로 보냈습니다. 지금 읽고 하던 일에 반영하세요. 답은 이번 턴의 마지막 답에 함께 쓰면 대화창에 보입니다.'];
+      const lines = ['[대화창 · 작업 중에 끼워넣은 메시지] 사용자가 작업하는 동안 대화창에서 "끼워넣기"로 보냈습니다. 지금 읽고 하던 일에 반영하세요. 답은 이번 턴의 마지막 답에 함께 쓰면 대화창에 보입니다(답 맨 앞에 <re 번호>로 무엇에 답하는지 붙이세요).'];
       for (const m of pending) lines.push(...formatMessage(m, all));
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: lines.join('\n') } }));
     }
