@@ -62,6 +62,8 @@
   /* 답 잇는 선: 대화 목록 오른쪽 가장자리를 따라, 질문(내 메시지)과 그에 대한 답을 꺾쇠 모양 선으로 잇는다. */
   .msgs { position: relative; padding-right: 18px; }
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+  .links { z-index: 0; }
+  .msgs > .msg { position: relative; z-index: 1; } /* 선 끝이 말풍선 뒤로 들어가게 말풍선을 선 위에 둔다 */
   .links path { fill: url(#uifbLinkGrad) #a5b4fc; opacity: .85; }
   .links path.new { animation: linkin .6s ease-out; }
   @keyframes linkin { from { opacity: 0; } }
@@ -516,8 +518,9 @@
       const r = Math.min(R, (bottom - q.y) / 2);
       const shape = document.createElementNS(NS, 'path');
       // 질문 → 오른쪽 기둥 → 마지막 답(둥근 모서리), 그 사이의 답들로 갈라지는 가지
-      let d = taper(`M ${q.right + 3} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right + 3}`, 5, 1);
-      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right + 3}`, 3, 1);
+      // 양 끝은 말풍선 뒤로 10px 들어가게 그려, 선이 말풍선 테두리에서 자연스럽게 나오고 들어가 보이게 한다(잘린 끝이 안 보임).
+      let d = taper(`M ${q.right - 10} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right - 10}`, 5, 1);
+      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right - 10}`, 3, 1);
       shape.setAttribute('d', d);
       if (drawnLinks.size > 0 && !drawnLinks.has(u)) shape.classList.add('new');
       drawn.add(u);
