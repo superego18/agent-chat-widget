@@ -63,11 +63,8 @@
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
   .links path { fill: none; stroke: url(#uifbLinkGrad) #a5b4fc; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .8; }
   .links path.new { stroke-dasharray: 1; stroke-dashoffset: 1; animation: linkdraw .7s ease-out forwards; }
-  .links circle { fill: #6366f1; }
-  .links circle.new { animation: linkdot 1.6s ease-out; transform-box: fill-box; transform-origin: center; }
   @keyframes linkdraw { to { stroke-dashoffset: 0; } }
-  @keyframes linkdot { 0% { transform: scale(0); } 40% { transform: scale(1.8); } 100% { transform: scale(1); } }
-  @media (prefers-reduced-motion: reduce) { .links path.new, .links circle.new { animation: none; stroke-dashoffset: 0; } }
+  @media (prefers-reduced-motion: reduce) { .links path.new { animation: none; stroke-dashoffset: 0; } }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
@@ -471,7 +468,7 @@
       if (!el || el.classList.contains('held')) return null;
       return { y: el.offsetTop + Math.min(16, el.offsetHeight / 2), right: el.offsetLeft + el.offsetWidth };
     };
-    // 연한 남보라→보라 그라데이션 선, 둥근 모서리. 새로 생긴 연결은 선이 그려지듯 나타나고 끝점이 톡 튄다.
+    // 연한 남보라→보라 그라데이션 선, 둥근 모서리. 새로 생긴 연결은 선이 그려지듯 나타난다.
     svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
     const rail = box.clientWidth - 8;
     const R = 8;
@@ -496,9 +493,6 @@
       seg(`M ${q.right + 3} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right + 3}`);
       // 그 사이의 답들로 갈라지는 가지(부드러운 곡선)
       for (const e of ends.slice(0, -1)) seg(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right + 3}`);
-      const dot = (pt) => { const c = document.createElementNS(NS, 'circle'); c.setAttribute('cx', String(pt.right + 3)); c.setAttribute('cy', String(pt.y)); c.setAttribute('r', '3'); if (isNew) c.classList.add('new'); svg.append(c); };
-      dot(q);
-      ends.forEach(dot);
     }
     drawnLinks = drawn;
     box.prepend(svg);
