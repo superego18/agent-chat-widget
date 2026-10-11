@@ -64,7 +64,8 @@
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
   .links { z-index: 0; }
   .msgs > .msg { position: relative; z-index: 1; } /* 선 끝이 말풍선 뒤로 들어가게 말풍선을 선 위에 둔다 */
-  .links path { fill: url(#uifbLinkGrad) #a5b4fc; opacity: .85; }
+  .links path { fill: url(#uifbLinkGrad) #a5b4fc; opacity: .3; transition: opacity .2s; }
+  .links path.on { opacity: .9; }
   .links path.reply { fill: url(#uifbReplyGrad) #fbbf24; } /* 골라서 답장한 연결은 주황(인용 노란 음영과 같은 계열) */
   .links path.new { animation: linkin .6s ease-out; }
   @keyframes linkin { from { opacity: 0; } }
@@ -460,6 +461,15 @@
   }
   // 질문과 답을 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 묶음이 겹치면 선을 한 칸씩 안쪽으로 옮긴다.
   let lastLinks = null;
+  let linkFocus = null; // 누른 메시지 번호. 그 메시지의 연결만 진하게 보인다
+  // 평소엔 모든 연결선을 아주 옅게 깔고, 메시지를 누르면 그 메시지의 연결만 굵고 진하게 바꾼다(다시 누르거나 빈 곳을 누르면 원래대로).
+  $('msgs').addEventListener('click', (e) => {
+    if (e.target.closest('button, a, textarea, input, select, .quote')) return;
+    const m = e.target.closest('.msg');
+    const id = m ? Number(m.dataset.id) : null;
+    linkFocus = id && id !== linkFocus ? id : null;
+    if (lastLinks) drawLinks(lastLinks);
+  });
   let drawnLinks = new Set(); // 이미 그린 연결(질문 번호). 새 연결만 그려지는 움직임을 준다
   // 질문과 그 답들을 대화 목록 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 질문 쪽은 굵고 답 쪽으로 갈수록 가늘어진다.
   // 가늘어지는 선은 경로를 따라 점을 찍고 양옆으로 폭만큼 벌린 윤곽을 채운 도형 하나로 그린다(연결마다 요소 하나라 가볍다).
@@ -513,8 +523,10 @@
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
     for (const m of messages) if (m.replyTo && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
     const placed = pairs.map((p) => ({ ...p, q: pos(p.from), ends: p.tos.map(pos).filter(Boolean) })).filter((p) => p.q && p.ends.length && p.ends[0].y > p.q.y).sort((a, b) => a.q.y - b.q.y);
-    for (const { from: u, q, ends, kind } of placed) {
+    for (const { from: u, tos, q, ends, kind } of placed) {
       const side = sideOf(u);
+      const on = linkFocus != null && (linkFocus === u || tos.includes(linkFocus)); // 누른 메시지의 연결만 굵고 진하게
+      const [w0, w1, w2] = on ? [5, 1, 3] : [1.6, 0.8, 1.2];
       const last = ends[ends.length - 1];
       const bottom = Math.max(q.y, last.y);
       const ln = lanes[side];
@@ -529,10 +541,11 @@
       const x = R1 ? box.clientWidth - 8 - lane * 6 : 8 + lane * 6;
       const edge = (p) => (R1 ? p.right - 10 : p.left + 10);
       const k = R1 ? -r : r; // 모서리가 기둥 안쪽으로 휘는 방향
-      let d = taper(`M ${edge(q)} ${q.y} H ${x + k} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x + k} ${bottom} H ${edge(last)}`, 5, 1);
-      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x + k} ${e.y} H ${edge(e)}`, 3, 1);
+      let d = taper(`M ${edge(q)} ${q.y} H ${x + k} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x + k} ${bottom} H ${edge(last)}`, w0, w1);
+      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x + k} ${e.y} H ${edge(e)}`, w2, w1);
       shape.setAttribute('d', d);
       if (kind === 'reply') shape.classList.add('reply');
+      if (on) shape.classList.add('on');
       const key = kind + u + ':' + ends.length;
       if (drawnLinks.size > 0 && !drawnLinks.has(key)) shape.classList.add('new');
       drawn.add(key);
