@@ -1096,11 +1096,12 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'cat' + (showDrafts && sheetLabel === name ? ' open' : '');
-      b.title = '짧게: 나중에 담을 분류 · 꾹: 이 분류 보관함 열기';
+      b.title = showDrafts ? '누르면 이 분류 보관함 열기' : '짧게: 나중에 담을 분류 · 꾹: 이 분류 보관함 열기';
       b.innerHTML = '<span class="fill"></span>';
       b.append(`${name || '미분류'} ${c}${showDrafts && sheetLabel === name ? ' ▾' : ''}`);
       b.setAttribute('aria-pressed', String((draftLabel || '') === name));
-      holdable(b, () => setDraftLabel(name || null), () => (showDrafts && sheetLabel === name ? setDraftsView(false) : openSheet(name)), () => showDrafts && sheetLabel === name);
+      // 보관함이 열려 있으면 짧게 눌러도 그 분류 보관함으로 바꿔 연다(담을 분류는 그대로). 닫혀 있으면 짧게 = 담을 분류 고르기.
+      holdable(b, () => (showDrafts ? (sheetLabel === name ? setDraftsView(false) : openSheet(name)) : setDraftLabel(name || null)), () => (showDrafts && sheetLabel === name ? setDraftsView(false) : openSheet(name)), () => showDrafts && sheetLabel === name);
       box.append(b);
     }
     // 새 분류: 평소에는 다른 분류 칩과 같은 크기의 "+ 새 분류" 칩이고, 누르면 그 자리에서 이름 칸으로 바뀐다
