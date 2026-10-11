@@ -61,6 +61,10 @@
   /* 답 잇는 선: 대화 목록 오른쪽 가장자리를 따라, 질문(내 메시지)과 그에 대한 답을 꺾쇠 모양 선으로 잇는다. */
   .msgs { position: relative; padding-right: 18px; }
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+  .links.cards { z-index: 0; }
+  .links.cards rect { fill: rgba(99,102,241,.11); stroke: rgba(99,102,241,.3); stroke-width: 1; }
+  .msgs > .msg, .msgs > .typing, .msgs > .newline, .msgs > .empty { position: relative; z-index: 1; }
+  .msg.dim { opacity: .28; transition: opacity .2s; }
   .links .taper { opacity: .85; } /* 조각이 겹치는 둥근 끝이 진해지지 않게 묶음째 투명도를 준다 */
   .links line { stroke: url(#uifbLinkGrad) #a5b4fc; stroke-linecap: round; }
   .links line.new { opacity: 0; animation: linkdraw .2s ease-out forwards; }
@@ -455,10 +459,49 @@
   // 질문과 답을 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 묶음이 겹치면 선을 한 칸씩 안쪽으로 옮긴다.
   let lastLinks = null;
   let drawnLinks = new Set(); // 이미 그린 연결(질문 번호). 새 연결만 그려지는 움직임을 준다
+  // 답 잇기 표시 방식(비교 중): line 선 · card 묶음 바탕 · tap 눌렀을 때만 강조 · band 같은 색 띠 · last 마지막 묶음만 선.
+  // 시험할 때는 localStorage __uifb_linkstyle 로 바꾼다.
+  const linkStyle = () => { try { return localStorage.getItem('__uifb_linkstyle') || 'line'; } catch { return 'line'; } };
+  // 질문 묶음과 그 답들. 같은 답들을 함께 받은 질문은 한 묶음이다.
+  function linkGroups(links) {
+    const byArr = new Map();
+    for (const [a, qs] of links.ans) byArr.set(qs, [...(byArr.get(qs) || []), a]);
+    return [...byArr].map(([qs, as]) => ({ qs, as }));
+  }
+  let focusGroup = null; // tap 방식에서 누른 묶음
+  function applyLinkStyle(links, box) {
+    const style = linkStyle();
+    const groups = linkGroups(links);
+    const el = (id) => box.querySelector(`.msg[data-id="${id}"]`);
+    if (style === 'band') {
+      const palette = ['#818cf8', '#f59e0b', '#10b981', '#ec4899'];
+      groups.forEach((g, i) => {
+        const c = palette[i % palette.length];
+        for (const id of g.qs) { const e = el(id); if (e) e.style.boxShadow = `inset -4px 0 0 ${c}`; }
+        for (const id of g.as) { const e = el(id); if (e) e.style.boxShadow = `0 0 0 1px rgba(0,0,0,.1), inset 4px 0 0 ${c}`; }
+      });
+    }
+    if (style === 'tap' && focusGroup) {
+      const g = groups.find((x) => x.qs.includes(focusGroup) || x.as.includes(focusGroup));
+      if (g) for (const e of box.querySelectorAll('.msg')) if (![...g.qs, ...g.as].includes(Number(e.dataset.id))) e.classList.add('dim');
+    }
+  }
+  $('msgs').addEventListener('click', (e) => {
+    if (linkStyle() !== 'tap' || e.target.closest('button, a, textarea, .quote')) return;
+    const m = e.target.closest('.msg');
+    const id = m ? Number(m.dataset.id) : null;
+    focusGroup = id && id !== focusGroup && !m.classList.contains('dim') ? id : null;
+    render();
+  });
   function drawLinks(links) {
     lastLinks = links;
     const box = $('msgs');
     box.querySelector('.links')?.remove();
+    if (!box.clientWidth) return; // 대화창이 닫혀 있으면 크기가 없어 그리지 않는다(열 때 다시 그린다)
+    const style = linkStyle();
+    applyLinkStyle(links, box);
+    if (style === 'band' || style === 'tap') return;
+    if (style === 'last') { const last = [...links.by].at(-1); links = { ans: links.ans, by: new Map(last ? [last] : []) }; }
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'links');
@@ -472,6 +515,22 @@
     // 연한 남보라→보라 그라데이션 선, 둥근 모서리. 새로 생긴 연결은 선이 그려지듯 나타난다.
     svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
     box.prepend(svg); // 경로 길이를 재려면 문서에 붙어 있어야 한다
+    if (style === 'card') {
+      // 질문부터 마지막 답까지를 연한 둥근 바탕 하나로 감싼다(말풍선 뒤에 깔린다).
+      svg.classList.add('cards');
+      for (const g of linkGroups(links)) {
+        const els = [...g.qs, ...g.as].map((id) => box.querySelector(`.msg[data-id="${id}"]`)).filter((e) => e && !e.classList.contains('held'));
+        if (els.length < 2) continue;
+        const top = Math.min(...els.map((e) => e.offsetTop)) - 2;
+        const bottom = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight)) + 2;
+        const rect = document.createElementNS(NS, 'rect');
+        rect.setAttribute('x', '4'); rect.setAttribute('y', String(top));
+        rect.setAttribute('width', String(box.clientWidth - 8)); rect.setAttribute('height', String(bottom - top));
+        rect.setAttribute('rx', '14');
+        svg.append(rect);
+      }
+      return;
+    }
     const rail = box.clientWidth - 8;
     const R = 8;
     const lanes = [];
