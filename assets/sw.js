@@ -14,16 +14,19 @@ self.addEventListener('push', (e) => {
     silent: !!d.silent,
     icon: '/__uifb/icon-192.png',
     badge: '/__uifb/icon-192.png',
-    data: { url: d.url || '/' },
+    data: { url: d.url || '/', session: d.session || null },
   }));
 });
 
 // 알림을 누르면 이미 열린 창이 있으면 그 창으로, 없으면 새로 연다.
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || '/';
+  // 알림이 어느 세션 것인지 알려, 대화창이 그 세션 탭을 열게 한다(열린 창에는 메시지로, 새 창은 주소 끝 #uifb-tab= 으로).
+  const session = e.notification.data && e.notification.data.session;
+  const base = (e.notification.data && e.notification.data.url) || '/';
+  const url = session ? base.split('#')[0] + '#uifb-tab=' + encodeURIComponent(session) : base;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-    for (const c of list) if ('focus' in c) return c.focus();
+    for (const c of list) if ('focus' in c) { if (session) c.postMessage({ type: 'uifb-open-tab', session }); return c.focus(); }
     return self.clients.openWindow(url);
   }));
 });

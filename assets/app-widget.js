@@ -2377,6 +2377,21 @@
       if (ls) { ls.value = '\u0000new'; ls.onchange(); const i = card.querySelector('.newlb'); if (i) i.value = st.moveNew.value; }
     }
   }
-  poll().then(() => { restoreReplyState(); if (wasOpen && $('panel').hidden) $('btn').click(); restoreSheetState(); restoreEditState(); });
+  // 알림을 눌러 들어오면 그 알림의 세션 탭을 연다(서비스 워커가 메시지로 알려 주거나, 새로 열 때는 주소 끝 #uifb-tab=).
+  function openTabFromNotice(session) {
+    if (!session || !sessions.some((x) => x.id === session)) return;
+    if ($('panel').hidden) $('btn').click();
+    if (session !== activeTab) { tabSetAt = Date.now(); switchTab(session); savePrefs({ tab: session }); }
+  }
+  navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'uifb-open-tab') openTabFromNotice(e.data.session); });
+  navigator.serviceWorker?.getRegistrations?.().then((rs) => rs.forEach((r) => r.update().catch(() => {}))).catch(() => {}); // 알림 서비스 워커가 바뀌었으면 새 판으로
+  poll().then(() => {
+    restoreReplyState();
+    if (wasOpen && $('panel').hidden) $('btn').click();
+    const m = /#uifb-tab=([^&]+)/.exec(location.hash);
+    if (m) { openTabFromNotice(decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname + location.search); }
+    restoreSheetState();
+    restoreEditState();
+  });
   setInterval(poll, 3000);
 })();
