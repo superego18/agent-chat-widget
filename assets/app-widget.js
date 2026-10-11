@@ -56,7 +56,12 @@
   .msg.user.held .meta span, .msg.user.cancelled .meta span { background: rgba(79,70,229,.1); }
   .msg .editdraft { display: block; }
   .msg .editdraft .meta { margin: 3px 0 8px; }
-  .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .85; cursor: pointer; white-space: normal; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+  .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
+  .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
+  .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
+  .msg .quote .qbar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 2px; }
+  .msg .quote .qbar button { font: inherit; font-size: 10.5px; font-weight: 600; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+  .msg .quote .qbar button[hidden] { display: none; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
   .empty { margin: auto; text-align: center; font-size: 12px; color: #8f8c84; line-height: 1.6; white-space: pre-line; }
@@ -282,6 +287,7 @@
     if (t) lastSel = { text: t.slice(0, 500), at: Date.now() };
   });
   let replyMsg = null;
+  const openQuotes = new Set(); // 펼친 인용(메시지 번호)
   function showReplyText() {
     const m = replyMsg;
     if (!m) return;
@@ -503,16 +509,34 @@
       } else d.append(tag, body, small);
       const orig = m.replyTo && messages.find((x) => x.id === m.replyTo);
       if (orig) {
+        // 인용: 길면 4줄로 줄여 보이고 "펼치기"로 전체를 본다. "원문으로"는 원래 메시지로 가서 인용한 부분을 칠한다.
         const q = document.createElement('span');
-        q.className = 'quote';
-        q.textContent = '↩ ' + (m.replyQuote ? `${quoteOf(orig).split(':')[0]}: "${m.replyQuote}"` : quoteOf(orig));
-        q.title = '원래 메시지로 가기';
-        q.onclick = () => {
+        q.className = 'quote' + (openQuotes.has(m.id) ? ' open' : '');
+        const who = quoteOf(orig).split(':')[0];
+        const full = m.replyQuote ? `↩ ${who}: "${m.replyQuote}"` : `↩ ${who}: ${orig.draft ? orig.draft.items.map((it) => it.text).join(' / ') : orig.text}`;
+        const qt = document.createElement('span');
+        qt.className = 'qt';
+        qt.textContent = full;
+        const bar = document.createElement('span');
+        bar.className = 'qbar';
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.textContent = openQuotes.has(m.id) ? '접기' : '펼치기';
+        toggle.hidden = true;
+        toggle.onclick = () => { openQuotes.has(m.id) ? openQuotes.delete(m.id) : openQuotes.add(m.id); render(); };
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.textContent = '원문으로';
+        go.onclick = () => {
           const el = box.querySelector(`.msg[data-id="${m.replyTo}"]`);
           if (!el) return;
           flash(el);
           if (m.replyQuote) { markQuote(m.replyTo, m.replyQuote); setTimeout(() => markQuote(replyTo, replyQuote), 2500); }
         };
+        bar.append(toggle, go);
+        q.append(qt, bar);
+        // 그려진 뒤 잘렸는지 보고, 잘렸거나 펼친 상태일 때만 "펼치기/접기"를 보인다.
+        requestAnimationFrame(() => { toggle.hidden = !(openQuotes.has(m.id) || qt.scrollHeight > qt.clientHeight + 1); });
         body.before(q);
       }
       if (typeof m.id === 'number' && !isHeld(m)) {
