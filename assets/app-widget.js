@@ -66,6 +66,10 @@
   .msg.user.hold { max-width: 100%; }
   .msg.user.hold .hacts { flex-wrap: wrap; gap: 5px; }
   .msg.user.hold .hacts button { padding: 4px 8px; }
+  .msg.user.hold.editing { width: 100%; }
+  .msg.user.hold .hacts .brk { flex-basis: 100%; height: 0; }
+  .msg.user.hold .hacts .now { background: #b45309; color: #fff; } /* 입력칸의 끼워넣기와 같은 주황(보내기와 구분) */
+  .msg.user.hold .hacts .save { background: #fff; color: #4f46e5; box-shadow: inset 0 0 0 1.5px #4f46e5; }
   .msg.user.hold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #a5b4fc; }
   .msg.user.hold .tag { background: #e0e7ff; }
   .msg.user.hold .hacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
@@ -951,40 +955,48 @@
       const tag = document.createElement('span');
       tag.className = 'tag';
       tag.textContent = '보류 · 아직 안 보냄';
-      const t = document.createElement('span');
+      let t = document.createElement('span');
       t.className = 'mbody';
       t.innerHTML = mdLite(d.text);
       const sm = document.createElement('small');
       sm.textContent = shortAt(d.at) + ' · 보내기를 누를 때까지 세션에 가지 않음';
-      if (holdEdit?.id === d.id) {
-        const ta = document.createElement('textarea');
-        ta.className = 'edit';
-        ta.value = holdEdit.text;
-        ta.setAttribute('aria-label', '보류 글 고치기');
-        ta.oninput = () => { holdEdit.text = ta.value; };
-        const bar = document.createElement('span');
-        bar.className = 'hacts';
-        const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; bar.append(b); };
-        mk('취소', '', () => { holdEdit = null; render(); });
-        mk('저장', 'go', async () => { const v = holdEdit.text.trim(); if (!v) return; holdEdit = null; await draftsApi({ action: 'update', id: d.id, text: v }); render(); });
+      // 고치는 중에도 다른 단추를 그대로 둔다. 보관함으로·끼워넣기·보내기는 고친 글을 먼저 저장한 뒤 한다.
+      const ed = holdEdit?.id === d.id;
+      let body = t;
+      if (ed) {
+        body = document.createElement('textarea');
+        body.className = 'edit';
+        body.value = holdEdit.text;
+        body.setAttribute('aria-label', '보류 글 고치기');
+        body.oninput = () => { holdEdit.text = body.value; };
         h.classList.add('editing');
-        h.append(tag, ta, sm, bar);
-        box.append(h);
-        editEl = ta;
-        continue;
+        editEl = body;
       }
+      const saveEdit = async () => {
+        if (!ed) return true;
+        const v = holdEdit.text.trim();
+        if (!v) return false;
+        holdEdit = null;
+        if (v !== d.text) await draftsApi({ action: 'update', id: d.id, text: v });
+        return true;
+      };
       const acts = document.createElement('span');
       acts.className = 'hacts';
       const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
-      mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; render(); editEl?.focus(); });
-      mk('지우기', '', async () => { await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
-      mk('보관함으로', '', async () => { await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
+      if (ed) {
+        mk('수정 취소', '', () => { holdEdit = null; render(); });
+        mk('저장', 'save', async () => { if (await saveEdit()) render(); });
+        acts.append(Object.assign(document.createElement('i'), { className: 'brk' })); // 고치기 단추와 나머지 단추를 두 줄로 나눈다
+      } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; render(); editEl?.focus(); });
+      mk('지우기', '', async () => { if (ed) holdEdit = null; await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
+      mk('보관함으로', '', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
       // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
       const tgt = sessionById(d.to);
       if (tgt && tgt.tool !== 'codex' && ['working', 'permission'].includes(tgt.status?.state)) {
-        mk('끼워넣기', 'go', async () => { await draftsApi({ action: 'send', ids: [d.id], plain: true, interject: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
+        mk('끼워넣기', 'now', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'send', ids: [d.id], plain: true, interject: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
       }
-      mk('보내기', 'go', async () => { await draftsApi({ action: 'send', ids: [d.id], plain: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
+      mk('보내기', 'go', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'send', ids: [d.id], plain: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
+      t = body;
       h.append(tag, t, sm, acts);
       box.append(h);
     }
