@@ -46,7 +46,7 @@
   .msg .editbar .go { background: #fff; color: #4f46e5; }
   /* 보내기 취소한 메시지: 흐리게, 글에 줄을 긋는다. */
   .msg.user.cancelled { background: #e7e5e0; color: #6b6860; box-shadow: none; }
-  .msg.user.cancelled > span:not(.tag):not(.quote) { text-decoration: line-through; }
+  .msg.user.cancelled > .mbody { text-decoration: line-through; } /* 글에만 긋는다(다시 보내기의 취소·다시 보내기 버튼 줄은 빼고) */
   .msg.user.cancelled .tag { background: rgba(0,0,0,.08); }
   .msg .dh { display: block; font-size: 11px; opacity: .85; margin-bottom: 4px; }
   .msg .ditem { display: block; }
@@ -428,7 +428,8 @@
   }
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
   // 세션이 받아 갔는지: 감시 명령이 넘긴 마지막 번호까지, 또는 끼워넣기로 따로 넘긴 것(_at).
-  const got = (m) => m.id <= (delivered[m.to] || 0) || !!delivered._at?.[m.id];
+  // 받아 간 번호(_at)로 본다. _at 이 생기기 전의 하루 넘은 메시지만 마지막 번호로 본다(scripts/chat-format.mjs 의 wasDelivered 와 같다).
+  const got = (m) => !!delivered._at?.[m.id] || (m.id <= (delivered[m.to] || 0) && Date.now() - Date.parse(m.at) > 86_400_000);
   const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && !m.cancelled && !got(m);
   let wasHeld = new Set();
   function orderAt(m) {

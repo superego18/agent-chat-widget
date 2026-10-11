@@ -11,7 +11,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatMessage } from './chat-format.mjs';
+import { formatMessage, pendingFor } from './chat-format.mjs';
 
 async function readStdin() {
   let s = '';
@@ -102,7 +102,7 @@ try {
     // 사용자가 "끼워넣기"로 보낸 것만 넣는다. 나머지는 일이 끝난 뒤 감시 명령이 넘긴다.
     // 일하는 도중 내 중간 안내가 대화에 먼저 기록돼도 건너뛰지 않게, "마지막 답 뒤" 조건 없이 아직 안 넘긴 끼워넣기 메시지를 모두 넣는다.
     const sid = session.sessionId;
-    const pending = all.filter((m) => m.from === 'user' && m.to === sid && m.context !== 'terminal' && m.interject && !m.cancelled && m.id > (d[sid] || 0) && !d._at?.[m.id]);
+    const pending = pendingFor(all, sid, 0, d).filter((m) => m.interject);
     if (pending.length) {
       const now = new Date().toISOString();
       const stamp = Object.fromEntries(pending.map((m) => [m.id, now]));

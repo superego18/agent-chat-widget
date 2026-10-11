@@ -83,7 +83,7 @@ function pendingMessages() {
   } catch {}
   let d = {};
   try { d = JSON.parse(fs.readFileSync(path.join(dir, 'delivered.json'), 'utf8')); } catch {}
-  return pendingFor(messages, sid, Math.max(seen, d[sid] || 0)).filter((m) => !d._at?.[m.id]).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
+  return pendingFor(messages, sid, seen, d).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
 }
 
 let timer;

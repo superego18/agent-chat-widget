@@ -17,10 +17,14 @@ export function formatMessage(m, all) {
   return lines;
 }
 
-// 이 세션에게 온 페이지·앱 메시지 중, 이 세션이 그 뒤에 아직 답하지 않았고 아직 받아 가지 않은 것.
-// seen: 이 번호까지는 처리한 것으로 본다(감시 --seen, 또는 delivered.json 에 적힌 이미 받아 간 번호).
-export function pendingFor(messages, sid, seen) {
-  const mine = messages.filter((m) => (m.from === 'user' && m.to === sid && m.context !== 'terminal' && !m.cancelled) || (m.from === 'agent' && m.session === sid));
-  const lastAgent = mine.map((m) => m.from).lastIndexOf('agent');
-  return mine.slice(lastAgent + 1).filter((m) => m.from === 'user' && m.id > seen);
+// 받아 갔는지: 받아 간 메시지는 delivered.json 의 _at 에 번호별로 남는다. _at 이 생기기 전의 옛 메시지(하루 넘은 것)는
+// 그 세션이 받아 간 마지막 번호까지를 받아 간 것으로 본다.
+const DAY = 86_400_000;
+export const wasDelivered = (m, d) => !!d._at?.[m.id] || (m.id <= (d[m.to] || 0) && Date.now() - Date.parse(m.at) > DAY);
+
+// 이 세션에게 온 페이지·앱 메시지 중 아직 받아 가지 않은 것(취소한 것 빼고).
+// 세션의 답보다 앞에 있어도 넘긴다(작업 중에 보낸 메시지가 작업을 마치며 쓴 답 때문에 건너뛰어지지 않게).
+// seen: 이 번호까지는 처리한 것으로 본다(감시 --seen).
+export function pendingFor(messages, sid, seen, d) {
+  return messages.filter((m) => m.from === 'user' && m.to === sid && m.context !== 'terminal' && !m.cancelled && m.id > seen && !wasDelivered(m, d));
 }
