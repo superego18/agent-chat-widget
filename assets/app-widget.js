@@ -368,7 +368,7 @@
           again.textContent = '다시 보내기';
           again.onclick = () => {
             $('input').value = m.text;
-            autoGrow($('input'));
+            $('input').dispatchEvent(new Event('input')); // 쓰던 글로 저장해야 다음 동기화가 비운 값으로 덮어쓰지 않는다
             if (m.where?.selector) {
               where = m.where;
               $('whereText').textContent = '위치: ' + (where.text || where.selector.replace(WIDGET_PREFIX, '대화창 › '));
