@@ -62,15 +62,10 @@
   /* 답 잇는 선: 대화 목록 오른쪽 가장자리를 따라, 질문(내 메시지)과 그에 대한 답을 꺾쇠 모양 선으로 잇는다. */
   .msgs { position: relative; padding-right: 18px; }
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
-  .links.cards { z-index: 0; }
-  .links.cards rect { fill: rgba(99,102,241,.11); stroke: rgba(99,102,241,.3); stroke-width: 1; }
-  .msgs > .msg, .msgs > .typing, .msgs > .newline, .msgs > .empty { position: relative; z-index: 1; }
-  .msg.dim { opacity: .28; transition: opacity .2s; }
-  .links .taper { opacity: .85; } /* 조각이 겹치는 둥근 끝이 진해지지 않게 묶음째 투명도를 준다 */
-  .links line { stroke: url(#uifbLinkGrad) #a5b4fc; stroke-linecap: round; }
-  .links line.new { opacity: 0; animation: linkdraw .2s ease-out forwards; }
-  @keyframes linkdraw { to { opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { .links line.new { animation: none; opacity: 1; } }
+  .links path { fill: url(#uifbLinkGrad) #a5b4fc; opacity: .85; }
+  .links path.new { animation: linkin .6s ease-out; }
+  @keyframes linkin { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .links path.new { animation: none; } }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
@@ -462,78 +457,48 @@
   // 질문과 답을 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 묶음이 겹치면 선을 한 칸씩 안쪽으로 옮긴다.
   let lastLinks = null;
   let drawnLinks = new Set(); // 이미 그린 연결(질문 번호). 새 연결만 그려지는 움직임을 준다
-  // 답 잇기 표시 방식(비교 중): line 선 · card 묶음 바탕 · tap 눌렀을 때만 강조 · band 같은 색 띠 · last 마지막 묶음만 선.
-  // 시험할 때는 localStorage __uifb_linkstyle 로 바꾼다.
-  const linkStyle = () => { try { return localStorage.getItem('__uifb_linkstyle') || 'line'; } catch { return 'line'; } };
-  // 질문 묶음과 그 답들. 같은 답들을 함께 받은 질문은 한 묶음이다.
-  function linkGroups(links) {
-    const byArr = new Map();
-    for (const [a, qs] of links.ans) byArr.set(qs, [...(byArr.get(qs) || []), a]);
-    return [...byArr].map(([qs, as]) => ({ qs, as }));
-  }
-  let focusGroup = null; // tap 방식에서 누른 묶음
-  function applyLinkStyle(links, box) {
-    const style = linkStyle();
-    const groups = linkGroups(links);
-    const el = (id) => box.querySelector(`.msg[data-id="${id}"]`);
-    if (style === 'band') {
-      const palette = ['#818cf8', '#f59e0b', '#10b981', '#ec4899'];
-      groups.forEach((g, i) => {
-        const c = palette[i % palette.length];
-        for (const id of g.qs) { const e = el(id); if (e) e.style.boxShadow = `inset -4px 0 0 ${c}`; }
-        for (const id of g.as) { const e = el(id); if (e) e.style.boxShadow = `0 0 0 1px rgba(0,0,0,.1), inset 4px 0 0 ${c}`; }
-      });
-    }
-    if (style === 'tap' && focusGroup) {
-      const g = groups.find((x) => x.qs.includes(focusGroup) || x.as.includes(focusGroup));
-      if (g) for (const e of box.querySelectorAll('.msg')) if (![...g.qs, ...g.as].includes(Number(e.dataset.id))) e.classList.add('dim');
-    }
-  }
-  $('msgs').addEventListener('click', (e) => {
-    if (linkStyle() !== 'tap' || e.target.closest('button, a, textarea, .quote')) return;
-    const m = e.target.closest('.msg');
-    const id = m ? Number(m.dataset.id) : null;
-    focusGroup = id && id !== focusGroup && !m.classList.contains('dim') ? id : null;
-    render();
-  });
+  // 질문과 그 답들을 대화 목록 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 질문 쪽은 굵고 답 쪽으로 갈수록 가늘어진다.
+  // 가늘어지는 선은 경로를 따라 점을 찍고 양옆으로 폭만큼 벌린 윤곽을 채운 도형 하나로 그린다(연결마다 요소 하나라 가볍다).
+  // 묶음이 겹치면 한 칸씩 안쪽으로 비켜 그린다. 새로 생긴 연결은 서서히 나타난다.
   function drawLinks(links) {
     lastLinks = links;
     const box = $('msgs');
     box.querySelector('.links')?.remove();
     if (!box.clientWidth) return; // 대화창이 닫혀 있으면 크기가 없어 그리지 않는다(열 때 다시 그린다)
-    const style = linkStyle();
-    applyLinkStyle(links, box);
-    if (style === 'band' || style === 'tap') return;
-    if (style === 'last') { const last = [...links.by].at(-1); links = { ans: links.ans, by: new Map(last ? [last] : []) }; }
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'links');
     svg.setAttribute('width', String(box.clientWidth));
     svg.setAttribute('height', String(box.scrollHeight));
+    svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
+    box.prepend(svg); // 경로 길이를 재려면 문서에 붙어 있어야 한다
     const pos = (id) => {
       const el = box.querySelector(`.msg[data-id="${id}"]`);
       if (!el || el.classList.contains('held')) return null;
       return { y: el.offsetTop + Math.min(16, el.offsetHeight / 2), right: el.offsetLeft + el.offsetWidth };
     };
-    // 연한 남보라→보라 그라데이션 선, 둥근 모서리. 새로 생긴 연결은 선이 그려지듯 나타난다.
-    svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
-    box.prepend(svg); // 경로 길이를 재려면 문서에 붙어 있어야 한다
-    if (style === 'card') {
-      // 질문부터 마지막 답까지를 연한 둥근 바탕 하나로 감싼다(말풍선 뒤에 깔린다).
-      svg.classList.add('cards');
-      for (const g of linkGroups(links)) {
-        const els = [...g.qs, ...g.as].map((id) => box.querySelector(`.msg[data-id="${id}"]`)).filter((e) => e && !e.classList.contains('held'));
-        if (els.length < 2) continue;
-        const top = Math.min(...els.map((e) => e.offsetTop)) - 2;
-        const bottom = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight)) + 2;
-        const rect = document.createElementNS(NS, 'rect');
-        rect.setAttribute('x', '4'); rect.setAttribute('y', String(top));
-        rect.setAttribute('width', String(box.clientWidth - 8)); rect.setAttribute('height', String(bottom - top));
-        rect.setAttribute('rx', '14');
-        svg.append(rect);
-      }
-      return;
-    }
+    const guide = document.createElementNS(NS, 'path');
+    svg.append(guide);
+    // 경로 d 를 따라 굵기 w0 → w1 로 가늘어지는 채운 도형의 윤곽
+    const taper = (d, w0, w1) => {
+      guide.setAttribute('d', d);
+      const L = guide.getTotalLength();
+      const n = Math.max(6, Math.round(L / 8));
+      const pts = Array.from({ length: n + 1 }, (_, i) => guide.getPointAtLength((L * i) / n));
+      const left = [];
+      const right = [];
+      pts.forEach((p, i) => {
+        const a = pts[Math.max(0, i - 1)];
+        const b = pts[Math.min(n, i + 1)];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const h = (w0 + ((w1 - w0) * i) / n) / 2;
+        left.push(`${(p.x - (dy / len) * h).toFixed(1)} ${(p.y + (dx / len) * h).toFixed(1)}`);
+        right.push(`${(p.x + (dy / len) * h).toFixed(1)} ${(p.y - (dx / len) * h).toFixed(1)}`);
+      });
+      return `M ${left.join(' L ')} L ${right.reverse().join(' L ')} Z`;
+    };
     const rail = box.clientWidth - 8;
     const R = 8;
     const lanes = [];
@@ -543,45 +508,22 @@
       const ends = answers.map(pos).filter(Boolean);
       if (!q || !ends.length) continue;
       const last = ends[ends.length - 1];
-      const top = Math.min(q.y, ends[0].y);
       const bottom = Math.max(q.y, last.y);
-      let lane = lanes.findIndex((end) => end < top - 2);
+      let lane = lanes.findIndex((end) => end < Math.min(q.y, ends[0].y) - 2);
       if (lane < 0) lane = lanes.length;
       lanes[lane] = bottom;
       const x = rail - lane * 6;
-      const isNew = drawnLinks.size > 0 && !drawnLinks.has(u);
-      drawn.add(u);
       const r = Math.min(R, (bottom - q.y) / 2);
-      // 질문 쪽은 굵고 답 쪽으로 갈수록 가늘어지는 선(이전 대화가 뒤 대화로 모여드는 느낌). SVG 선은 굵기가 하나라,
-      // 경로를 잘게 나눠 조각마다 굵기를 줄여 그린다. 새 연결은 조각이 차례로 나타나 그려지듯 보인다.
-      const seg = (d, w0, w1) => {
-        const guide = document.createElementNS(NS, 'path');
-        guide.setAttribute('d', d);
-        svg.append(guide);
-        const L = guide.getTotalLength();
-        const n = Math.max(8, Math.round(L / 5));
-        const pts = Array.from({ length: n + 1 }, (_, i) => guide.getPointAtLength((L * i) / n));
-        guide.remove();
-        const g = document.createElementNS(NS, 'g');
-        g.setAttribute('class', 'taper');
-        let prev = pts[0];
-        for (let i = 1; i <= n; i++) {
-          const pt = pts[i];
-          const ln = document.createElementNS(NS, 'line');
-          ln.setAttribute('x1', String(prev.x)); ln.setAttribute('y1', String(prev.y));
-          ln.setAttribute('x2', String(pt.x)); ln.setAttribute('y2', String(pt.y));
-          ln.setAttribute('stroke-width', String(w0 + ((w1 - w0) * i) / n));
-          if (isNew) { ln.classList.add('new'); ln.style.animationDelay = `${Math.round((i / n) * 600)}ms`; }
-          g.append(ln);
-          prev = pt;
-        }
-        svg.append(g);
-      };
-      // 질문 → 오른쪽 기둥 → 마지막 답(둥근 모서리)
-      seg(`M ${q.right + 3} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right + 3}`, 5, 1);
-      // 그 사이의 답들로 갈라지는 가지(부드러운 곡선)
-      for (const e of ends.slice(0, -1)) seg(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right + 3}`, 3, 1);
+      const shape = document.createElementNS(NS, 'path');
+      // 질문 → 오른쪽 기둥 → 마지막 답(둥근 모서리), 그 사이의 답들로 갈라지는 가지
+      let d = taper(`M ${q.right + 3} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right + 3}`, 5, 1);
+      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right + 3}`, 3, 1);
+      shape.setAttribute('d', d);
+      if (drawnLinks.size > 0 && !drawnLinks.has(u)) shape.classList.add('new');
+      drawn.add(u);
+      svg.append(shape);
     }
+    guide.remove();
     drawnLinks = drawn;
   }
   new ResizeObserver(() => { if (lastLinks) drawLinks(lastLinks); }).observe($('msgs'));
