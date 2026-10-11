@@ -1959,13 +1959,13 @@
   showNotif();
 
   // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
-  // 새로고침: 대화창 머리말과, 대화창을 닫았을 때 여는 단추 옆(화면 전체를 새로 읽는다).
+  // 새로고침: 대화창 머리말과, 대화창을 닫았을 때 여는 단추 아래(화면 전체를 새로 읽는다).
   $('reload').onclick = () => location.reload();
   $('rbtn').onclick = () => location.reload();
   const placeRbtn = () => {
     const b = $('btn').getBoundingClientRect();
-    $('rbtn').style.left = b.right + 6 + 'px';
-    $('rbtn').style.top = b.top + (b.height - 34) / 2 + 'px';
+    $('rbtn').style.left = b.left + 'px';
+    $('rbtn').style.top = b.bottom + 6 + 'px';
   };
   new ResizeObserver(placeRbtn).observe($('btn'));
   addEventListener('resize', placeRbtn);
