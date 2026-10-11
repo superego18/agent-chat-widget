@@ -267,8 +267,9 @@
   form .bcol { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; align-self: stretch; justify-content: flex-end; }
   button.busy { pointer-events: none; color: transparent !important; position: relative; }
   button.busy::before { content: none !important; }
-  button.busy::after { content: ''; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -8px 0 0 -8px; border: 2px solid var(--spb, rgba(0,0,0,.15)); border-top-color: var(--spt, #57534e); border-radius: 50%; animation: rspin .7s linear infinite; }
-  form button[type="submit"].busy, form .now.busy, .hacts .go.busy, .hacts .now.busy { --spb: rgba(255,255,255,.35); --spt: #fff; }
+  /* 새로고침 단추와 같은 ↻ 가 돈다 */
+  button.busy::after { content: '↻'; position: absolute; left: 50%; top: 50%; width: 1em; height: 1em; margin: -.5em 0 0 -.5em; line-height: 1em; text-align: center; font-size: 15px; font-weight: 400; color: var(--spt, #4f46e5); animation: rspin .7s linear infinite; }
+  form button[type="submit"].busy, form .now.busy, .hacts .go.busy, .hacts .now.busy { --spt: #fff; }
   form .bcol button { height: 38px; padding: 0 10px; font-size: 12.5px; }
   /* 단추 칸은 입력칸이 길어져도 늘지 않고 아래에 붙는다. 끼워넣기가 없으면 보내기가 두 칸(보류+보관함) 높이를 채운다 */
   form .bcol { align-self: flex-end; }
