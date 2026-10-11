@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { formatMessage, pendingFor } from './chat-format.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -69,15 +70,20 @@ function cleanup() {
 process.on('SIGINT', () => { cleanup(); process.exit(130); });
 process.on('SIGTERM', () => { cleanup(); process.exit(143); });
 
-// 이 세션에게 온 페이지·앱 메시지 중, 이 세션이 그 뒤에 아직 답하지 않은 것
+// 이 세션에게 온 페이지·앱 메시지 중, 이 세션이 그 뒤에 아직 답하지 않은 것.
+// 세션이 일하는 중이면 기다린다. 그동안 온 메시지는 중계 훅이 도구 사이에 끼워 넣고(PostToolUse), 남은 것은 일이 끝나면 넘긴다.
+// 훅이 이미 넘긴 것(delivered.json 의 이 세션 번호)은 다시 넘기지 않는다.
 function pendingMessages() {
+  let st = {};
+  try { st = JSON.parse(fs.readFileSync(path.join(dir, `status-${sid}.json`), 'utf8')); } catch {}
+  if (['working', 'permission'].includes(st.state) && Date.now() - Date.parse(st.at) < 30 * 60_000) return [];
   let messages = [];
   try {
     messages = JSON.parse(fs.readFileSync(chatFile, 'utf8')).messages || [];
   } catch {}
-  const mine = messages.filter((m) => (m.from === 'user' && m.to === sid && m.context !== 'terminal') || (m.from === 'agent' && m.session === sid));
-  const lastAgent = mine.map((m) => m.from).lastIndexOf('agent');
-  return mine.slice(lastAgent + 1).filter((m) => m.from === 'user' && m.id > seen).map((m) => ({ ...m, orig: m.replyTo ? messages.find((x) => x.id === m.replyTo) : null }));
+  let d = {};
+  try { d = JSON.parse(fs.readFileSync(path.join(dir, 'delivered.json'), 'utf8')); } catch {}
+  return pendingFor(messages, sid, Math.max(seen, d[sid] || 0)).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
 }
 
 let timer;
@@ -120,18 +126,7 @@ function check() {
   const pending = pendingMessages();
   if (pending.length > 0) {
     const lines = [`CHAT session=${session.name}`];
-    for (const m of pending) {
-      const dev = m.device === 'mobile' ? '·모바일' : m.device === 'desktop' ? '·데스크톱' : '';
-      lines.push(`[${m.id}]${m.context === 'app' ? `[앱 화면${dev}]` : `[비교 페이지${dev}]`}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
-      // 이전 메시지에 단 답장이면 원문을 붙인다.
-      if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
-      const orig = m.orig;
-      if (orig) lines.push(`    답장 대상 [${orig.id}] ${orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트'}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
-      // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
-      if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
-        lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
-      }
-    }
+    for (const m of pending) lines.push(...m.lines);
     markDelivered(pending.map((m) => m.id));
     finish(0, lines);
   }

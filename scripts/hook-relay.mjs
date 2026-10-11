@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Claude Code 훅에서 불려, 터미널 대화를 리뷰 서버 대화 기록(chat.json)으로 보낸다. 의존성 없음 (Node 18+).
-// 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, Stop, Notification 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
+// 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, PostToolUse, Stop, Notification 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
 //   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답, 세션끼리 주고받은 메시지(SendMessage)를 chat.json 으로 보낸다.
 //   - 상태: 작업 시작·도구 사용·응답 끝·승인 대기를 /api/status 로 보내, 대화 창에 "작업 중" 표시를 한다.
-//   - 입력 JSON 은 표준 입력으로 받는다. 표준 출력에는 아무것도 쓰지 않는다(MessageDisplay 는 출력이 없으면 원문을 그대로 표시한다).
+//   - 끼워 넣기: 작업 중에 대화창에서 온 메시지를 도구를 하나 쓸 때마다(PostToolUse) 세션에 바로 넣는다(터미널에서 작업 중에 입력하는 것처럼).
+//   - 입력 JSON 은 표준 입력으로 받는다. 표준 출력에는 끼워 넣기(PostToolUse) 말고는 아무것도 쓰지 않는다(MessageDisplay 는 출력이 없으면 원문을 그대로 표시한다).
 //   - <cwd>/.ui-feedback/sessions/<session_id>.json 으로 등록된 세션일 때만 보낸다.
 //     그 밖의 프로젝트·세션에서는 아무것도 하지 않고 끝난다.
 //   - 어떤 오류가 나도 조용히 끝난다(대화 표시를 막지 않는다).
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { formatMessage, pendingFor } from './chat-format.mjs';
 
 async function readStdin() {
   let s = '';
@@ -90,6 +92,24 @@ try {
     await post(port, { session: session.sessionId, state: 'working', detail: toolLabel(input.tool_name, ti), ...(peer ? { peer } : {}) }, 'status');
     // 세션끼리 보내는 메시지도 대화창에 남긴다(보낸 세션 기준).
     if (peer) await post(port, { from: 'peer', session: session.sessionId, toName: peer, text: ti.message });
+  }
+
+  if (input.hook_event_name === 'PostToolUse') {
+    const all = JSON.parse(fs.readFileSync(path.join(dir, 'chat.json'), 'utf8')).messages || [];
+    const file = path.join(dir, 'delivered.json');
+    let d = {};
+    try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+    const pending = pendingFor(all, session.sessionId, d[session.sessionId] || 0);
+    if (pending.length) {
+      const now = new Date().toISOString();
+      const ids = pending.map((m) => m.id);
+      const recent = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[0] - a[0]).slice(0, 500));
+      // 바로 읽은 것으로 적는다(대화창에서 그 자리로 떨어진다).
+      fs.writeFileSync(file, JSON.stringify({ ...d, [session.sessionId]: Math.max(d[session.sessionId] || 0, ...ids), _at: recent({ ...(d._at || {}), ...Object.fromEntries(ids.map((id) => [id, now])) }), _read: recent({ ...(d._read || {}), ...Object.fromEntries(ids.map((id) => [id, now])) }) }, null, 2) + '\n');
+      const lines = ['[대화창 · 작업 중에 온 메시지] 사용자가 작업하는 동안 대화창에서 보냈습니다. 지금 읽고 하던 일에 반영하세요. 답은 이번 턴의 마지막 답에 함께 쓰면 대화창에 보입니다.'];
+      for (const m of pending) lines.push(...formatMessage(m, all));
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: lines.join('\n') } }));
+    }
   }
 
   if (input.hook_event_name === 'Stop') {
