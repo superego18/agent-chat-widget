@@ -1051,6 +1051,14 @@
 
   let key = '';
   let statusKey = '';
+  let seenKey = '';
+  // 읽음이 바뀌었을 때: 안 읽음 표시와 탭·버튼 개수만 고친다.
+  function refreshUnread() {
+    const byId = new Map(messages.map((m) => [String(m.id), m]));
+    for (const el of $('msgs').querySelectorAll('.msg.unread')) { const m = byId.get(el.dataset.id); if (m && !isUnread(m)) el.classList.remove('unread'); }
+    renderTabs();
+    updateBadges();
+  }
   async function poll() {
     try {
       const [c, ss, dd, sv, pf, cp] = await Promise.all([
@@ -1093,12 +1101,15 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold).map((d) => d.id + d.to).join() + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      const k = JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold).map((d) => d.id + d.to).join() + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
       const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
-      if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; render(); }
+      // 읽음(seen)만 바뀐 것은 다시 그리지 않고 표시만 고친다(스크롤하며 읽을 때마다 전체를 다시 그리면 화면이 얼고 스크롤이 튄다).
+      const seenK = JSON.stringify(seen);
+      if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; seenKey = seenK; render(); }
       else {
+        if (seenK !== seenKey) { seenKey = seenK; refreshUnread(); }
         if (sk !== statusKey) { statusKey = sk; updateTyping(); }
         updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       }
@@ -1117,12 +1128,23 @@
     if (!document.getElementById('__uifb_hide_devtools')) {
       const st = document.createElement('style');
       st.id = '__uifb_hide_devtools';
-      st.textContent = 'html[data-uifb-open] nextjs-portal{display:none!important}';
+      // 모바일에선 뒤의 앱 화면도 굴러가지 않게 묶는다(키보드가 올라올 때 창이 끌려 올라가며 앱이 비치지 않게).
+      st.textContent = 'html[data-uifb-open] nextjs-portal{display:none!important}@media (max-width:767px){html[data-uifb-open],html[data-uifb-open] body{overflow:hidden!important;overscroll-behavior:none!important}}';
       document.head.append(st);
     }
+    fitPanel();
     render();
     if (open) { autoGrow($('input')); if (!touchScreen()) $('input').focus(); }
   };
+  // 모바일 키보드가 올라오면 iOS는 화면 전체를 밀어 올려 대화창 아래로 앱이 비친다. 보이는 영역(visualViewport)에 창을 맞춘다.
+  function fitPanel() {
+    const vv = window.visualViewport, p = $('panel');
+    if (!vv || p.hidden || innerWidth > 767 || p.classList.contains('picking')) { p.style.removeProperty('top'); p.style.removeProperty('height'); return; }
+    p.style.setProperty('top', vv.offsetTop + 'px', 'important');
+    p.style.setProperty('height', vv.height + 'px', 'important');
+  }
+  window.visualViewport?.addEventListener('resize', fitPanel);
+  window.visualViewport?.addEventListener('scroll', fitPanel);
 
   // 찍을 화면: 'app'(대화창을 숨기고 앱을 찍음) 또는 'widget'(대화창만 보이고 그 안을 찍음). 한 번에 하나만 보인다.
   let pickTarget = 'app';
@@ -1816,6 +1838,7 @@
   function saveCompose(session, text) {
     if (!session) return;
     composed[session] = text ? { text } : undefined;
+    typedAt = Date.now(); // 저장이 서버에 닿기 전 다음 확인에서 옛 글을 다시 채우지 않게(보낸 뒤 입력칸에 글이 되살아나던 문제)
     fetch('/__uifb/api/compose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session, text }) }).catch(() => {});
   }
   // force: 탭을 바꿨을 때. 아니면 지금 쓰는 중(최근 3초 안에 입력)에는 덮어쓰지 않는다.
