@@ -264,7 +264,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침">↻</button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button><button class="notif" id="reload" type="button" title="새로고침">↻</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="reload" type="button" title="새로고침">↻</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
