@@ -1143,7 +1143,7 @@
       fold.type = 'button';
       fold.className = 'fold';
       fold.textContent = (folded.has(label) ? '▸ ' : '▾ ') + (label || '미분류');
-      fold.onclick = () => { folded.has(label) ? folded.delete(label) : folded.add(label); renderDrafts(); };
+      fold.onclick = () => { folded.has(label) ? folded.delete(label) : folded.add(label); saveFold(); renderDrafts(); };
       const n = document.createElement('span');
       n.className = 'n';
       n.textContent = `${items.length}개`;
@@ -1247,7 +1247,7 @@
     fold.type = 'button';
     fold.className = 'fold';
     fold.textContent = (showTrash ? '▾ ' : '▸ ') + '최근 보낸 것·지운 것';
-    fold.onclick = () => { showTrash = !showTrash; renderDrafts(); };
+    fold.onclick = () => { showTrash = !showTrash; saveFold(); renderDrafts(); };
     const n = document.createElement('span');
     n.className = 'n';
     n.textContent = `${list.length}개 · 7일 보관`;
@@ -1305,6 +1305,7 @@
   }
   function setDraftsView(on) {
     if (!on) sheetLabel = null;
+    if (on && !showDrafts) loadFold();
     showDrafts = on;
     $('dsheet').hidden = !on;
     updateDraftsBtn();
@@ -1470,6 +1471,14 @@
   let draftLabel = null;
   let labelSetAt = 0; // 방금 이 화면에서 고른 분류를 서버의 옛 값으로 되돌리지 않게
   const folded = new Set();
+  // 접은 분류와 "최근 보낸 것·지운 것" 펼침은 서버 설정에 세션마다 남겨, 새로고침해도(다른 화면에서도) 그대로 둔다.
+  const saveFold = () => savePrefs({ fold: { session: activeTab, labels: [...folded], trash: showTrash } });
+  function loadFold() {
+    const f = prefs?.fold?.[activeTab];
+    folded.clear();
+    for (const l of f?.labels || []) folded.add(l);
+    showTrash = !!f?.trash;
+  }
   // 분류와 고른 분류는 세션 탭마다 따로다(다른 세션의 분류가 섞이지 않게).
   const allLabels = () => [...new Set([...mine().map((d) => d.label).filter(Boolean), ...(draftLabel ? [draftLabel] : [])])].sort((a, b) => a.localeCompare(b, 'ko'));
   function setDraftLabel(v) {
