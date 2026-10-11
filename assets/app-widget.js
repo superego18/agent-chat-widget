@@ -930,7 +930,7 @@
             bk.textContent = '보류로';
             bk.onclick = () => withBusy(bk, async () => {
               const text = m.draft ? m.draft.items.map((it) => it.text).join('\n') : m.text;
-              await draftsApi({ action: 'add', hold: true, fromMsg: m.id, cid: 'tohold-' + m.id, to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
+              await draftsApi({ action: 'add', hold: true, fromMsg: m.id, cid: 'tohold-' + m.id, ...(m.replyTo ? { replyTo: m.replyTo, replyQuote: m.replyQuote, refer: m.refer } : {}), to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
               toast('✓ 보류로 옮김');
               render();
             });
@@ -1060,6 +1060,14 @@
       let t = document.createElement('span');
       t.className = 'mbody';
       t.innerHTML = mdLite(d.text);
+      // 답장·참고를 붙여 담았으면 보낸 말풍선과 같은 인용을 보인다(보내면 함께 간다).
+      const orig = d.replyTo && messages.find((x) => x.id === d.replyTo);
+      const qb = orig ? document.createElement('span') : null;
+      if (qb) {
+        const who = quoteOf(orig).split(':')[0];
+        qb.className = 'quote ' + (d.refer ? 'ref' : d.replyQuote ? 'part' : 'whole');
+        qb.textContent = (d.refer ? '📎 참고 · ' : '↩ ') + (d.replyQuote ? `${who}의 ${d.refer ? '일부' : '고른 부분'}: "${d.replyQuote}"` : (d.refer ? '' : '답장 · ') + quoteOf(orig));
+      }
       const sm = document.createElement('small');
       sm.textContent = shortAt(d.at) + ' · 보내기를 누를 때까지 세션에 가지 않음';
       // 고치는 중에도 다른 단추를 그대로 둔다. 보관함으로·끼워넣기·보내기는 고친 글을 먼저 저장한 뒤 한다.
@@ -1099,7 +1107,7 @@
       }
       mk('보내기', 'go', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'send', ids: [d.id], plain: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
       t = body;
-      h.append(tag, t, sm, acts);
+      h.append(tag, ...(qb ? [qb] : []), t, sm, acts);
       box.append(h);
     }
     drawLinks(links);
@@ -1972,7 +1980,7 @@
     const kind = 'draft:' + activeTab;
     await withBusy($(toDrafts ? 'stash' : 'later'), async () => {
     try {
-      const r = await draftsApi({ action: 'add', cid: cidFor(kind, text), ...(toDrafts ? {} : { hold: true }), to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      const r = await draftsApi({ action: 'add', cid: cidFor(kind, text), ...(replyTo ? { replyTo, ...(replyQuote ? { replyQuote } : {}), ...(refMode ? { refer: true } : {}) } : {}), ...(toDrafts ? {} : { hold: true }), to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
       if (!r?.id) throw new Error('add');
       doneCid(kind, text);
       sentTexts.set(text, Date.now());
@@ -1982,6 +1990,7 @@
       $('msgs').scrollTop = $('msgs').scrollHeight;
       where = null;
       $('where').hidden = true;
+      setReply(null);
       updateDraftsBtn();
       if (toDrafts) toast('✓ 보관함에 담음', { label: `${draftLabel || '미분류'} 열기`, fn: () => openSheet(draftLabel || '') });
     } catch {
