@@ -70,6 +70,7 @@
   @keyframes linkin { from { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .links path.new { animation: none; } }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
+  .msg .quote.part { background: rgba(253,230,138,.55); color: #78350f; border-left-color: #f59e0b; opacity: 1; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
   .msg .quote .qbar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 2px; }
@@ -659,9 +660,10 @@
       if (orig) {
         // 인용: 길면 4줄로 줄여 보이고 "펼치기"로 전체를 본다. "원문으로"는 원래 메시지로 가서 인용한 부분을 칠한다.
         const q = document.createElement('span');
-        q.className = 'quote' + (openQuotes.has(m.id) ? ' open' : '');
+        // 골라서 답장(일부)은 노란 바탕에 "고른 부분", 메시지 전체에 답장은 회색 바탕에 "전체에 답장"으로 나눠 보인다.
+        q.className = 'quote ' + (m.replyQuote ? 'part' : 'whole') + (openQuotes.has(m.id) ? ' open' : '');
         const who = quoteOf(orig).split(':')[0];
-        const full = m.replyQuote ? `↩ ${who}: "${m.replyQuote}"` : `↩ ${who}: ${orig.draft ? orig.draft.items.map((it) => it.text).join(' / ') : orig.text}`;
+        const full = m.replyQuote ? `↩ ${who}의 고른 부분: "${m.replyQuote}"` : `↩ ${who}에게 전체 답장: ${orig.draft ? orig.draft.items.map((it) => it.text).join(' / ') : orig.text}`;
         const qt = document.createElement('span');
         qt.className = 'qt';
         qt.textContent = full;
