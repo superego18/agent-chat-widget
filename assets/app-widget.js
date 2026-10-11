@@ -324,7 +324,7 @@
     if (!btn || btn.classList.contains('busy')) return;
     btn.classList.add('busy');
     const t = setTimeout(() => btn.classList.remove('busy'), 8000);
-    try { return await fn(); } finally { clearTimeout(t); btn.classList.remove('busy'); }
+    try { return await fn(); } catch { toast('처리하지 못했어요. 다시 눌러 주세요'); } finally { clearTimeout(t); btn.classList.remove('busy'); }
   }
   let sessions = [];
   const transcripts = {};
@@ -340,13 +340,13 @@
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
     const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
     if (!text) return;
-    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
-    try {
-      await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      editing = null;
-      await poll();
-      render();
-    } catch {}
+    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, cid: cidFor('resend:' + m.id, text), ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
+    const r = await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('resend');
+    doneCid('resend:' + m.id, text);
+    editing = null;
+    await poll();
+    render();
   }
   const WIDGET_PREFIX = '대화창 › '; // 대화창 안을 찍은 위치의 선택자 앞에 붙인다
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
@@ -868,12 +868,12 @@
             bk.type = 'button';
             bk.className = 'rp';
             bk.textContent = '보류로';
-            bk.onclick = async () => {
+            bk.onclick = () => withBusy(bk, async () => {
               const text = m.draft ? m.draft.items.map((it) => it.text).join('\n') : m.text;
-              await draftsApi({ action: 'add', hold: true, fromMsg: m.id, to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
+              await draftsApi({ action: 'add', hold: true, fromMsg: m.id, cid: 'tohold-' + m.id, to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
               toast('✓ 보류로 옮김');
               render();
-            };
+            });
             small.append(bk);
           }
         }
@@ -884,12 +884,12 @@
           ij.type = 'button';
           ij.className = 'rp';
           ij.textContent = m.interject ? '끼워넣기 취소' : '끼워넣기';
-          ij.onclick = async () => {
+          ij.onclick = () => withBusy(ij, async () => {
             const r = await fetch('/__uifb/api/chat-interject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, on: !m.interject }) }).catch(() => null);
             if (r && !r.ok) alert((await r.json().catch(() => ({}))).error || '바꾸지 못했습니다.');
             await poll();
             render();
-          };
+          });
           small.append(ij);
         }
         // 세션이 아직 안 받아 간 메시지는 보내기를 취소할 수 있다.
@@ -898,12 +898,12 @@
           cx.type = 'button';
           cx.className = 'rp';
           cx.textContent = '보내기 취소';
-          cx.onclick = async () => {
+          cx.onclick = () => withBusy(cx, async () => {
             const r = await fetch('/__uifb/api/chat-cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) }).catch(() => null);
             if (r && !r.ok) alert((await r.json().catch(() => ({}))).error || '취소하지 못했습니다.');
             await poll();
             render();
-          };
+          });
           small.append(cx);
         }
         if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
@@ -939,7 +939,7 @@
           go.type = 'button';
           go.className = 'go';
           go.textContent = '다시 보내기';
-          go.onclick = () => resend(m);
+          go.onclick = () => withBusy(go, () => resend(m));
           bar.append(cancel, go);
           body.replaceWith(ta);
           small.after(bar);
@@ -1618,7 +1618,7 @@
       gs.type = 'button';
       gs.className = 'gsend';
       gs.textContent = items.length > 1 ? '이 분류 모두 보내기' : '보내기';
-      gs.onclick = () => sendDrafts(items.map((d) => d.id));
+      gs.onclick = () => withBusy(gs, () => sendDrafts(items.map((d) => d.id)));
       if (only) head.append(gs);
       else head.append(fold, n, gs);
       g.append(head);
@@ -1679,7 +1679,7 @@
       }
       const acts = document.createElement('div');
       acts.className = 'acts';
-      const btn = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
+      const btn = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = () => withBusy(b, fn); acts.append(b); };
       btn('이것만 보내기', () => sendDrafts([d.id]), 'send1');
       if (loc?.el) btn('위치 보기', () => flash(loc.el));
       if (d.where?.selector) btn('다시 찍기', () => { pickFor = d.id; startPick(); });
@@ -1765,7 +1765,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = '다시 담기';
-      b.onclick = async () => { await draftsApi({ action: 'restore', ids: [d.id] }); toast('✓ 다시 담음'); };
+      b.onclick = () => withBusy(b, async () => { await draftsApi({ action: 'restore', ids: [d.id] }); toast('✓ 다시 담음'); });
       row.append(what, tx, b);
       sec.append(row);
     }
@@ -1826,7 +1826,7 @@
   $('msgs').addEventListener('pointerdown', () => { if (showDrafts) setDraftsView(false); });
   $('draftsBtn').onclick = () => (showDrafts && sheetLabel === null ? setDraftsView(false) : openSheet(null));
   $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
-  $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
+  $('dsend').onclick = () => withBusy($('dsend'), () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id)));
 
   // "나중에"로 담으면 입력한 글이 보관함 버튼으로 날아 들어가고, 버튼이 한 번 튀며 개수가 오른다.
   // 폰에서는 "나중에"를 누르면 키보드가 닫히며 화면 배치가 바뀌므로, 날아가는 동안 매 프레임 버튼 위치를 다시 읽어 따라간다.
