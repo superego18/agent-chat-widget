@@ -657,10 +657,28 @@
     const sideOf = (id) => { const m = messages.find((x) => x.id === id); return m?.from === 'user' || (m?.from === 'peer' && m.to === activeTab) ? 'left' : 'right'; };
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
     for (const m of messages) if (m.replyTo && !m.refer && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
-    const placed = pairs.map((p) => ({ ...p, q: pos(p.from), ends: p.tos.map(pos).filter(Boolean) })).filter((p) => p.q && p.ends.length && p.ends[0].y > p.q.y).sort((a, b) => a.q.y - b.q.y);
-    for (const { from: u, tos, q, ends, kind } of placed) {
+    // 같은 답(또는 같은 원문)으로 모이는 연결은 한 줄기로 합친다: 같은 종류끼리 보내는 쪽이나 받는 쪽 메시지를 하나라도 함께 쓰면 한 묶음.
+    const groups = [];
+    for (const p of pairs) {
+      const ids = new Set([p.from, ...p.tos]);
+      const hit = groups.filter((g) => g.kind === p.kind && [...ids].some((id) => g.ids.has(id)));
+      const g = hit[0] || { kind: p.kind, froms: new Set(), tos: new Set(), ids: new Set() };
+      for (const o of hit.slice(1)) { o.froms.forEach((x) => g.froms.add(x)); o.tos.forEach((x) => g.tos.add(x)); o.ids.forEach((x) => g.ids.add(x)); groups.splice(groups.indexOf(o), 1); }
+      g.froms.add(p.from);
+      p.tos.forEach((x) => g.tos.add(x));
+      ids.forEach((x) => g.ids.add(x));
+      if (!hit[0]) groups.push(g);
+    }
+    const placed = groups.map((g) => {
+      const qs = [...g.froms].map((id) => ({ id, p: pos(id) })).filter((x) => x.p).sort((a, b) => a.p.y - b.p.y);
+      const ends = [...g.tos].filter((id) => !g.froms.has(id)).map(pos).filter(Boolean).sort((a, b) => a.y - b.y);
+      return { ...g, qs, ends };
+    }).filter((g) => g.qs.length && g.ends.length && g.ends[g.ends.length - 1].y > g.qs[0].p.y).sort((a, b) => a.qs[0].p.y - b.qs[0].p.y);
+    for (const { kind, froms, tos, qs, ends } of placed) {
+      const u = qs[0].id;
+      const q = qs[0].p;
       const side = sideOf(u);
-      const on = linkFocus != null && (linkFocus === u || tos.includes(linkFocus)); // 누른 메시지의 연결만 굵고 진하게
+      const on = linkFocus != null && (froms.has(linkFocus) || tos.has(linkFocus)); // 누른 메시지의 연결만 굵고 진하게
       const [w0, w1, w2] = on ? [5, 1, 3] : [1.6, 0.8, 1.2];
       const last = ends[ends.length - 1];
       const bottom = Math.max(q.y, last.y);
@@ -671,6 +689,7 @@
       const r = Math.min(R, (bottom - q.y) / 2);
       const shape = document.createElementNS(NS, 'path');
       // 보낸 말풍선 → 그쪽 가장자리 기둥 → 마지막 받는 말풍선(둥근 모서리), 그 사이로 갈라지는 가지.
+      // 같은 줄기에 합쳐진 다른 보낸 말풍선은 기둥으로 들어오는 가지로 잇는다.
       // 양 끝은 말풍선 뒤로 10px 들어가게 그려, 선이 말풍선 테두리에서 자연스럽게 나오고 들어가 보이게 한다(잘린 끝이 안 보임).
       const R1 = side === 'right';
       const x = R1 ? box.clientWidth - 8 - lane * 6 : 8 + lane * 6;
@@ -678,10 +697,11 @@
       const k = R1 ? -r : r; // 모서리가 기둥 안쪽으로 휘는 방향
       let d = taper([[edge(q), q.y], [x + k, q.y], ['Q', x, q.y, x, q.y + r], [x, bottom - r], ['Q', x, bottom, x + k, bottom], [edge(last), bottom]], w0, w1);
       for (const e of ends.slice(0, -1)) d += ' ' + taper([[x, e.y - r], ['Q', x, e.y, x + k, e.y], [edge(e), e.y]], w2, w1);
+      for (const o of qs.slice(1)) if (o.p.y < bottom) d += ' ' + taper([[edge(o.p), o.p.y], [x + k, o.p.y], ['Q', x, o.p.y, x, o.p.y + r]], w0 * 0.8, w2);
       shape.setAttribute('d', d);
       if (kind === 'reply') shape.classList.add('reply');
       if (on) shape.classList.add('on');
-      const key = kind + u + ':' + ends.length;
+      const key = kind + [...froms].join(',') + ':' + ends.length;
       if (drawnLinks.size > 0 && !drawnLinks.has(key)) shape.classList.add('new');
       drawn.add(key);
       svg.append(shape);
