@@ -340,10 +340,12 @@
     b.hidden = false;
     b.onclick = () => {
       const keep = lastSel;
+      // 글 선택을 먼저 풀고 입력칸에 초점을 준다(선택을 나중에 풀면 폰에서 입력칸 초점과 키보드가 사라진다).
+      try { ((root.getSelection && root.getSelection()) || getSelection())?.removeAllRanges(); } catch {}
+      b.hidden = true;
       setReply(m);
       if (!replyQuote && keep) { replyQuote = keep.text; showReplyText(); markQuote(m.id, replyQuote); }
-      b.hidden = true;
-      try { ((root.getSelection && root.getSelection()) || getSelection())?.removeAllRanges(); } catch {}
+      $('input').focus();
     };
   });
   function setReply(m) {
