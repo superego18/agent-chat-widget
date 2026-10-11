@@ -850,6 +850,14 @@
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
     try { localStorage.setItem('__uifb_open', open ? '1' : '0'); } catch {}
+    // 대화창이 열려 있는 동안 앱의 개발 도구 단추(Next.js 의 nextjs-portal)가 모바일에서 대화창을 가리므로 숨긴다. 닫으면 다시 보인다.
+    document.documentElement.toggleAttribute('data-uifb-open', open);
+    if (!document.getElementById('__uifb_hide_devtools')) {
+      const st = document.createElement('style');
+      st.id = '__uifb_hide_devtools';
+      st.textContent = 'html[data-uifb-open] nextjs-portal{display:none!important}';
+      document.head.append(st);
+    }
     render();
     if (open) { autoGrow($('input')); if (!touchScreen()) $('input').focus(); }
   };
