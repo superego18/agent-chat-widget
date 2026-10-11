@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 // 세션에 넘길 대화창 메시지를 사람이 읽을 줄로 만든다. 감시 명령(wait-review)과 중계 훅(hook-relay, 작업 중 끼워 넣기)이 함께 쓴다.
 // all: chat.json 의 전체 메시지(답장 원문을 찾을 때 쓴다).
 export function formatMessage(m, all) {
@@ -29,4 +30,25 @@ export const wasDelivered = (m, d) => !!d._at?.[m.id] || (m.id <= (d[m.to] || 0)
 // seen: 이 번호까지는 처리한 것으로 본다(감시 --seen).
 export function pendingFor(messages, sid, seen, d) {
   return messages.filter((m) => m.from === 'user' && m.to === sid && m.context !== 'terminal' && !m.cancelled && m.id > seen && !wasDelivered(m, d));
+}
+
+// delivered.json 은 감시 명령·중계 훅·서버가 함께 쓴다. 한쪽이 쓰는 도중에 다른 쪽이 읽으면 반쯤 쓴 파일을 읽어
+// 빈 기록({})으로 착각하고, 그러면 받아 간 메시지를 모두 다시 넘기거나 기록을 통째로 지운다.
+// 그래서 쓸 때는 임시 파일에 쓴 뒤 이름을 바꿔 한 번에 바꾸고, 읽다 실패하면 빈 기록이 아니라 null(이번엔 건너뜀)을 돌려준다.
+export function readJsonSafe(file) {
+  for (let i = 0; i < 5; i++) {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+      if (e.code === 'ENOENT') return {};
+      const until = Date.now() + 20;
+      while (Date.now() < until) {} // 잠깐 기다렸다 다시 읽는다(다른 쪽이 쓰는 중)
+    }
+  }
+  return null;
+}
+export function writeJsonAtomic(file, obj) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
+  fs.renameSync(tmp, file);
 }

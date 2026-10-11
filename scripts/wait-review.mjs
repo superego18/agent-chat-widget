@@ -11,7 +11,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatMessage, pendingFor } from './chat-format.mjs';
+import { formatMessage, pendingFor, readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -79,8 +79,8 @@ function pendingMessages() {
   try {
     messages = JSON.parse(fs.readFileSync(chatFile, 'utf8')).messages || [];
   } catch {}
-  let d = {};
-  try { d = JSON.parse(fs.readFileSync(path.join(dir, 'delivered.json'), 'utf8')); } catch {}
+  const d = readJsonSafe(path.join(dir, 'delivered.json'));
+  if (!d) return []; // 다른 쪽이 쓰는 중이라 못 읽었으면 이번엔 건너뛴다(빈 기록으로 보고 모두 다시 넘기지 않게)
   // --seen 은 더 이상 걸러내는 데 쓰지 않는다. 받아 간 메시지는 delivered.json 에 번호별로 남아 다시 넘기지 않고,
   // --seen 으로 걸러 내면 그보다 앞에 있었지만 아직 못 받아 간 메시지(작업 중에 온 것)가 영영 빠진다.
   return pendingFor(messages, sid, 0, d).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
@@ -101,12 +101,12 @@ function markHandling() {
 // 받아 간 시각(_at)에 맞춰 그 메시지를 대화 순서에 놓는 근거다.
 function markDelivered(ids) {
   const file = path.join(dir, 'delivered.json');
-  let d = {};
-  try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const d = readJsonSafe(file);
+  if (!d) return; // 못 읽었으면 기록을 덮어쓰지 않는다
   const now = new Date().toISOString();
   const at = { ...(d._at || {}) };
   for (const id of ids) at[id] ||= now;
-  fs.writeFileSync(file, JSON.stringify({ ...d, [sid]: Math.max(d[sid] || 0, ...ids), _at: Object.fromEntries(Object.entries(at).sort((a, b) => b[0] - a[0]).slice(0, 500)) }, null, 2) + '\n');
+  writeJsonAtomic(file, { ...d, [sid]: Math.max(d[sid] || 0, ...ids), _at: at });
 }
 
 function finish(code, lines) {

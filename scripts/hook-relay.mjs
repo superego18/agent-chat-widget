@@ -11,7 +11,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatMessage, pendingFor } from './chat-format.mjs';
+import { formatMessage, pendingFor, readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 
 async function readStdin() {
   let s = '';
@@ -97,18 +97,16 @@ try {
   if (input.hook_event_name === 'PostToolUse') {
     const all = JSON.parse(fs.readFileSync(path.join(dir, 'chat.json'), 'utf8')).messages || [];
     const file = path.join(dir, 'delivered.json');
-    let d = {};
-    try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+    const d = readJsonSafe(file) || null;
     // 사용자가 "끼워넣기"로 보낸 것만 넣는다. 나머지는 일이 끝난 뒤 감시 명령이 넘긴다.
     // 일하는 도중 내 중간 안내가 대화에 먼저 기록돼도 건너뛰지 않게, "마지막 답 뒤" 조건 없이 아직 안 넘긴 끼워넣기 메시지를 모두 넣는다.
     const sid = session.sessionId;
-    const pending = pendingFor(all, sid, 0, d).filter((m) => m.interject);
+    const pending = d ? pendingFor(all, sid, 0, d).filter((m) => m.interject) : []; // 못 읽었으면 이번엔 건너뛴다
     if (pending.length) {
       const now = new Date().toISOString();
       const stamp = Object.fromEntries(pending.map((m) => [m.id, now]));
-      const recent = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[0] - a[0]).slice(0, 500));
       // 받은 번호(_at)와 읽은 시각(_read)만 적는다. 마지막 번호는 올리지 않는다(그 앞의 끼워넣지 않은 메시지는 감시 명령이 넘겨야 한다).
-      fs.writeFileSync(file, JSON.stringify({ ...d, _at: recent({ ...(d._at || {}), ...stamp }), _read: recent({ ...(d._read || {}), ...stamp }) }, null, 2) + '\n');
+      writeJsonAtomic(file, { ...d, _at: { ...(d._at || {}), ...stamp }, _read: { ...(d._read || {}), ...stamp } });
       const lines = ['[대화창 · 작업 중에 끼워넣은 메시지] 사용자가 작업하는 동안 대화창에서 "끼워넣기"로 보냈습니다. 지금 읽고 하던 일에 반영하세요. 답은 이번 턴의 마지막 답에 함께 쓰면 대화창에 보입니다(답 맨 앞에 <re 번호>로 무엇에 답하는지 붙이세요).'];
       for (const m of pending) lines.push(...formatMessage(m, all));
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: lines.join('\n') } }));
