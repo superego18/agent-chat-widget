@@ -932,11 +932,11 @@
     if (scrollToUnread && !$('panel').hidden) {
       // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
       const pos = prefs.pos?.[activeTab];
-      const anchor = !newLine && pos && pos !== 'bottom' ? box.querySelector(`.msg[data-id="${CSS.escape(pos)}"]`) : null;
+      const [posId, posOff] = (pos || '').split('@');
+      const anchor = !newLine && posId && posId !== 'bottom' ? box.querySelector(`.msg[data-id="${CSS.escape(posId)}"]`) : null;
       // offsetTop 은 창 기준이라 머리말 높이만큼 어긋난다. 목록 기준 위치로 바꿔 계산한다.
       const topOf = (el) => el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-      const target = newLine || anchor;
-      box.scrollTop = target ? Math.max(0, topOf(target) - 8) : box.scrollHeight;
+      box.scrollTop = newLine ? Math.max(0, topOf(newLine) - 8) : anchor ? Math.max(0, topOf(anchor) - (posOff === undefined ? 8 : Number(posOff) || 0)) : box.scrollHeight;
       scrollToUnread = false;
     } else if (nearBottom) {
       // 새 답이 왔으면 그 답의 처음이 보이게 둔다(긴 답이면 끝부터 보이지 않게). 짧으면 어차피 맨 아래까지 내려간다.
@@ -1027,7 +1027,8 @@
       if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) {
         const top = box.getBoundingClientRect().top;
         const first = [...box.querySelectorAll('.msg')].find((el) => el.getBoundingClientRect().bottom > top + 4);
-        if (first) id = first.dataset.id;
+        // 메시지 번호와 그 메시지가 화면 맨 위에서 얼마나 위/아래에 있었는지 함께 저장한다(새로고침해도 같은 자리로).
+        if (first) id = first.dataset.id + '@' + Math.round(first.getBoundingClientRect().top - top);
       }
       if (prefs.pos?.[activeTab] !== id) { prefs.pos = { ...(prefs.pos || {}), [activeTab]: id }; savePrefs({ pos: { session: activeTab, id } }); }
     }, 800);
