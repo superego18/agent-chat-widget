@@ -124,6 +124,7 @@ function check() {
       const dev = m.device === 'mobile' ? '·모바일' : m.device === 'desktop' ? '·데스크톱' : '';
       lines.push(`[${m.id}]${m.context === 'app' ? `[앱 화면${dev}]` : `[비교 페이지${dev}]`}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
       // 이전 메시지에 단 답장이면 원문을 붙인다.
+      if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
       const orig = m.orig;
       if (orig) lines.push(`    답장 대상 [${orig.id}] ${orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트'}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
       // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.

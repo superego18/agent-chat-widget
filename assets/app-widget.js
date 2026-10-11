@@ -39,6 +39,11 @@
   /* 답장: 메시지마다 작은 "답장" 버튼(마우스가 있으면 올렸을 때만), 답장 메시지 위에는 원문 인용. */
   .msg .rp { font: inherit; font-size: 10px; color: inherit; background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; text-decoration: underline; opacity: .8; }
   @media (hover: hover) { .msg .rp { opacity: 0; } .msg:hover .rp, .msg .rp:focus-visible { opacity: .8; } }
+  .msg.editing { width: 88%; }
+  .msg .edit { display: block; width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; font: inherit; color: #1c1b18; background: #fff; border: 0; border-radius: 6px; padding: 6px 8px; margin-top: 2px; }
+  .msg .editbar { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .msg .editbar button { font: inherit; font-size: 12px; font-weight: 600; height: 30px; padding: 0 12px; border-radius: 6px; border: 0; cursor: pointer; background: rgba(255,255,255,.22); color: inherit; }
+  .msg .editbar .go { background: #fff; color: #4f46e5; }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .85; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
@@ -186,6 +191,19 @@
   try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
   let replyTo = null; // 답장할 메시지 번호
+  let editing = null; // 말풍선 안에서 고치는 중인 내 메시지 { id, text }
+  let editEl = null;
+  async function resend(m) {
+    const text = (editing?.text || '').trim();
+    if (!text) return;
+    const body = { from: 'user', text, to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.where ? { where: m.where } : {}) };
+    try {
+      await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      editing = null;
+      await poll();
+      render();
+    } catch {}
+  }
   const WIDGET_PREFIX = '대화창 › '; // 대화창 안을 찍은 위치의 선택자 앞에 붙인다
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
   let seen = {};
@@ -365,22 +383,38 @@
         rp.textContent = '답장';
         rp.onclick = () => setReply(m);
         small.append(rp);
-        // 내가 보낸 글은 입력칸에 다시 채워, 고쳐서 다시 보낼 수 있게 한다(찍은 위치도 함께).
-        if (m.from === 'user' && m.context !== 'terminal') {
+      }
+      // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
+      if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
+        if (m.resendOf) tag.textContent += ' · 다시 보냄';
+        if (editing?.id === m.id) {
+          d.classList.add('editing');
+          const ta = document.createElement('textarea');
+          ta.className = 'edit';
+          ta.value = editing.text;
+          ta.setAttribute('aria-label', '고쳐서 다시 보낼 글');
+          ta.oninput = () => { editing.text = ta.value; };
+          const bar = document.createElement('span');
+          bar.className = 'editbar';
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.textContent = '취소';
+          cancel.onclick = () => { editing = null; render(); };
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.className = 'go';
+          go.textContent = '다시 보내기';
+          go.onclick = () => resend(m);
+          bar.append(cancel, go);
+          body.replaceWith(ta);
+          small.after(bar);
+          editEl = ta;
+        } else {
           const again = document.createElement('button');
           again.type = 'button';
           again.className = 'rp';
           again.textContent = '다시 보내기';
-          again.onclick = () => {
-            $('input').value = m.text;
-            $('input').dispatchEvent(new Event('input')); // 쓰던 글로 저장해야 다음 동기화가 비운 값으로 덮어쓰지 않는다
-            if (m.where?.selector) {
-              where = m.where;
-              $('whereText').textContent = '위치: ' + (where.text || where.selector.replace(WIDGET_PREFIX, '대화창 › '));
-              $('where').hidden = false;
-            }
-            $('input').focus();
-          };
+          again.onclick = () => { editing = { id: m.id, text: m.text }; render(); editEl?.focus(); };
           small.append(again);
         }
       }
@@ -561,7 +595,8 @@
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
       const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer').map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
-      if (k !== key) { key = k; render(); }
+      // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
+      if (k !== key && !(editing && root.activeElement === editEl)) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
       peekNew();
     } catch {}
