@@ -262,7 +262,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button><button class="notif" id="reload" type="button" title="새로고침" hidden>↻</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
@@ -1954,6 +1954,20 @@
     showNotif();
   };
   showNotif();
+
+  // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 머리말에 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  $('reload').hidden = !standalone;
+  $('reload').onclick = () => location.reload();
+  let widgetV = null;
+  const checkVersion = async () => {
+    const v = await fetch('/__uifb/api/widget-version').then((r) => r.json()).then((j) => j.v).catch(() => null);
+    if (v == null) return;
+    if (widgetV == null) widgetV = v;
+    else if (v !== widgetV) { widgetV = v; toast('대화창이 새로 바뀌었어요', { label: '새로고침', fn: () => location.reload() }); }
+  };
+  checkVersion();
+  setInterval(checkVersion, 60_000);
 
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
