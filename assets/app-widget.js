@@ -53,6 +53,10 @@
   /* 답장: 메시지마다 작은 "답장" 버튼(마우스가 있으면 올렸을 때만), 답장 메시지 위에는 원문 인용. */
   .msg .rp { font: inherit; font-size: 10px; color: inherit; background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; text-decoration: underline; opacity: .8; }
   @media (hover: hover) { .msg .rp { opacity: 0; } .msg:hover .rp, .msg .rp:focus-visible { opacity: .8; } }
+  /* 답장·참고: 보관함 단추와 같은 베이지 상자. 메시지 글을 고르면 그 메시지의 두 단추가 남색으로 바뀌어 "고른 부분"에 쓰인다는 걸 보인다 */
+  .msg .rp.rq { text-decoration: none; opacity: 1; margin-left: 5px; padding: 1px 6px; border-radius: 5px; background: #ece9e1; color: #57534e; box-shadow: inset 0 0 0 1px #d6d3cb, inset 0 -2px 0 #d6d3cb; }
+  .msg.hassel .rp.rq { opacity: 1; background: #4f46e5; color: #fff; box-shadow: none; }
+  @media (hover: hover) { .msg .rp.rq { opacity: 0; } .msg:hover .rp.rq, .msg.hassel .rp.rq, .msg .rp.rq:focus-visible { opacity: 1; } }
   .msg.editing { width: 88%; }
   .msg .edit { display: block; width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; font: inherit; color: #1c1b18; background: #fff; border: 0; border-radius: 6px; padding: 6px 8px; margin-top: 2px; }
   .msg .editbar { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
@@ -170,11 +174,6 @@
   .chipbtn[aria-pressed="true"] { background: #1c1b18; color: #fff; border-color: transparent; }
   #replyText { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
-  .selreply { position: fixed; z-index: 2147483647; transform: translateX(-50%); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer; }
-  .selreply[hidden] { display: none; }
-  .selreply { display: flex; padding: 0; overflow: hidden; }
-  .selreply button { font: inherit; color: inherit; background: none; border: 0; padding: 7px 14px; cursor: pointer; }
-  .selreply button + button { border-left: 1px solid rgba(255,255,255,.25); }
   /* 참고(답장 아님): 회색 점선 인용, 원문과 잇는 선 없음 */
   .msg .quote.ref { background: rgba(127,127,127,.08); color: inherit; border-left: 0; outline: 1.5px dashed rgba(127,127,127,.55); outline-offset: -1.5px; opacity: .9; }
   #reply.ref { background: #f1f1ef; color: #44403c; outline: 1.5px dashed #a8a29e; outline-offset: -1.5px; }
@@ -295,7 +294,6 @@
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
-  <span class="selreply" id="selReply" hidden><button type="button" id="selR">↩ 고른 부분에 답장</button><button type="button" id="selF">📎 참고</button></span>
   <div class="toast" id="toast" hidden role="status"></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
@@ -424,29 +422,27 @@
       else CSS.highlights.delete('uifbq');
     } catch {}
   }
-  // 글을 고르면(이 탭의 메시지 안 글일 때만) 입력칸 위에 "고른 부분에 답장" 버튼을 띄운다.
+  // 글을 고르면(이 탭의 메시지 안 글일 때만) 그 메시지의 "↩ 답장"·"📎 참고" 단추에 색이 들어오고, 누르면 고른 부분만 인용한다.
   const msgOfSel = (t) => (t ? timeline(activeTab).filter((m) => typeof m.id === 'number' && !isHeld(m)).reverse().find((m) => plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text).includes(t)) : null);
+  let selFor = null; // 글을 고른 메시지 번호(선택이 풀려도 15초는 남겨, 폰에서 단추를 누르며 선택이 풀려도 쓰게)
+  let selT = null;
+  const markSel = () => { for (const el of $('msgs').querySelectorAll('.msg')) el.classList.toggle('hassel', selFor != null && el.dataset.id === String(selFor)); };
   document.addEventListener('selectionchange', () => {
     const m = lastSel && Date.now() - lastSel.at < 300 ? msgOfSel(lastSel.text) : null;
-    const b = $('selReply');
-    if (!m) { if (!b.matches(':hover')) setTimeout(() => { if (!lastSel || Date.now() - lastSel.at > 300) b.hidden = true; }, 400); return; }
-    const p = $('panel').getBoundingClientRect();
-    const c = $('composeRow').getBoundingClientRect();
-    b.style.left = p.left + p.width / 2 + 'px';
-    b.style.top = c.top - 46 + 'px';
-    b.hidden = false;
-    const pick = (ref) => {
-      const keep = lastSel;
-      // 글 선택을 먼저 풀고 입력칸에 초점을 준다(선택을 나중에 풀면 폰에서 입력칸 초점과 키보드가 사라진다).
-      try { ((root.getSelection && root.getSelection()) || getSelection())?.removeAllRanges(); } catch {}
-      b.hidden = true;
-      setReply(m, ref);
-      if (!replyQuote && keep) { replyQuote = keep.text; showReplyText(); markQuote(m.id, replyQuote); }
-      $('input').focus();
-    };
-    $('selR').onclick = () => pick(false);
-    $('selF').onclick = () => pick(true);
+    clearTimeout(selT);
+    if (m) { selFor = m.id; markSel(); return; }
+    selT = setTimeout(() => { selFor = null; markSel(); }, 15000);
   });
+  function quoteFrom(m, ref) {
+    const keep = selFor === m.id ? lastSel : null;
+    // 글 선택을 먼저 풀고 입력칸에 초점을 준다(선택을 나중에 풀면 폰에서 입력칸 초점과 키보드가 사라진다).
+    try { ((root.getSelection && root.getSelection()) || getSelection())?.removeAllRanges(); } catch {}
+    selFor = null;
+    markSel();
+    setReply(m, ref);
+    if (keep && !replyQuote) { replyQuote = keep.text; showReplyText(); markQuote(m.id, replyQuote); }
+    if (!keep && replyQuote) { replyQuote = null; showReplyText(); markQuote(null, null); } // 고른 글이 없으면 전체 인용
+  }
   function setReply(m, ref = false) {
     replyTo = m ? m.id : null;
     refMode = !!m && ref;
@@ -826,15 +822,16 @@
         const rp = document.createElement('button');
         rp.type = 'button';
         rp.className = 'rp';
-        rp.textContent = '답장';
-        rp.onclick = () => setReply(m);
+        rp.className = 'rp rq';
+        rp.textContent = '↩ 답장';
+        rp.onclick = () => quoteFrom(m, false);
         small.append(rp);
         const rf = document.createElement('button');
         rf.type = 'button';
-        rf.className = 'rp';
-        rf.textContent = '참고';
+        rf.className = 'rp rq';
+        rf.textContent = '📎 참고';
         rf.title = '답장이 아니라 참고하라고 이 메시지를 붙이기';
-        rf.onclick = () => setReply(m, true);
+        rf.onclick = () => quoteFrom(m, true);
         small.append(rf);
       }
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
@@ -1045,6 +1042,7 @@
       keepPlace(); // 다시 그려도 읽던 메시지가 같은 자리에 있게
     }
     markQuote(replyTo, replyQuote); // 다시 그리면 범위가 사라지므로 음영을 다시 칠한다
+    if (selFor != null) markSel();
     placeToBottom();
     const target = sessionById(activeTab);
     // 세션이 일하는 중이고 Claude 세션(중계 훅이 끼워 넣음)일 때만 "끼워넣기"를 보인다.
