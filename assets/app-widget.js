@@ -158,6 +158,10 @@
   form .now { background: #b45309; padding: 0 9px; }
   form .now[hidden] { display: none; }
   .msg.user .tag.now { background: #fde68a; color: #78350f; }
+  .fly { position: fixed; z-index: 2147483647; pointer-events: none; padding: 7px 10px; border-radius: 10px; background: #4f46e5; color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px rgba(0,0,0,.25); transform-origin: center; box-sizing: border-box; }
+  #draftsBtn.got { animation: got .7s ease-out; }
+  @keyframes got { 0% { transform: scale(1); } 30% { transform: scale(1.18); background: #4f46e5; color: #fff; } 100% { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { #draftsBtn.got { animation: gotc 1s; } @keyframes gotc { 0%, 60% { background: #4f46e5; color: #fff; } } }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -1049,9 +1053,32 @@
   $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
   $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
 
+  // "나중에"로 담으면 입력한 글이 보관함 버튼으로 날아 들어가고, 버튼이 한 번 튀며 개수가 오른다.
+  function flyToDrafts(text) {
+    const from = $('input').getBoundingClientRect();
+    const to = $('draftsBtn').getBoundingClientRect();
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce) {
+      const g = document.createElement('div');
+      g.className = 'fly';
+      g.textContent = text.replace(/\s+/g, ' ').slice(0, 40);
+      Object.assign(g.style, { left: from.left + 'px', top: from.top + 'px', width: from.width + 'px' });
+      root.append(g);
+      const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+      const dy = to.top + to.height / 2 - (from.top + 14);
+      g.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${dx}px,${dy}px) scale(.15)`, opacity: .3 }], { duration: 450, easing: 'cubic-bezier(.5,0,.75,0)' }).finished.then(() => g.remove(), () => g.remove());
+    }
+    setTimeout(() => {
+      $('draftsBtn').classList.remove('got');
+      void $('draftsBtn').offsetWidth;
+      $('draftsBtn').classList.add('got');
+    }, reduce ? 0 : 430);
+  }
+
   $('later').onclick = async () => {
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
+    flyToDrafts(text);
     $('input').value = '';
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
