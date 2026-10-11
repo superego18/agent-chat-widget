@@ -141,6 +141,11 @@
   .dgroup > header .n { font-weight: 400; color: #8f8c84; }
   .dgroup > header .gsend { margin-left: auto; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 0; background: #1c1b18; color: #fff; cursor: pointer; }
   .dgroup.folded .draft { display: none; }
+  /* 입력칸 지우기: 글이 있을 때만 입력칸 오른쪽 위에 보인다. */
+  .inwrap { position: relative; flex: 1; min-width: 0; display: flex; }
+  form .clr { position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; padding: 0; border-radius: 12px; background: rgba(0,0,0,.08); color: #5a5852; font-size: 14px; font-weight: 400; line-height: 24px; }
+  form .clr[hidden] { display: none; }
+  .inwrap textarea { padding-right: 32px; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -166,7 +171,7 @@
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
+  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="box" id="box" hidden></div>`;
@@ -1072,7 +1077,11 @@
     if (!force && (Date.now() - typedAt < 3000 || composeT)) return;
     if (el.value !== want) { el.value = want; autoGrow(el); }
   }
+  $('clr').onclick = () => { $('input').value = ''; $('input').dispatchEvent(new Event('input')); $('input').focus(); };
+  // 입력칸 값이 코드로 바뀌는 곳(보내기, 동기화, 탭 전환)이 여러 군데라, 지우기 버튼은 짧은 주기로 맞춘다.
+  setInterval(() => { $('clr').hidden = !$('input').value; }, 300);
   $('input').addEventListener('input', () => {
+    $('clr').hidden = !$('input').value;
     typedAt = Date.now();
     clearTimeout(composeT);
     const session = activeTab;
