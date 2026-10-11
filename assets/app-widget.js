@@ -168,7 +168,9 @@
   .gone .gwhat { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
   .gone .gwhat.sent { background: #dcfce7; color: #166534; }
   .gone .gwhat.deleted { background: #fee2e2; color: #991b1b; }
-  .gone .gtext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #5a5852; }
+  .gone .gtext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #5a5852; cursor: pointer; }
+  .gone .gtext.open { white-space: pre-wrap; overflow: visible; color: #1c1b18; }
+  .gone { align-items: start; }
   .gone button { font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(0,0,0,.15); background: #fff; cursor: pointer; }
   .dfoot { display: flex; gap: 8px; align-items: center; padding: 8px 10px 10px; font-size: 12px; color: #5a5852; border-top: 1px solid rgba(0,0,0,.08); }
   .dfoot[hidden] { display: none; }
@@ -979,6 +981,7 @@
   let drafts = [];
   let trash = []; // 최근 7일 보낸 것·지운 것
   let showTrash = false;
+  const openGone = new Set(); // 펼친 보낸 것·지운 것(항목 번호)
   // 보관함에서 보내거나 지운 직후 잠깐 띄우는 알림. 지운 것은 "되살리기"로 바로 되돌릴 수 있다.
   let toastT = null;
   function toast(text, undo) {
@@ -1252,9 +1255,12 @@
       const what = document.createElement('span');
       what.className = 'gwhat ' + d.gone;
       what.textContent = (d.gone === 'sent' ? '보냄' : '지움') + ' ' + shortAt(d.goneAt) + (d.msgId ? ` · #${d.msgId}` : '');
+      // 글을 누르면 전체를 펼치고, 다시 누르면 한 줄로 접는다.
       const tx = document.createElement('span');
-      tx.className = 'gtext';
+      tx.className = 'gtext' + (openGone.has(d.id) ? ' open' : '');
       tx.textContent = (d.label ? `[${d.label}] ` : '') + d.text;
+      tx.title = openGone.has(d.id) ? '접기' : '눌러서 펼치기';
+      tx.onclick = () => { openGone.has(d.id) ? openGone.delete(d.id) : openGone.add(d.id); renderDrafts(); };
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = '다시 담기';
