@@ -58,7 +58,11 @@
   .msg .editdraft .meta { margin: 3px 0 8px; }
   .msg.flashing { animation: flashm 2s ease-out; }
   @keyframes flashm { 0%, 70% { outline: 3px solid #f59e0b; outline-offset: 2px; } 100% { outline: 3px solid transparent; outline-offset: 2px; } }
-  .msg .lnk { font: inherit; font-size: 10px; color: inherit; background: rgba(127,127,127,.14); border: 0; border-radius: 4px; padding: 0 5px; margin-left: 6px; cursor: pointer; }
+  /* 답 잇는 선: 대화 목록 오른쪽 가장자리를 따라, 질문(내 메시지)과 그에 대한 답을 꺾쇠 모양 선으로 잇는다. */
+  .msgs { position: relative; padding-right: 18px; }
+  .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+  .links path { fill: none; stroke: #a5b4fc; stroke-width: 1.5; }
+  .links circle { fill: #818cf8; }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
@@ -111,6 +115,7 @@
     .close { display: inline-block; }
     header { padding: 10px 12px 8px; }
     .msgs, .drafts { padding: 10px 10px 14px; }
+    .msgs { padding-right: 18px; }
     .msg { font-size: 15px; max-width: 92%; }
     /* iPhone 은 16px 보다 작은 입력칸을 누르면 화면을 확대하므로, 모든 입력칸·선택칸을 16px 로 둔다(아래 일반 규칙보다 앞에 있어 !important) */
     textarea, input, select { font-size: 16px !important; }
@@ -444,15 +449,45 @@
     }
     return { ans, by };
   }
-  function goMsg(id) {
-    const el = $('msgs').querySelector(`.msg[data-id="${id}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    el.classList.remove('flashing');
-    void el.offsetWidth;
-    el.classList.add('flashing');
-    setTimeout(() => el.classList.remove('flashing'), 2000);
+  // 질문과 답을 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 묶음이 겹치면 선을 한 칸씩 안쪽으로 옮긴다.
+  let lastLinks = null;
+  function drawLinks(links) {
+    lastLinks = links;
+    const box = $('msgs');
+    box.querySelector('.links')?.remove();
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'links');
+    svg.setAttribute('width', String(box.clientWidth));
+    svg.setAttribute('height', String(box.scrollHeight));
+    const pos = (id) => {
+      const el = box.querySelector(`.msg[data-id="${id}"]`);
+      if (!el || el.classList.contains('held')) return null;
+      return { y: el.offsetTop + Math.min(16, el.offsetHeight / 2), right: el.offsetLeft + el.offsetWidth };
+    };
+    const rail = box.clientWidth - 8;
+    const lanes = []; // 겹치는 묶음끼리 다른 줄을 쓰게, 줄마다 마지막 끝 y
+    for (const [u, answers] of links.by) {
+      const q = pos(u);
+      const ends = answers.map(pos).filter(Boolean);
+      if (!q || !ends.length) continue;
+      const last = ends[ends.length - 1];
+      const top = Math.min(q.y, ends[0].y);
+      const bottom = Math.max(q.y, last.y);
+      let lane = lanes.findIndex((end) => end < top - 2);
+      if (lane < 0) lane = lanes.length;
+      lanes[lane] = bottom;
+      const x = rail - lane * 5;
+      const dot = (pt) => { const c = document.createElementNS(NS, 'circle'); c.setAttribute('cx', String(pt.right + 2)); c.setAttribute('cy', String(pt.y)); c.setAttribute('r', '2.5'); svg.append(c); };
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', [`M ${q.right + 2} ${q.y} H ${x} V ${bottom}`, ...ends.map((e) => `M ${x} ${e.y} H ${e.right + 2}`)].join(' '));
+      svg.append(path);
+      dot(q);
+      ends.forEach(dot);
+    }
+    box.prepend(svg);
   }
+  new ResizeObserver(() => { if (lastLinks) drawLinks(lastLinks); }).observe($('msgs'));
 
   function timeline(tab) {
     return [...messages, ...Object.values(transcripts).flat()]
@@ -610,16 +645,6 @@
         requestAnimationFrame(() => { toggle.hidden = !(openQuotes.has(m.id) || qt.scrollHeight > qt.clientHeight + 1); });
         body.before(q);
       }
-      // 어느 메시지에 대한 답인지(답 쪽), 어느 답을 받았는지(질문 쪽) 이어 보여 준다. 누르면 그 메시지로 간다.
-      const pair = m.from === 'agent' ? links.ans.get(m.id) : links.by.get(m.id);
-      if (pair?.length) {
-        const ln = document.createElement('button');
-        ln.type = 'button';
-        ln.className = 'lnk';
-        ln.textContent = m.from === 'agent' ? `↩ #${pair.join(' #')}에 대한 답` : `↪ 답 #${pair[0]}${pair.length > 1 ? ` 외 ${pair.length - 1}` : ''}`;
-        ln.onclick = () => goMsg(pair[0]);
-        small.append(ln);
-      }
       if (typeof m.id === 'number' && !isHeld(m)) {
         const rp = document.createElement('button');
         rp.type = 'button';
@@ -726,6 +751,7 @@
       box.append(w);
     }
     box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
+    drawLinks(links);
     if (scrollToUnread && !$('panel').hidden) {
       // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
       const pos = prefs.pos?.[activeTab];
