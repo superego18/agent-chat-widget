@@ -371,7 +371,7 @@
   let seen = {};
   try { seen = JSON.parse(localStorage.getItem('__uifb_seen') || '{}'); } catch {}
   if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {}; // 예전 버전은 숫자로 저장했다
-  // 읽음 상태는 리뷰 서버(seen.json)에 두어 앱 화면과 리뷰 페이지가 함께 쓴다. 브라우저 저장소는 서버가 꺼졌을 때의 예비다.
+  // 읽음 상태는 대화창 서버(seen.json)에 두어 앱 화면과 리뷰 페이지가 함께 쓴다. 브라우저 저장소는 서버가 꺼졌을 때의 예비다.
   const saveSeen = (ids) => {
     try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {}
     const up = Object.fromEntries((ids || Object.keys(seen)).map((id) => [id, seen[id]]));
@@ -1562,7 +1562,7 @@
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); }
   });
 
-  // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(리뷰 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
+  // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(대화창 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
   let drafts = [];
   let draftsRenderedKey = ''; // 보관함을 마지막으로 그렸을 때의 내용
   let trash = []; // 최근 7일 보낸 것·지운 것
@@ -2063,7 +2063,7 @@
     $('panel').style.width = w + 'px';
     $('panel').style.height = h + 'px';
   }
-  // 창 크기와 입력칸 높이는 리뷰 서버(prefs.json)에 두어 앱 화면·리뷰 페이지가 함께 쓰고, 데스크톱(768px 이상)과 모바일은 따로 기억한다.
+  // 창 크기와 입력칸 높이는 대화창 서버(prefs.json)에 두어 앱 화면·리뷰 페이지가 함께 쓰고, 데스크톱(768px 이상)과 모바일은 따로 기억한다.
   let size = null;
   let prefs = {};
   let dragging = false;
@@ -2120,7 +2120,7 @@
   });
   $('grip').addEventListener('dblclick', () => { size = null; $('panel').style.width = ''; $('panel').style.height = ''; savePrefs({ panel: null }); });
 
-  // ── 쓰던 글: 세션 탭마다 보내지 않은 글을 리뷰 서버(compose.json)에 저장한다. 새로고침해도 남고 다른 화면에서 이어 쓴다 ──
+  // ── 쓰던 글: 세션 탭마다 보내지 않은 글을 대화창 서버(compose.json)에 저장한다. 새로고침해도 남고 다른 화면에서 이어 쓴다 ──
   let composed = {};
   let composeT = null;
   let typedAt = 0;

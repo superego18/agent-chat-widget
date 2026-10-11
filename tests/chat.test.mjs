@@ -1,0 +1,131 @@
+// 대화창 핵심 흐름 시험(휴대폰 크기 크롬). 실행: npm test
+// 각 시험은 실제로 있었던 문제에서 나왔다. 이름 뒤 괄호는 그 요청이나 문제.
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { A, makeDir, startServer, openWidget, closeBrowser, sleep } from './helpers.mjs';
+
+after(closeBrowser);
+
+const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
+const readChat = (srv) => JSON.parse(fs.readFileSync(path.join(srv.dir, 'chat.json'), 'utf8')).messages;
+
+test('보내면 메시지가 하나 생기고 입력칸이 빈다', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.type('안녕');
+    await w.click('#form button[type="submit"]');
+    await w.idle(1200);
+    assert.equal(await w.inputValue(), '');
+    const sent = readChat(srv).filter((m) => m.from === 'user');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].text, '안녕');
+    assert.ok((await w.msgs()).some((m) => m.text === '안녕'));
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('서버 답이 늦어 다시 눌러도 메시지는 한 번만 생긴다 (보내기 로딩·다시 누르기)', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    let first = true;
+    await page.route('**/__uifb/api/chat', async (route) => {
+      if (route.request().method() === 'POST' && first) { first = false; await sleep(10_000); }
+      await route.continue();
+    });
+    await w.type('늦은 글');
+    await w.click('#form button[type="submit"]');
+    await sleep(300);
+    assert.equal(await w.eval((r) => r.querySelector('#form button[type="submit"]').classList.contains('busy')), true, '보내는 동안 단추가 돈다');
+    assert.equal(await w.inputValue(), '늦은 글', '서버가 받기 전에는 입력칸을 비우지 않는다');
+    await sleep(8300);
+    assert.equal(await w.eval((r) => r.querySelector('#form button[type="submit"]').classList.contains('busy')), false, '8초 뒤에는 다시 누를 수 있다');
+    await w.click('#form button[type="submit"]');
+    await sleep(3500);
+    assert.equal(readChat(srv).filter((m) => m.text === '늦은 글').length, 1);
+    assert.equal(await w.inputValue(), '');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('안 읽힌 글에는 보내기 취소·보류로가 있고 다시 보내기는 읽힌 뒤에만 있다', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'user', to: A, text: '첫 글', context: 'app', at: iso(5000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    let m = (await w.msgs()).find((x) => x.id === '1');
+    assert.ok(m.buttons.includes('보내기 취소') && m.buttons.includes('보류로'));
+    assert.ok(!m.buttons.includes('다시 보내기'));
+    fs.writeFileSync(path.join(srv.dir, 'delivered.json'), JSON.stringify({ [A]: 1, _at: { 1: iso(1000) } }));
+    await w.idle(3500);
+    m = (await w.msgs()).find((x) => x.id === '1');
+    assert.ok(m.buttons.includes('다시 보내기'));
+    assert.ok(!m.buttons.includes('보내기 취소'));
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('안 읽힌 글을 보류로 돌리면 취소되고 같은 글이 보류에 생긴다', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'user', to: A, text: '보류할 글', context: 'app', at: iso(5000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.clickText('보류로', '.msg[data-id="1"]');
+    await w.idle(1500);
+    assert.ok(readChat(srv).find((m) => m.id === 1).cancelled);
+    assert.deepEqual((await w.holds()).map((h) => h.text), ['보류할 글']);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('새로고침해도 입력칸 글과 붙여 둔 참고가 남는다 (하던 것은 보존)', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'agent', session: A, text: '세션 답', at: iso(5000) }] }));
+  try {
+    let { w, page, ctx } = await openWidget(srv);
+    await w.clickText('참고', '.msg[data-id="1"]');
+    await w.type('쓰던 글');
+    await sleep(1500);
+    await page.close();
+    ({ w } = await openWidget(srv, { ctx }));
+    await w.idle(800);
+    assert.equal(await w.inputValue(), '쓰던 글');
+    assert.equal(await w.eval((r) => !r.getElementById('reply').hidden && r.getElementById('reply').classList.contains('ref')), true);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
+  const srv = await startServer(makeDir({
+    messages: [
+      { id: 1, from: 'user', to: A, text: '옛 글', context: 'app', at: iso(3 * 3600_000) },
+      { id: 2, from: 'agent', session: A, text: '옛 답', at: iso(3 * 3600_000 - 60_000) },
+      { id: 3, from: 'user', to: A, text: '작업 중에 보낸 글', context: 'app', at: iso(30_000) },
+      { id: 4, from: 'agent', session: A, text: '그 사이 나온 답', at: iso(20_000) },
+    ],
+    // 1번은 방금 다시 넘겨졌고(3시간 뒤), 3번은 답(4번)이 나온 뒤에 읽혔다
+    delivered: { [A]: 3, _at: { 1: iso(1000), 3: iso(10_000) } },
+  }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    const ids = (await w.msgs()).map((m) => m.id);
+    assert.deepEqual(ids, ['1', '2', '4', '3']);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('위젯 파일이 바뀌기만 해서는 새로고침하지 않고, reload-widgets 를 부르면 안내를 띄운 뒤 새로고침한다', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    const { page, w, ctx } = await openWidget(srv);
+    await page.evaluate(() => { window.__mark = 1; });
+    await sleep(6000);
+    assert.equal(await page.evaluate(() => window.__mark), 1, '저절로 새로고침하지 않는다');
+    await srv.api('/api/reload-widgets', {});
+    let shown = false;
+    for (let i = 0; i < 70 && !shown; i++) { shown = await w.eval((r) => !r.getElementById('reloadCover').hidden).catch(() => false); if (!shown) await sleep(100); }
+    assert.ok(shown, '새로 고치는 중 안내가 뜬다');
+    await page.waitForFunction(() => window.__mark === undefined, null, { timeout: 5000 });
+    await ctx.close();
+  } finally { srv.stop(); }
+});

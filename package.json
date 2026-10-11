@@ -1,0 +1,12 @@
+{
+  "name": "ui-feedback-loop",
+  "private": true,
+  "type": "module",
+  "description": "스킬 자체는 의존성이 없다. 이 파일은 대화창 자동 시험(tests/)에만 쓴다.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.48.2"
+  }
+}

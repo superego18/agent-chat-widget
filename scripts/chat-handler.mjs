@@ -1,82 +1,31 @@
-#!/usr/bin/env node
-// UI 피드백 리뷰 서버. 의존성 없음 (Node 18+).
-// 사용: node review-server.mjs [--dir .ui-feedback] [--port 4799] [--lan]
-//   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, lan-auth.mjs).
-//   <dir>/review.html 과 캡처 이미지를 정적으로 제공하고,
-//   페이지가 보낸 평가를 <dir>/r<round>.json 에, 대화를 <dir>/chat.json 에 저장한다.
-//   세션별 대화: 등록된 세션(<dir>/sessions/)을 /api/sessions 로 알려 주고, 메시지는 to(받는 세션)·session(보낸 세션)으로 나눈다.
-//   보관함: 나중에 보낼 메시지를 <dir>/drafts.json 에 세션별로 모았다가, 사용자가 고른 것만 하나로 묶거나 따로 보낸다(/api/drafts).
+// 대화창 서버의 요청 처리. 의존성 없음 (Node 18+).
+// createChatHandler({ root, auth }) 가 돌려주는 handle(req, res, url) 를 http 서버에 붙인다(혼자 쓸 때는 chat-server.mjs, 비교 페이지와 함께 쓸 때는 그쪽 서버가 붙인다).
+//   대화(<root>/chat.json), 세션 목록·상태, 보관함(drafts.json), 설정(prefs.json), 쓰던 글, 읽음, 휴대폰 알림, 대화창 새로고침을 맡고,
+//   대화창 위젯 파일(assets/app-widget.js 등)을 /__uifb/* 로 내보낸다.
+//   세션별 대화: 등록된 세션(<root>/sessions/)을 /api/sessions 로 알려 주고, 메시지는 to(받는 세션)·session(보낸 세션)으로 나눈다.
 //   Codex 세션에게 온 메시지는 `codex queue` 로 그 세션에 바로 넣어 깨운다(감시 명령이 필요 없다). 답은 Codex 대화 기록에서 읽어 보여 준다.
+// handle 은 자기 요청이면 true, 아니면 false 를 돌려준다(다른 처리기로 넘기게). 접속 키 확인과 /__uifb/api → /api 바꾸기는 붙이는 쪽이 한다.
 
-import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { lanAuth } from './lan-auth.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
 import { readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 
-function arg(name, fallback) {
-  const i = process.argv.indexOf(`--${name}`);
-  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
-}
-
-const root = path.resolve(arg('dir', '.ui-feedback'));
-const auth = lanAuth({ dir: root, lan: process.argv.includes('--lan') });
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
-// 모든 리뷰 페이지가 함께 쓰는 공용 파일. 요청마다 새로 읽으므로 고치면 이미 만든 페이지도 새로고침만으로 바뀐다.
+// 위젯 파일. 요청마다 새로 읽으므로 고치면 열린 화면도 새로고침만으로 바뀐다.
 const SHARED = {
   '/__uifb/widget.js': ['app-widget.js', 'text/javascript; charset=utf-8'],
-  '/__uifb/review-page.js': ['review-page.js', 'text/javascript; charset=utf-8'],
-  '/__uifb/review-page.css': ['review-page.css', 'text/css; charset=utf-8'],
   '/__uifb/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
   '/__uifb/icon-180.png': ['icon-180.png', 'image/png'],
   '/__uifb/icon-192.png': ['icon-192.png', 'image/png'],
   '/__uifb/icon-512.png': ['icon-512.png', 'image/png'],
 };
-const port = Number(arg('port', '4799'));
 const MAX_BODY = 256 * 1024;
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.json': 'application/json; charset=utf-8',
-};
+const NOT_MINE = Symbol('not mine');
 
-if (!fs.existsSync(path.join(root, 'review.html'))) {
-  console.error(`review.html 이 없습니다: ${root}`);
-  process.exit(1);
-}
-
-function feedbackFile(round) {
-  return /^[a-z0-9-]{1,40}$/i.test(round) ? path.join(root, `r${round}.json`) : null;
-}
-
-// 평가 파일을 대화에 남길 짧은 글로. 항목마다 고른 평가·한 줄 의견·핀 수.
-const VERDICTS = { good: '좋음', tweak: '수정 필요', revert: '되돌리기' };
-function feedbackSummary(data, round, name) {
-  const lines = [`[평가 완료] ${name || (/^\d+$/.test(round) ? `${round}차 비교` : round)}`];
-  for (const [id, it] of Object.entries(data.items || {})) {
-    const pins = (it.pins || []).filter((p) => p.note);
-    lines.push(`- ${it.title || id}: ${VERDICTS[it.verdict] || it.verdict || '평가 없음'}${it.memo ? ` · ${it.memo.trim()}` : ''}${pins.length ? ` · 핀 ${pins.map((p) => p.note).join(' / ')}` : ''}`);
-  }
-  if (data.overall) lines.push(`전체 의견: ${data.overall.trim()}`);
-  lines.push(`(.ui-feedback/r${round}.json)`);
-  return lines.join('\n');
-}
-
-function readFeedback(file, round) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return { round: /^\d+$/.test(round) ? Number(round) : round, items: {}, overall: '', done: false };
-  }
-}
-
+export function createChatHandler({ root, auth = { key: null } }) {
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -418,36 +367,6 @@ function savePrefs(req) {
   return prefs;
 }
 
-// ── 캡처 기록 ──
-// make-capture.mjs 로 만든 캡처가 찍을 때마다 남긴다. 이미지 파일마다 한 줄(같은 파일을 다시 찍으면 덮어씀)이라
-// 이미지 수보다 늘지 않고, 레시피·차수·예시 응답 여부로 어떤 조건에서 찍었는지 추적한다. 오래된 이미지 정리는 prune-captures.mjs.
-const capturesFile = path.join(root, 'captures.json');
-function readCaptures() {
-  try {
-    return JSON.parse(fs.readFileSync(capturesFile, 'utf8'));
-  } catch {
-    return { shots: {} };
-  }
-}
-function recordCapture(r) {
-  if (typeof r.file !== 'string' || !/^[\w가-힣.-]{1,120}\.png$/.test(r.file)) return null;
-  const db = readCaptures();
-  const src = r.source && typeof r.source === 'object' ? r.source : {};
-  db.shots[r.file] = {
-    round: Number(r.round) || null,
-    recipe: typeof src.recipe === 'string' ? src.recipe.slice(0, 60) : null,
-    url: typeof src.url === 'string' ? src.url.slice(0, 300) : null,
-    viewport: typeof src.viewport === 'string' ? src.viewport.slice(0, 20) : null,
-    theme: src.theme === 'dark' ? 'dark' : 'light',
-    mocked: Array.isArray(src.mocked) ? src.mocked.slice(0, 20).map((m) => String(m).slice(0, 120)) : [],
-    steps: !!src.steps,
-    marks: Array.isArray(r.marks) ? r.marks.length : 0,
-    at: new Date().toISOString(),
-  };
-  fs.writeFileSync(capturesFile, JSON.stringify(db, null, 2) + '\n');
-  return db.shots[r.file];
-}
-
 // ── 쓰던 글 ──
 // 세션 탭마다 입력칸에 쓰다가 아직 보내지 않은 글. 새로고침해도 남고, 앱 화면·리뷰 페이지에서 이어 쓸 수 있다.
 const composeFile = path.join(root, 'compose.json');
@@ -709,25 +628,14 @@ function readReviewWatch(sessionKey, round) {
   return { active: false };
 }
 
-const server = http.createServer((req, res) => {
-  if (!auth.check(req, res)) return;
-  const url = new URL(req.url, 'http://localhost');
-
-  // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 리뷰 페이지가 같은 파일을 쓴다.
-  // 위젯은 /__uifb/api/* 로 부르므로, 리뷰 서버에서는 앞의 /__uifb 를 떼고 같은 API 로 처리한다.
+function inner(req, res, url) {
+  // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 비교 페이지가 같은 파일을 쓴다.
   if (SHARED[url.pathname]) {
     const [file, type] = SHARED[url.pathname];
     // 서비스 워커는 /__uifb/ 아래 있지만 페이지 전체(/)를 맡게 한다(화면 요청은 가로채지 않고 알림만 띄운다).
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', ...(file === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}) });
     return res.end(fs.readFileSync(path.join(assetsDir, file)));
   }
-  if (url.pathname.startsWith('/__uifb/api/')) url.pathname = url.pathname.slice('/__uifb'.length);
-
-  if (url.pathname === '/favicon.ico') {
-    res.writeHead(204);
-    return res.end();
-  }
-
   if (url.pathname === '/api/watch') {
     return send(res, 200, readReviewWatch(url.searchParams.get('session') || '', url.searchParams.get('round') || ''));
   }
@@ -814,27 +722,6 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/transcript') {
     return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
-  }
-
-  if (url.pathname === '/api/captures') {
-    if (req.method === 'GET') return send(res, 200, readCaptures());
-    if (req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > MAX_BODY) req.destroy();
-      });
-      req.on('end', () => {
-        try {
-          const rec = recordCapture(JSON.parse(body));
-          send(res, rec ? 200 : 400, rec || { error: 'file(.png)이 필요합니다.' });
-        } catch {
-          send(res, 400, { error: 'JSON 형식이 아닙니다.' });
-        }
-      });
-      return;
-    }
-    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
   // 진단 기록: 폰에서만 생기는 문제(초점이 엉뚱한 곳으로 가는 등)를 원인까지 보려고, 위젯이 그 순간 전후의 터치·초점 순서를 남긴다.
@@ -1007,66 +894,15 @@ const server = http.createServer((req, res) => {
     return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
-  if (url.pathname === '/api/feedback') {
-    const round = url.searchParams.get('round') ?? '';
-    const file = feedbackFile(round);
-    if (!file) return send(res, 400, { error: 'round 는 숫자나 영문 id 여야 합니다.' });
+  return NOT_MINE;
+}
 
-    if (req.method === 'GET') return send(res, 200, readFeedback(file, round));
-
-    if (req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > MAX_BODY) req.destroy();
-      });
-      req.on('end', () => {
-        let patch;
-        try {
-          patch = JSON.parse(body);
-        } catch {
-          return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
-        }
-        const data = readFeedback(file, round);
-        if (patch.id && typeof patch.id === 'string') {
-          data.items[patch.id] = { ...(data.items[patch.id] || {}), ...patch.fields, updatedAt: new Date().toISOString() };
-        }
-        if (typeof patch.overall === 'string') data.overall = patch.overall;
-        const newlyDone = patch.done === true && data.done !== true;
-        if (patch.done === true) data.done = true;
-        data.updatedAt = new Date().toISOString();
-        fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
-        const reviewer = newlyDone ? findSessionByKey(typeof patch.session === 'string' ? patch.session : '') : null;
-        // 완료한 평가를 대화에도 남긴다. 어느 페이지(라운드 리뷰든 비교 페이지든)에서 평가했는지와 상관없이 대화창에서 보이고, 그 세션의 대화 감시가 받는다.
-        if (newlyDone && reviewer) addChat({ from: 'user', to: reviewer.sessionId, context: 'review', round, noQueue: true, text: feedbackSummary(data, round, typeof patch.name === 'string' ? patch.name : '') });
-        if (reviewer?.tool === 'codex') {
-          queueText(reviewer, `${QUEUE_PREFIX}비교 페이지 · ${round}차] 피드백 확인해. 사용자가 ${round}차 비교 페이지에서 평가 완료를 표시했습니다. .ui-feedback/r${round}.json 을 읽고 ui-feedback-loop 5단계대로 반영하세요.`);
-        }
-        send(res, 200, { ok: true });
-      });
-      return;
-    }
-    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
-  }
-
-  const rel = url.pathname === '/' ? 'review.html' : decodeURIComponent(url.pathname.slice(1));
-  const target = path.resolve(root, rel);
-  if (!target.startsWith(root + path.sep) || !TYPES[path.extname(target).toLowerCase()]) {
-    return send(res, 404, 'not found', 'text/plain; charset=utf-8');
-  }
-  fs.readFile(target, (err, buf) => {
-    if (err) return send(res, 404, 'not found', 'text/plain; charset=utf-8');
-    send(res, 200, buf, TYPES[path.extname(target).toLowerCase()]);
-  });
-});
-
-server.on('error', (err) => {
-  console.error(err.code === 'EADDRINUSE' ? `포트 ${port} 이(가) 이미 쓰이고 있습니다. --port 로 바꾸세요.` : err.message);
-  process.exit(1);
-});
-
-server.listen(port, auth.host, () => {
-  console.log(`비교 페이지: http://localhost:${port}/`);
-  for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
-  console.log(`평가 저장 위치: ${root}${path.sep}r<round>.json`);
-});
+  return {
+    handle: (req, res, url) => inner(req, res, url) !== NOT_MINE,
+    // 비교 페이지와 함께 쓸 때 평가 완료를 대화에 남기고 그 세션을 깨우는 데 쓴다.
+    addChat,
+    findSessionByKey,
+    queueText,
+    QUEUE_PREFIX,
+  };
+}

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // 실제 앱 화면에 피드백 버튼을 끼워 보여 주는 프록시. 의존성 없음 (Node 18+).
 // 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799] [--lan --dir .ui-feedback]
-//   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, 키는 리뷰 서버와 같은 <dir>/lan-key, lan-auth.mjs).
+//   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, 키는 대화창 서버와 같은 <dir>/lan-key, lan-auth.mjs).
 //   http://localhost:<port>/ 로 열면 앱을 그대로 보여 주고, HTML 응답에만 피드백 위젯 스크립트를 넣는다.
-//   위젯이 보낸 메시지는 리뷰 서버(/api/chat)로 넘어가 리뷰 대화와 같은 기록(chat.json)에 쌓인다.
+//   위젯이 보낸 메시지는 대화창 서버(/api/chat)로 넘어가 리뷰 대화와 같은 기록(chat.json)에 쌓인다.
 //   앱 코드는 고치지 않는다. dev 서버의 실시간 갱신(HMR) 웹소켓도 그대로 앱으로 넘긴다
 //   (Turbopack 등은 이 연결이 있어야 화면 코드가 동작한다).
 
@@ -70,7 +70,7 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith('/__uifb/api/')) {
     return forward(req, res, review, req.url.replace('/__uifb', ''));
   }
-  // 알림·홈 화면 설치용 파일(서비스 워커, 설치 정보, 아이콘)은 리뷰 서버가 내보낸다. 이 주소(앱 화면)에서 등록·설치해야 하므로 같은 경로로 넘긴다.
+  // 알림·홈 화면 설치용 파일(서비스 워커, 설치 정보, 아이콘)은 대화창 서버가 내보낸다. 이 주소(앱 화면)에서 등록·설치해야 하므로 같은 경로로 넘긴다.
   if (/^\/__uifb\/(sw\.js|manifest\.webmanifest|icon-\d+\.png)(\?|$)/.test(req.url)) {
     return forward(req, res, review, req.url);
   }

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// 지금 이 세션의 대화 기록 파일을 찾아 리뷰 서버에 등록한다. 의존성 없음 (Node 18+).
+// 지금 이 세션의 대화 기록 파일을 찾아 대화창 서버에 등록한다. 의존성 없음 (Node 18+).
 // 사용: node register-session.mjs --name "작업 세션" --marker <아무 글자 8자 이상> [--dir .ui-feedback] [--agent "Claude Code"] [--port 4799] [--tool claude|codex]
 //   --name: 대화 창 탭에 보일 세션 이름(역할). 한 프로젝트에 여러 세션을 등록할 수 있다.
 //   --tool: 그 도구의 기록만 찾는다. 다른 세션이 대신 등록할 때(예: Claude 세션이 Codex 세션을 등록) 표시가 자기 기록에도 남으므로 꼭 붙인다.
 //   --marker 는 명령에 글자 그대로 적는다(예: uifb-k3x9q2m7). 셸 변수·$(...)를 쓰면 기록에 남는 글자와 달라져 못 찾는다.
 //   이 명령 자체가 세션 기록에 남으므로, 최근 기록 파일 중 marker 가 들어 있는 파일이 곧 이 세션의 파일이다.
 //   찾으면 <dir>/sessions/<세션 id>.json 에 { name, tool, sessionId, path, agent, port } 를 쓴다.
-//   Claude: hook-relay.mjs 훅이 이 sessionId 의 대화만 리뷰 서버로 보낸다. Codex: 리뷰 서버가 path 의 기록을 읽어 보여 준다.
+//   Claude: hook-relay.mjs 훅이 이 sessionId 의 대화만 대화창 서버로 보낸다. Codex: 대화창 서버가 path 의 기록을 읽어 보여 준다.
 
 import fs from 'node:fs';
 import os from 'node:os';

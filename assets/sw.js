@@ -1,5 +1,5 @@
 // 대화/피드백 알림용 서비스 워커. 화면 요청은 가로채지 않고(fetch 처리 없음) 푸시 알림만 띄운다.
-// 리뷰 서버·앱 프록시가 /__uifb/sw.js 로 내보내고, 위젯이 사용자가 알림을 켤 때 등록한다.
+// 대화창 서버·앱 프록시가 /__uifb/sw.js 로 내보내고, 위젯이 사용자가 알림을 켤 때 등록한다.
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code 훅에서 불려, 터미널 대화를 리뷰 서버 대화 기록(chat.json)으로 보낸다. 의존성 없음 (Node 18+).
+// Claude Code 훅에서 불려, 터미널 대화를 대화창 서버 대화 기록(chat.json)으로 보낸다. 의존성 없음 (Node 18+).
 // 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, PostToolUse, Stop, Notification 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
 //   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답, 세션끼리 주고받은 메시지(SendMessage)를 chat.json 으로 보낸다.
 //   - 상태: 작업 시작·도구 사용·응답 끝·승인 대기를 /api/status 로 보내, 대화 창에 "작업 중" 표시를 한다.
