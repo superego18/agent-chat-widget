@@ -8,8 +8,10 @@ export function formatMessage(m, all) {
   // 이전 메시지에 단 답장이면 원문을 붙인다.
   const orig = m.replyTo ? all.find((x) => x.id === m.replyTo) : null;
   const who = orig ? (orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트') : '';
-  if (orig && m.replyQuote) lines.push(`    답장 대상 [${orig.id}] ${who} 메시지 중 이 부분: "${m.replyQuote}"`);
-  else if (orig) lines.push(`    답장 대상 [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
+  // 참고(refer)는 그 메시지에 답하라는 뜻이 아니라 함께 보라고 붙인 것이다.
+  const label = m.refer ? '참고로 붙인 메시지(답장 아님)' : '답장 대상';
+  if (orig && m.replyQuote) lines.push(`    ${label} [${orig.id}] ${who} 메시지 중 이 부분: "${m.replyQuote}"`);
+  else if (orig) lines.push(`    ${label} [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
   // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
   if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
     lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);

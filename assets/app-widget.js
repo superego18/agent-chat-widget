@@ -172,6 +172,12 @@
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
   .selreply { position: fixed; z-index: 2147483647; transform: translateX(-50%); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer; }
   .selreply[hidden] { display: none; }
+  .selreply { display: flex; padding: 0; overflow: hidden; }
+  .selreply button { font: inherit; color: inherit; background: none; border: 0; padding: 7px 14px; cursor: pointer; }
+  .selreply button + button { border-left: 1px solid rgba(255,255,255,.25); }
+  /* 참고(답장 아님): 회색 점선 인용, 원문과 잇는 선 없음 */
+  .msg .quote.ref { background: rgba(127,127,127,.08); color: inherit; border-left: 0; outline: 1.5px dashed rgba(127,127,127,.55); outline-offset: -1.5px; opacity: .9; }
+  #reply.ref { background: #f1f1ef; color: #44403c; outline: 1.5px dashed #a8a29e; outline-offset: -1.5px; }
   ::highlight(uifbq) { background-color: #fde68a; color: #1c1b18; }
   .where { margin: 6px 10px 0; font-size: 12px; background: #eef0ff; color: #3730a3; border-radius: 6px; padding: 5px 8px; display: flex; gap: 6px; align-items: center; }
   .where[hidden] { display: none; }
@@ -289,7 +295,7 @@
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
-  <button type="button" class="selreply" id="selReply" hidden>↩ 고른 부분에 답장</button>
+  <span class="selreply" id="selReply" hidden><button type="button" id="selR">↩ 고른 부분에 답장</button><button type="button" id="selF">📎 참고</button></span>
   <div class="toast" id="toast" hidden role="status"></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
@@ -316,7 +322,7 @@
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
     const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
     if (!text) return;
-    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
+    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       editing = null;
@@ -369,6 +375,7 @@
   // 일부만 인용: 메시지 글의 일부를 길게 눌러(또는 끌어) 고른 뒤 그 메시지의 "답장"을 누르면 고른 부분만 인용한다.
   // 버튼을 누르는 순간 선택이 풀리기도 해서, 마지막으로 고른 글을 잠시 기억해 둔다.
   let replyQuote = null;
+  let refMode = false; // true 면 답장이 아니라 참고로만 붙인다
   let lastSel = null;
   const plain = (t) => String(t).replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
   document.addEventListener('selectionchange', () => {
@@ -382,7 +389,8 @@
   function showReplyText() {
     const m = replyMsg;
     if (!m) return;
-    $('replyText').textContent = '↩ 답장 · ' + (replyQuote ? `${quoteOf(m).split(':')[0]}의 일부: "${replyQuote}"` : quoteOf(m));
+    $('reply').classList.toggle('ref', refMode);
+    $('replyText').textContent = (refMode ? '📎 참고 · ' : '↩ 답장 · ') + (replyQuote ? `${quoteOf(m).split(':')[0]}의 일부: "${replyQuote}"` : quoteOf(m));
   }
   // 메시지 본문에서 인용한 부분의 범위를 찾는다(공백은 하나로 본다). 못 찾으면 null.
   function quoteRange(bodyEl, quote) {
@@ -427,18 +435,21 @@
     b.style.left = p.left + p.width / 2 + 'px';
     b.style.top = c.top - 46 + 'px';
     b.hidden = false;
-    b.onclick = () => {
+    const pick = (ref) => {
       const keep = lastSel;
       // 글 선택을 먼저 풀고 입력칸에 초점을 준다(선택을 나중에 풀면 폰에서 입력칸 초점과 키보드가 사라진다).
       try { ((root.getSelection && root.getSelection()) || getSelection())?.removeAllRanges(); } catch {}
       b.hidden = true;
-      setReply(m);
+      setReply(m, ref);
       if (!replyQuote && keep) { replyQuote = keep.text; showReplyText(); markQuote(m.id, replyQuote); }
       $('input').focus();
     };
+    $('selR').onclick = () => pick(false);
+    $('selF').onclick = () => pick(true);
   });
-  function setReply(m) {
+  function setReply(m, ref = false) {
     replyTo = m ? m.id : null;
+    refMode = !!m && ref;
     replyMsg = m || null;
     const body = m ? plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text) : '';
     replyQuote = m && lastSel && Date.now() - lastSel.at < 60_000 && lastSel.text !== body && body.includes(lastSel.text) ? lastSel.text : null;
@@ -594,7 +605,7 @@
     // 선은 받는 쪽 가장자리에 둔다: 내 메시지에서 세션 답으로 가는 연결은 왼쪽(세션 답 쪽), 세션 답에 단 내 답장 연결은 오른쪽(내 쪽).
     const sideOf = (id) => { const m = messages.find((x) => x.id === id); return m?.from === 'user' || (m?.from === 'peer' && m.to === activeTab) ? 'left' : 'right'; };
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
-    for (const m of messages) if (m.replyTo && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
+    for (const m of messages) if (m.replyTo && !m.refer && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
     const placed = pairs.map((p) => ({ ...p, q: pos(p.from), ends: p.tos.map(pos).filter(Boolean) })).filter((p) => p.q && p.ends.length && p.ends[0].y > p.q.y).sort((a, b) => a.q.y - b.q.y);
     for (const { from: u, tos, q, ends, kind } of placed) {
       const side = sideOf(u);
@@ -777,9 +788,10 @@
         // 인용: 길면 4줄로 줄여 보이고 "펼치기"로 전체를 본다. "원문으로"는 원래 메시지로 가서 인용한 부분을 칠한다.
         const q = document.createElement('span');
         // 골라서 답장(일부)은 노란 바탕에 "고른 부분", 메시지 전체에 답장은 회색 바탕에 "전체에 답장"으로 나눠 보인다.
-        q.className = 'quote ' + (m.replyQuote ? 'part' : 'whole') + (openQuotes.has(m.id) ? ' open' : '');
+        q.className = 'quote ' + (m.refer ? 'ref' : m.replyQuote ? 'part' : 'whole') + (openQuotes.has(m.id) ? ' open' : '');
         const who = quoteOf(orig).split(':')[0];
-        const full = m.replyQuote ? `↩ ${who}의 고른 부분: "${m.replyQuote}"` : `↩ ${who}에게 전체 답장: ${orig.draft ? orig.draft.items.map((it) => it.text).join(' / ') : orig.text}`;
+        const origText = orig.draft ? orig.draft.items.map((it) => it.text).join(' / ') : orig.text;
+        const full = m.refer ? (m.replyQuote ? `📎 참고 · ${who}의 일부: "${m.replyQuote}"` : `📎 참고 · ${who}: ${origText}`) : m.replyQuote ? `↩ ${who}의 고른 부분: "${m.replyQuote}"` : `↩ ${who}에게 전체 답장: ${origText}`;
         const qt = document.createElement('span');
         qt.className = 'qt';
         qt.textContent = full;
@@ -817,6 +829,13 @@
         rp.textContent = '답장';
         rp.onclick = () => setReply(m);
         small.append(rp);
+        const rf = document.createElement('button');
+        rf.type = 'button';
+        rf.className = 'rp';
+        rf.textContent = '참고';
+        rf.title = '답장이 아니라 참고하라고 이 메시지를 붙이기';
+        rf.onclick = () => setReply(m, true);
+        small.append(rf);
       }
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
@@ -1332,7 +1351,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo, ...(replyQuote ? { replyQuote } : {}) } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo, ...(replyQuote ? { replyQuote } : {}), ...(refMode ? { refer: true } : {}) } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
