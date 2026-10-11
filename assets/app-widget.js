@@ -55,6 +55,12 @@
   .msg.user.cancelled { background: #e7e5e0; color: #6b6860; box-shadow: none; }
   .msg.user.cancelled > .mbody { text-decoration: line-through; } /* 글에만 긋는다(다시 보내기의 취소·다시 보내기 버튼 줄은 빼고) */
   .msg.user.cancelled .tag { background: rgba(0,0,0,.08); }
+  .msg.user.hold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #a5b4fc; }
+  .msg.user.hold .tag { background: #e0e7ff; }
+  .msg.user.hold .hacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .msg.user.hold .hacts button { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; background: #f1f1ef; color: #5a5852; }
+  .msg.user.hold .hacts .go { background: #4f46e5; color: #fff; }
+  .msg.user.hold.got { animation: got .7s ease-out; }
   .msg .dh { display: block; font-size: 11px; opacity: .85; margin-bottom: 4px; }
   .msg .ditem { display: block; }
   .msg .ditem + .ditem { margin-top: 8px; }
@@ -644,7 +650,7 @@
     const prevTop = box.scrollTop;
     box.textContent = '';
     const items = timeline(activeTab);
-    if (!items.length) {
+    if (!items.length && !holds().length) {
       const p = document.createElement('p');
       p.className = 'empty';
       p.textContent = sessions.length
@@ -847,6 +853,26 @@
       box.append(w);
     }
     box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
+    // 보류: 아직 보내지 않은 글. 점선 말풍선으로 맨 아래에 쌓이고, 보내기를 누를 때까지 세션에 가지 않는다.
+    for (const d of holds()) {
+      const h = document.createElement('div');
+      h.className = 'msg user hold';
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = '보류 · 아직 안 보냄';
+      const t = document.createElement('span');
+      t.className = 'mbody';
+      t.innerHTML = mdLite(d.text);
+      const sm = document.createElement('small');
+      sm.textContent = shortAt(d.at) + ' · 보내기를 누를 때까지 세션에 가지 않음';
+      const acts = document.createElement('span');
+      acts.className = 'hacts';
+      const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
+      mk('보관함으로', '', async () => { await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
+      mk('보내기', 'go', async () => { await draftsApi({ action: 'send', ids: [d.id], plain: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
+      h.append(tag, t, sm, acts);
+      box.append(h);
+    }
     drawLinks(links);
     if (scrollToUnread && !$('panel').hidden) {
       // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
@@ -1018,7 +1044,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold).map((d) => d.id + d.to).join() + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
       if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
@@ -1226,7 +1252,8 @@
     await poll();
     return r.json();
   };
-  const mine = () => drafts.filter((d) => d.to === activeTab);
+  const mine = () => drafts.filter((d) => d.to === activeTab && !d.hold); // 보관함(완전 나중)
+  const holds = () => drafts.filter((d) => d.to === activeTab && d.hold); // 보류(대화창 맨 아래에 잠깐 대기)
   // 사용자 메시지에 붙는 읽음 표시. 세션이 받아 갔으면(delivered) "읽음", 아직이면 세션 상태에 따라 언제 읽는지 적는다.
   let delivered = {};
   function readMark(m) {
@@ -1588,12 +1615,14 @@
 
   // "나중에"로 담으면 입력한 글이 보관함 버튼으로 날아 들어가고, 버튼이 한 번 튀며 개수가 오른다.
   // 폰에서는 "나중에"를 누르면 키보드가 닫히며 화면 배치가 바뀌므로, 날아가는 동안 매 프레임 버튼 위치를 다시 읽어 따라간다.
-  function flyToDrafts(text) {
+  function flyToDrafts(text, target = () => $('draftsBtn')) {
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const bump = () => {
-      $('draftsBtn').classList.remove('got');
-      void $('draftsBtn').offsetWidth;
-      $('draftsBtn').classList.add('got');
+      const t = target();
+      if (!t) return;
+      t.classList.remove('got');
+      void t.offsetWidth;
+      t.classList.add('got');
     };
     if (reduce) return bump();
     const g = document.createElement('div');
@@ -1609,7 +1638,7 @@
       const t = Math.min(1, (now - start) / dur);
       const e = t * t * (3 - 2 * t); // 부드럽게 출발해 부드럽게 도착
       const src = $('input').getBoundingClientRect();
-      const to = $('draftsBtn').getBoundingClientRect();
+      const to = (target() || $('draftsBtn')).getBoundingClientRect();
       const gw = g.offsetWidth;
       const gh = g.offsetHeight;
       const x0 = src.left + 8;
@@ -1630,12 +1659,15 @@
   $('later').onclick = async () => {
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
-    flyToDrafts(text);
+    // 나중에 = 보류: 대화창 맨 아래에 잠깐 대기시킨다(보관함으로는 보류 말풍선의 "보관함으로"로 옮긴다).
+    flyToDrafts(text, () => [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
     $('input').value = '';
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     try {
-      await draftsApi({ action: 'add', to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      await draftsApi({ action: 'add', hold: true, to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      render();
+      $('msgs').scrollTop = $('msgs').scrollHeight;
       where = null;
       $('where').hidden = true;
       updateDraftsBtn();
