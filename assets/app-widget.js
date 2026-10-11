@@ -259,24 +259,14 @@
       .sort((a, b) => orderAt(a).localeCompare(orderAt(b)));
   }
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
-  // 일하는 중에 받아 갔으면(_after) 그 일이 끝난 시각(_read)에 놓고, 아직 안 끝났으면 맨 아래에 둔다.
   // 세션이 받아 갔는지: 감시 명령이 넘긴 마지막 번호까지, 또는 끼워넣기로 따로 넘긴 것(_at).
   const got = (m) => m.id <= (delivered[m.to] || 0) || !!delivered._at?.[m.id];
-  const waitingTurn = (m) => delivered._after?.[m.id] && !delivered._read?.[m.id];
-  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && (!got(m) || waitingTurn(m));
+  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && !got(m);
   let wasHeld = new Set();
   function orderAt(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
     if (isHeld(m)) return '\uffff' + m.at;
-    const read = delivered._read?.[m.id];
-    if (!read) return String(delivered._at?.[m.id] || m.at);
-    // 일이 끝날 때(Stop) 마지막 답이 거의 같은 순간에 기록되므로, 몇 초 안의 그 세션 답 뒤에 놓는다.
-    // 끼워넣기로 일하는 도중에 읽은 것은 그 시각 그대로 둔다(뒤이은 답 아래로 밀지 않는다).
-    if (!delivered._after?.[m.id]) return read + '~';
-    let key = read;
-    const limit = new Date(Date.parse(read) + 5000).toISOString();
-    for (const x of messages) if (x.from === 'agent' && x.session === m.to && x.at > key && x.at <= limit) key = x.at;
-    return key + '~';
+    return String(delivered._read?.[m.id] || delivered._at?.[m.id] || m.at);
   }
 
   // 세션끼리 메시지를 보내는 중(보낸 쪽 상태가 SendMessage 사용 중)인 [보낸 세션, 받는 세션] 쌍.
@@ -784,7 +774,7 @@
   let delivered = {};
   function readMark(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
-    if (got(m)) return waitingTurn(m) ? ' · 받음(하던 일 끝나면 읽음)' : ' · 읽음';
+    if (got(m)) return ' · 읽음';
     const s = sessionById(m.to);
     if (s?.status?.state === 'working' || s?.status?.state === 'permission') return m.interject ? ' · 안 읽음(다음 단계에서 바로 읽음)' : ' · 안 읽음(작업 중이라 끝나면 읽음)';
     return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';
