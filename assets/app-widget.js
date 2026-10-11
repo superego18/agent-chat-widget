@@ -730,7 +730,10 @@
   function orderAt(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
     if (isHeld(m)) return '\uffff' + m.at;
-    return String(delivered._read?.[m.id] || delivered._at?.[m.id] || m.at);
+    const readAt = delivered._read?.[m.id] || delivered._at?.[m.id];
+    // 읽힌 시각이 보낸 지 1시간도 더 뒤면(감시 방식을 바꿀 때 옛 메시지를 한꺼번에 다시 넘긴 경우 등) 보낸 자리에 둔다.
+    if (!readAt || Date.parse(readAt) - Date.parse(m.at) > 3_600_000) return String(m.at);
+    return String(readAt);
   }
 
   // 세션끼리 메시지를 보내는 중(보낸 쪽 상태가 SendMessage 사용 중)인 [보낸 세션, 받는 세션] 쌍.
