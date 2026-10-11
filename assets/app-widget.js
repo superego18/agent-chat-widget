@@ -440,7 +440,7 @@
       }
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
-        if (m.draft) tag.textContent += ' · 보관함 ' + m.draft.label;
+        if (m.draft) tag.textContent += ` · 보관함 › ${m.draft.label}`;
         if (m.resendOf) tag.textContent += ' · 다시 보냄';
         if (m.cancelled) d.classList.add('cancelled');
         // 세션이 아직 안 받아 간 메시지는 보내기를 취소할 수 있다.
