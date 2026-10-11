@@ -70,6 +70,10 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith('/__uifb/api/')) {
     return forward(req, res, review, req.url.replace('/__uifb', ''));
   }
+  // 알림·홈 화면 설치용 파일(서비스 워커, 설치 정보, 아이콘)은 리뷰 서버가 내보낸다. 이 주소(앱 화면)에서 등록·설치해야 하므로 같은 경로로 넘긴다.
+  if (/^\/__uifb\/(sw\.js|manifest\.webmanifest|icon-\d+\.png)(\?|$)/.test(req.url)) {
+    return forward(req, res, review, req.url);
+  }
   forward(req, res, app);
 });
 

@@ -32,6 +32,7 @@ export function lanAuth({ dir, lan }) {
   const ok = (req) => !lan || isLocal(req) || hasCookie(req);
 
   return {
+    key, // 홈 화면에 설치한 앱은 브라우저와 쿠키를 따로 써서, 설치 정보(manifest)의 시작 주소에 키를 붙인다(키가 있어야 받는 파일이라 새지 않는다)
     host: lan ? '0.0.0.0' : '127.0.0.1',
     // 요청을 계속 처리해도 되면 true. 아니면 응답(키 저장 후 이동 또는 거절)을 끝내고 false.
     check(req, res) {

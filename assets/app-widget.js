@@ -127,6 +127,8 @@
   .peek[hidden] { display: none; }
   .peek b { display: block; font-size: 12px; color: #4f46e5; margin-bottom: 2px; }
   @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
+  .notif { float: right; margin-right: 6px; border: 0; background: #f6f5f1; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #5a5852; cursor: pointer; }
+  .notif.on { background: #eef0ff; color: #3730a3; }
   .close { display: none; float: right; border: 0; background: #f6f5f1; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #1c1b18; cursor: pointer; }
   /* 모바일(768px 미만): 앱 위에 떠 있는 작은 창 대신 화면을 채우는 창으로 연다. 크기 조절 손잡이는 쓰지 않는다. */
   @media (max-width: 767px) {
@@ -253,7 +255,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="세션이 답하면 이 기기에 알림">🔕 알림</button><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
@@ -1853,6 +1855,55 @@
   }, 1000);
 
   $('close').onclick = () => $('btn').click();
+
+  // ── 알림(웹 푸시) ──
+  // 홈 화면에 앱처럼 설치할 수 있게 설치 정보를 붙인다(아이폰은 설치한 앱에서만 웹 알림을 받는다).
+  {
+    const add = (tag, attrs) => { const el = document.createElement(tag); Object.assign(el, attrs); document.head.append(el); };
+    if (!document.querySelector('link[rel="manifest"]')) add('link', { rel: 'manifest', href: '/__uifb/manifest.webmanifest?start=' + encodeURIComponent(location.pathname) });
+    if (!document.querySelector('link[rel="apple-touch-icon"]')) add('link', { rel: 'apple-touch-icon', href: '/__uifb/icon-180.png' });
+    if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
+  }
+  const pushReady = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  async function currentSub() {
+    if (!pushReady()) return null;
+    const reg = await navigator.serviceWorker.getRegistration('/');
+    return reg ? reg.pushManager.getSubscription() : null;
+  }
+  async function showNotif() {
+    const sub = await currentSub().catch(() => null);
+    const on = !!sub && Notification.permission === 'granted';
+    $('notif').classList.toggle('on', on);
+    $('notif').textContent = on ? '🔔 알림' : '🔕 알림';
+  }
+  $('notif').onclick = async () => {
+    if (!pushReady()) {
+      const ios = /iPhone|iPad/.test(navigator.userAgent);
+      return toast(!window.isSecureContext ? 'https:// 주소로 열어야 알림을 켤 수 있어요' : ios ? '사파리 공유 → 홈 화면에 추가한 앱에서 켜 주세요' : '이 브라우저는 알림을 지원하지 않아요');
+    }
+    try {
+      const old = await currentSub();
+      if (old && Notification.permission === 'granted') {
+        await old.unsubscribe();
+        await fetch('/__uifb/api/push-unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: old.endpoint }) });
+        toast('알림을 껐어요');
+        return showNotif();
+      }
+      if ((await Notification.requestPermission()) !== 'granted') return toast('알림 권한이 꺼져 있어요(설정에서 허용해 주세요)');
+      const reg = await navigator.serviceWorker.register('/__uifb/sw.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      const { publicKey } = await fetch('/__uifb/api/push-key').then((r) => r.json());
+      const key = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      await fetch('/__uifb/api/push-subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub.toJSON(), url: location.pathname, device: deviceNow() }) });
+      await fetch('/__uifb/api/push-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      toast('✓ 알림을 켰어요. 시험 알림을 보냈어요');
+    } catch (e) {
+      toast('알림을 켜지 못했어요: ' + (e?.message || e));
+    }
+    showNotif();
+  };
+  showNotif();
 
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
