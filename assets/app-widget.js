@@ -1442,6 +1442,7 @@
       } else {
         $('whereText').textContent = '위치: ' + (pickTarget === 'widget' ? '대화창 › ' : '') + (where.text || where.selector.replace(WIDGET_PREFIX, ''));
         $('where').hidden = false;
+        saveWhere();
       }
     }
     const repicked = pickFor;
@@ -1460,7 +1461,15 @@
     document.addEventListener('keydown', onKey, true);
   }
   $('pick').onclick = () => startPick();
-  $('whereClear').onclick = () => { where = null; $('where').hidden = true; };
+  $('whereClear').onclick = () => { where = null; $('where').hidden = true; saveWhere(); };
+  // 찍어 둔 위치도 이 기기에 기억해, 새로고침해도 다시 붙인다.
+  function saveWhere() {
+    try { if (where) localStorage.setItem('__uifb_where', JSON.stringify({ where, label: $('whereText').textContent })); else localStorage.removeItem('__uifb_where'); } catch {}
+  }
+  try {
+    const st = JSON.parse(localStorage.getItem('__uifb_where') || 'null');
+    if (st?.where) { where = st.where; $('whereText').textContent = st.label || '위치'; $('where').hidden = false; }
+  } catch {}
   $('replyClear').onclick = () => setReply(null);
 
   let interjectNext = false;
@@ -1483,6 +1492,7 @@
         if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
         where = null;
         $('where').hidden = true;
+        saveWhere();
         setReply(null);
         await poll();
         // 세션이 쉬는 중이면 감시 명령이 1초 안에 받아 간다. 3초마다 확인하면 그동안 "안 읽음"으로 보여서, 보낸 직후 몇 초는 자주 확인한다.
@@ -1798,6 +1808,9 @@
       fits.push({ measure, apply });
       ta.setAttribute('aria-label', '보관한 메시지');
       ta.onchange = () => { if (ta.value.trim()) draftsApi({ action: 'update', id: d.id, text: ta.value }); };
+      // 고치는 중에도 0.8초마다 서버에 저장해 둔다(새로고침되어도 고친 글이 남게).
+      let taT = null;
+      ta.addEventListener('input', () => { clearTimeout(taT); taT = setTimeout(() => { if (ta.value.trim()) fetch('/__uifb/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id: d.id, text: ta.value }) }).catch(() => {}); }, 800); });
       top.append(cb, ta);
       const meta = document.createElement('div');
       meta.className = 'meta';
@@ -2022,6 +2035,7 @@
       $('msgs').scrollTop = $('msgs').scrollHeight;
       where = null;
       $('where').hidden = true;
+      saveWhere();
       setReply(null);
       updateDraftsBtn();
       if (toDrafts) toast('✓ 보관함에 담음', { label: `${draftLabel || '미분류'} 열기`, fn: () => openSheet(draftLabel || '') });
@@ -2317,6 +2331,28 @@
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
   try { wasOpen = localStorage.getItem('__uifb_open') === '1'; } catch {}
-  poll().then(() => { restoreReplyState(); if (wasOpen && $('panel').hidden) $('btn').click(); });
+  // 하던 것은 원치 않는 새로고침(폰이 앱을 다시 띄움 등)에도 남긴다: 말풍선·보류에서 고치던 글을 1초마다 이 기기에 적어 두고, 다시 열 때 되살린다.
+  // (입력칸 글은 서버, 답장·참고·위치는 따로 이 기기에 남긴다)
+  let editSaved = '';
+  setInterval(() => {
+    // 어느 칸에 커서가 있었는지도 적어 둔다(입력칸·말풍선 고치는 칸). 새로고침 뒤 그 칸에 다시 커서를 둔다.
+    const a = root.activeElement;
+    const focus = a === $('input') ? 'input' : a?.classList?.contains('edit') ? 'edit' : null;
+    const v = JSON.stringify({ tab: activeTab, editing, holdEdit, focus, caret: focus ? [a.selectionStart, a.selectionEnd] : null });
+    if (v === editSaved) return;
+    editSaved = v;
+    try { if (editing || holdEdit || focus) localStorage.setItem('__uifb_edit', v); else localStorage.removeItem('__uifb_edit'); } catch {}
+  }, 1000);
+  function restoreEditState() {
+    let st = null;
+    try { st = JSON.parse(localStorage.getItem('__uifb_edit') || 'null'); } catch {}
+    if (!st || st.tab !== activeTab) return;
+    if (st.editing && messages.some((x) => x.id === st.editing.id)) editing = st.editing;
+    if (st.holdEdit && drafts.some((x) => x.id === st.holdEdit.id && x.hold)) holdEdit = st.holdEdit;
+    if (editing || holdEdit) render();
+    const el = st.focus === 'input' ? $('input') : st.focus === 'edit' ? editEl : null;
+    if (el?.isConnected) { el.focus(); try { if (st.caret) el.setSelectionRange(st.caret[0], st.caret[1]); } catch {} }
+  }
+  poll().then(() => { restoreReplyState(); if (wasOpen && $('panel').hidden) $('btn').click(); restoreEditState(); });
   setInterval(poll, 3000);
 })();
