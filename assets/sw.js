@@ -10,7 +10,8 @@ self.addEventListener('push', (e) => {
   e.waitUntil(self.registration.showNotification(d.title || '대화/피드백', {
     body: d.body || '',
     tag: d.tag || 'uifb',
-    renotify: true,
+    renotify: !d.silent, // 조용한 알림(다른 세션 작업 중)은 소리·진동 없이 같은 자리를 바꿔 끼운다
+    silent: !!d.silent,
     icon: '/__uifb/icon-192.png',
     badge: '/__uifb/icon-192.png',
     data: { url: d.url || '/' },

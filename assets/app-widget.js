@@ -2091,6 +2091,7 @@
   }
   function switchTab(id) {
     flushCompose();
+    setTimeout(() => viewing(), 0); // 보고 있는 탭이 바뀐 것을 서버에 알린다(다른 세션 작업 중 알림을 고르는 데 씀)
     if (id !== activeTab) setReply(null);
     activeTab = id;
     labelSetAt = 0;
@@ -2213,7 +2214,7 @@
     $('notif').textContent = on ? '🔔 알림' : '🔕 알림';
   }
   // 알림 설정 창: 받을 알림 종류와 "보고 있을 땐 보내지 않기". 이 기기에만 적용된다(서버에 기기마다 저장).
-  const NKINDS = [['answer', '세션 답장'], ['done', '작업 끝남'], ['permission', '승인 필요'], ['review', '비교 페이지 준비'], ['stale', '오래 멈춤(5분 그대로)'], ['peer', '세션끼리 메시지']];
+  const NKINDS = [['answer', '세션 답장'], ['done', '작업 끝남'], ['permission', '승인 필요'], ['review', '비교 페이지 준비'], ['stale', '오래 멈춤(5분 그대로)'], ['peer', '세션끼리 메시지'], ['work', '다른 세션 작업 중(대화창을 보는 동안, 조용히)']];
   async function openNotifSettings(sub) {
     const box = $('nset');
     const post = (body) => fetch('/__uifb/api/push-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, ...body }) }).then((r) => r.json());
@@ -2257,7 +2258,7 @@
     if (!on && lastViewing === false && force !== true) return;
     lastViewing = on;
     const sub = await currentSub().catch(() => null);
-    if (sub) fetch('/__uifb/api/push-viewing', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, off: !on }) }).catch(() => {});
+    if (sub) fetch('/__uifb/api/push-viewing', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, off: !on, tab: activeTab }) }).catch(() => {});
   };
   setInterval(viewing, 15_000);
   document.addEventListener('visibilitychange', () => viewing());
