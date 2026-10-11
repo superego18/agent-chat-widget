@@ -319,10 +319,14 @@
     }
   }
 
+  let lastTab = null;
   function render() {
     renderTabs();
     const box = $('msgs');
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    const rendered = new Set([...box.querySelectorAll('.msg')].map((el) => el.dataset.id));
+    const renderedTab = lastTab;
+    lastTab = activeTab;
     const prevTop = box.scrollTop;
     box.textContent = '';
     const items = timeline(activeTab);
@@ -460,7 +464,9 @@
       box.scrollTop = target ? Math.max(0, topOf(target) - 8) : box.scrollHeight;
       scrollToUnread = false;
     } else if (nearBottom) {
-      box.scrollTop = box.scrollHeight;
+      // 새 답이 왔으면 그 답의 처음이 보이게 둔다(긴 답이면 끝부터 보이지 않게). 짧으면 어차피 맨 아래까지 내려간다.
+      const fresh = [...box.querySelectorAll('.msg.agent, .msg.peer')].find((el) => renderedTab === activeTab && rendered.size > 0 && !rendered.has(el.dataset.id));
+      box.scrollTop = fresh ? fresh.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8 : box.scrollHeight;
     } else {
       box.scrollTop = prevTop; // 다시 그려도 읽던 위치를 유지한다
     }
