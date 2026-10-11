@@ -216,7 +216,7 @@
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
     const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
     if (!text) return;
-    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.where ? { where: m.where } : {}) };
+    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       editing = null;
@@ -264,10 +264,24 @@
   }
 
   const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
+  // 일부만 인용: 메시지 글의 일부를 길게 눌러(또는 끌어) 고른 뒤 그 메시지의 "답장"을 누르면 고른 부분만 인용한다.
+  // 버튼을 누르는 순간 선택이 풀리기도 해서, 마지막으로 고른 글을 잠시 기억해 둔다.
+  let replyQuote = null;
+  let lastSel = null;
+  const plain = (t) => String(t).replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
+  document.addEventListener('selectionchange', () => {
+    let t = '';
+    try { t = ((root.getSelection && root.getSelection()) || getSelection())?.toString() || ''; } catch {}
+    t = plain(t);
+    if (t) lastSel = { text: t.slice(0, 500), at: Date.now() };
+  });
   function setReply(m) {
     replyTo = m ? m.id : null;
+    const body = m ? plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text) : '';
+    replyQuote = m && lastSel && Date.now() - lastSel.at < 60_000 && lastSel.text !== body && body.includes(lastSel.text) ? lastSel.text : null;
+    lastSel = null;
     $('reply').hidden = !m;
-    if (m) { $('replyText').textContent = '↩ 답장 · ' + quoteOf(m); $('input').focus(); }
+    if (m) { $('replyText').textContent = '↩ 답장 · ' + (replyQuote ? `${quoteOf(m).split(':')[0]}의 일부: "${replyQuote}"` : quoteOf(m)); $('input').focus(); }
   }
 
   // 보관함에서 보낸 메시지: 사용자가 쓴 글과, 서버가 덧붙인 정보(위치·저장 시각·커밋·담은 화면)를 나눠 보인다.
@@ -425,7 +439,7 @@
       if (orig) {
         const q = document.createElement('span');
         q.className = 'quote';
-        q.textContent = '↩ ' + quoteOf(orig);
+        q.textContent = '↩ ' + (m.replyQuote ? `${quoteOf(orig).split(':')[0]}: "${m.replyQuote}"` : quoteOf(orig));
         q.title = '원래 메시지로 가기';
         q.onclick = () => { const el = box.querySelector(`.msg[data-id="${m.replyTo}"]`); if (el) flash(el); };
         body.before(q);
@@ -798,7 +812,7 @@
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo, ...(replyQuote ? { replyQuote } : {}) } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;

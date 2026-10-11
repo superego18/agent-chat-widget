@@ -7,7 +7,9 @@ export function formatMessage(m, all) {
   if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
   // 이전 메시지에 단 답장이면 원문을 붙인다.
   const orig = m.replyTo ? all.find((x) => x.id === m.replyTo) : null;
-  if (orig) lines.push(`    답장 대상 [${orig.id}] ${orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트'}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
+  const who = orig ? (orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트') : '';
+  if (orig && m.replyQuote) lines.push(`    답장 대상 [${orig.id}] ${who} 메시지 중 이 부분: "${m.replyQuote}"`);
+  else if (orig) lines.push(`    답장 대상 [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
   // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
   if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
     lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
