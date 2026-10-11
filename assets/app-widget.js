@@ -160,6 +160,16 @@
   .draft .acts { display: flex; flex-wrap: wrap; gap: 4px; }
   .draft .acts button, .draft .acts select { font-size: 11px; padding: 3px 7px; border-radius: 6px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
   .draft .acts .send1 { background: #1c1b18; color: #fff; border-color: transparent; }
+  .toast { position: fixed; z-index: 2147483647; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; max-width: min(340px, calc(100vw - 32px)); font-size: 12px; line-height: 1.4; padding: 8px 12px; border-radius: 10px; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  .toast[hidden] { display: none; }
+  .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #fde68a; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+  .dgroup.trash { opacity: .9; }
+  .gone { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 6px 2px; border-top: 1px solid rgba(0,0,0,.06); font-size: 12px; }
+  .gone .gwhat { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
+  .gone .gwhat.sent { background: #dcfce7; color: #166534; }
+  .gone .gwhat.deleted { background: #fee2e2; color: #991b1b; }
+  .gone .gtext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #5a5852; }
+  .gone button { font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(0,0,0,.15); background: #fff; cursor: pointer; }
   .dfoot { display: flex; gap: 8px; align-items: center; padding: 8px 10px 10px; font-size: 12px; color: #5a5852; border-top: 1px solid rgba(0,0,0,.08); }
   .dfoot[hidden] { display: none; }
   .dfoot button { margin-left: auto; border: 0; border-radius: 7px; padding: 8px 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
@@ -207,6 +217,7 @@
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <button type="button" class="selreply" id="selReply" hidden>↩ 고른 부분에 답장</button>
+  <div class="toast" id="toast" hidden role="status"></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
@@ -782,10 +793,11 @@
       }
       messages = c.messages || [];
       delivered = c.delivered || {};
-      const dk = JSON.stringify(dd.drafts || []);
+      const dk = JSON.stringify(dd.drafts || []) + JSON.stringify(dd.trash || []);
       if (dk !== draftsKey) {
         draftsKey = dk;
         drafts = dd.drafts || [];
+        trash = dd.trash || [];
         if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts();
       }
       sessions = ss.sessions || [];
@@ -965,6 +977,25 @@
 
   // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(리뷰 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
   let drafts = [];
+  let trash = []; // 최근 7일 보낸 것·지운 것
+  let showTrash = false;
+  // 보관함에서 보내거나 지운 직후 잠깐 띄우는 알림. 지운 것은 "되살리기"로 바로 되돌릴 수 있다.
+  let toastT = null;
+  function toast(text, undo) {
+    const t = $('toast');
+    t.textContent = '';
+    const sp = document.createElement('span');
+    sp.textContent = text;
+    t.append(sp);
+    if (undo) { const b = document.createElement('button'); b.type = 'button'; b.textContent = '되살리기'; b.onclick = () => { undo(); t.hidden = true; }; t.append(b); }
+    const c = $('composeRow').getBoundingClientRect();
+    const p = $('panel').getBoundingClientRect();
+    t.style.left = p.left + p.width / 2 + 'px';
+    t.style.top = c.top - 46 + 'px';
+    t.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(() => { t.hidden = true; }, undo ? 6000 : 3500);
+  }
   let draftsKey = '';
   let showDrafts = false;
   let pickFor = null;
@@ -1185,12 +1216,53 @@
         };
         acts.append(ls);
       }
-      btn('지우기', () => draftsApi({ action: 'delete', ids: [d.id] }));
+      btn('지우기', async () => {
+        await draftsApi({ action: 'delete', ids: [d.id] });
+        toast('지웠어요 · 7일 동안 되살릴 수 있어요', () => draftsApi({ action: 'restore', ids: [d.id] }));
+      });
       card.append(top, meta, acts);
       g.append(card);
     }
     }
+    renderTrash(box);
     updateFoot();
+    updateDraftsBtn(); // 보내거나 지운 뒤 머리말 개수도 바로 맞춘다
+  }
+
+  // 보관함 맨 아래: 최근 7일 보낸 것·지운 것(접혀 있음). "다시 담기"로 보관함에 되돌린다.
+  function renderTrash(box) {
+    const list = trash.filter((d) => d.to === activeTab && (sheetLabel === null || (d.label || '') === sheetLabel)).sort((a, b) => String(b.goneAt).localeCompare(String(a.goneAt)));
+    if (!list.length) return;
+    const sec = document.createElement('section');
+    sec.className = 'dgroup trash' + (showTrash ? '' : ' folded');
+    const head = document.createElement('header');
+    const fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'fold';
+    fold.textContent = (showTrash ? '▾ ' : '▸ ') + '최근 보낸 것·지운 것';
+    fold.onclick = () => { showTrash = !showTrash; renderDrafts(); };
+    const n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = `${list.length}개 · 7일 보관`;
+    head.append(fold, n);
+    sec.append(head);
+    if (showTrash) for (const d of list) {
+      const row = document.createElement('div');
+      row.className = 'gone';
+      const what = document.createElement('span');
+      what.className = 'gwhat ' + d.gone;
+      what.textContent = (d.gone === 'sent' ? '보냄' : '지움') + ' ' + shortAt(d.goneAt) + (d.msgId ? ` · #${d.msgId}` : '');
+      const tx = document.createElement('span');
+      tx.className = 'gtext';
+      tx.textContent = (d.label ? `[${d.label}] ` : '') + d.text;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = '다시 담기';
+      b.onclick = async () => { await draftsApi({ action: 'restore', ids: [d.id] }); toast('보관함에 다시 담았어요'); };
+      row.append(what, tx, b);
+      sec.append(row);
+    }
+    box.append(sec);
   }
 
   function updateFoot() {
@@ -1201,7 +1273,9 @@
   }
 
   async function sendDrafts(ids) {
-    await draftsApi({ action: 'send', ids, combine: true, device: deviceNow() });
+    const out = await draftsApi({ action: 'send', ids, combine: true, device: deviceNow() });
+    const sent = out?.sent || [];
+    if (sent.length) toast(`${ids.length}개 보냄 → ${nameOf(sent[0].to)} (#${sent.map((m) => m.id).join(', #')}) · 보관함 아래 "최근 보낸 것"에 7일 남아요`);
     ids.forEach((id) => checked.delete(id));
     if (!mine().length) setDraftsView(false);
     else renderDrafts();
