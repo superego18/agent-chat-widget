@@ -65,6 +65,7 @@
   .links { z-index: 0; }
   .msgs > .msg { position: relative; z-index: 1; } /* 선 끝이 말풍선 뒤로 들어가게 말풍선을 선 위에 둔다 */
   .links path { fill: url(#uifbLinkGrad) #a5b4fc; opacity: .85; }
+  .links path.reply { fill: url(#uifbReplyGrad) #fbbf24; } /* 골라서 답장한 연결은 주황(인용 노란 음영과 같은 계열) */
   .links path.new { animation: linkin .6s ease-out; }
   @keyframes linkin { from { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .links path.new { animation: none; } }
@@ -472,7 +473,8 @@
     svg.setAttribute('class', 'links');
     svg.setAttribute('width', String(box.clientWidth));
     svg.setAttribute('height', String(box.scrollHeight));
-    svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
+    svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>'
+      + '<linearGradient id="uifbReplyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#fbbf24"/></linearGradient></defs>';
     box.prepend(svg); // 경로 길이를 재려면 문서에 붙어 있어야 한다
     const pos = (id) => {
       const el = box.querySelector(`.msg[data-id="${id}"]`);
@@ -505,10 +507,11 @@
     const R = 8;
     const lanes = [];
     const drawn = new Set();
-    for (const [u, answers] of links.by) {
-      const q = pos(u);
-      const ends = answers.map(pos).filter(Boolean);
-      if (!q || !ends.length) continue;
+    // 잇는 쌍: 질문 → 그에 대한 답들(남보라), 원문 → 그 원문에 단 답장(주황). 위에서부터 차례로 그려 겹치면 안쪽 줄로 비킨다.
+    const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
+    for (const m of messages) if (m.replyTo && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
+    const placed = pairs.map((p) => ({ ...p, q: pos(p.from), ends: p.tos.map(pos).filter(Boolean) })).filter((p) => p.q && p.ends.length && p.ends[0].y > p.q.y).sort((a, b) => a.q.y - b.q.y);
+    for (const { from: u, q, ends, kind } of placed) {
       const last = ends[ends.length - 1];
       const bottom = Math.max(q.y, last.y);
       let lane = lanes.findIndex((end) => end < Math.min(q.y, ends[0].y) - 2);
@@ -522,8 +525,10 @@
       let d = taper(`M ${q.right - 10} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right - 10}`, 5, 1);
       for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right - 10}`, 3, 1);
       shape.setAttribute('d', d);
-      if (drawnLinks.size > 0 && !drawnLinks.has(u)) shape.classList.add('new');
-      drawn.add(u);
+      if (kind === 'reply') shape.classList.add('reply');
+      const key = kind + u + ':' + ends.length;
+      if (drawnLinks.size > 0 && !drawnLinks.has(key)) shape.classList.add('new');
+      drawn.add(key);
       svg.append(shape);
     }
     guide.remove();
