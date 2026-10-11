@@ -509,29 +509,40 @@
     svg.setAttribute('height', String(box.scrollHeight));
     svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>'
       + '<linearGradient id="uifbReplyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#fbbf24"/></linearGradient></defs>';
-    box.prepend(svg); // 경로 길이를 재려면 문서에 붙어 있어야 한다
+    box.prepend(svg);
+    const byId = new Map([...box.querySelectorAll('.msg[data-id]')].map((e) => [Number(e.dataset.id), e]));
     const pos = (id) => {
-      const el = box.querySelector(`.msg[data-id="${id}"]`);
+      const el = byId.get(id);
       if (!el || el.classList.contains('held')) return null;
       return { y: el.offsetTop + Math.min(16, el.offsetHeight / 2), left: el.offsetLeft, right: el.offsetLeft + el.offsetWidth };
     };
-    const guide = document.createElementNS(NS, 'path');
-    svg.append(guide);
-    // 경로 d 를 따라 굵기 w0 → w1 로 가늘어지는 채운 도형의 윤곽
-    const taper = (d, w0, w1) => {
-      guide.setAttribute('d', d);
-      const L = guide.getTotalLength();
-      const n = Math.max(6, Math.round(L / 8));
-      const pts = Array.from({ length: n + 1 }, (_, i) => guide.getPointAtLength((L * i) / n));
+    // 선 모양은 직선과 둥근 모서리(2차 곡선)뿐이라, 브라우저에 경로 길이를 묻지 않고 직접 점을 찍는다(폰에서도 가볍게).
+    // segs: [[x, y], ['Q', cx, cy, x, y], [x, y], ...] → 점 목록
+    const pointsOf = (segs) => {
+      const pts = [];
+      for (const sgm of segs) {
+        if (sgm[0] !== 'Q') { pts.push({ x: sgm[0], y: sgm[1] }); continue; }
+        const [, cx, cy, x, y] = sgm;
+        const p0 = pts[pts.length - 1];
+        for (let i = 1; i <= 6; i++) { const t = i / 6; const u = 1 - t; pts.push({ x: u * u * p0.x + 2 * u * t * cx + t * t * x, y: u * u * p0.y + 2 * u * t * cy + t * t * y }); }
+      }
+      return pts;
+    };
+    // 점 목록을 따라 굵기 w0 → w1 로 가늘어지는 채운 도형의 윤곽(굵기는 지나온 길이에 비례)
+    const taper = (segs, w0, w1) => {
+      const pts = pointsOf(segs);
+      const acc = [0];
+      for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      const L = acc[acc.length - 1] || 1;
       const left = [];
       const right = [];
       pts.forEach((p, i) => {
         const a = pts[Math.max(0, i - 1)];
-        const b = pts[Math.min(n, i + 1)];
+        const b = pts[Math.min(pts.length - 1, i + 1)];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const len = Math.hypot(dx, dy) || 1;
-        const h = (w0 + ((w1 - w0) * i) / n) / 2;
+        const h = (w0 + ((w1 - w0) * acc[i]) / L) / 2;
         left.push(`${(p.x - (dy / len) * h).toFixed(1)} ${(p.y + (dx / len) * h).toFixed(1)}`);
         right.push(`${(p.x + (dy / len) * h).toFixed(1)} ${(p.y - (dx / len) * h).toFixed(1)}`);
       });
@@ -564,8 +575,8 @@
       const x = R1 ? box.clientWidth - 8 - lane * 6 : 8 + lane * 6;
       const edge = (p) => (R1 ? p.right - 10 : p.left + 10);
       const k = R1 ? -r : r; // 모서리가 기둥 안쪽으로 휘는 방향
-      let d = taper(`M ${edge(q)} ${q.y} H ${x + k} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x + k} ${bottom} H ${edge(last)}`, w0, w1);
-      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x + k} ${e.y} H ${edge(e)}`, w2, w1);
+      let d = taper([[edge(q), q.y], [x + k, q.y], ['Q', x, q.y, x, q.y + r], [x, bottom - r], ['Q', x, bottom, x + k, bottom], [edge(last), bottom]], w0, w1);
+      for (const e of ends.slice(0, -1)) d += ' ' + taper([[x, e.y - r], ['Q', x, e.y, x + k, e.y], [edge(e), e.y]], w2, w1);
       shape.setAttribute('d', d);
       if (kind === 'reply') shape.classList.add('reply');
       if (on) shape.classList.add('on');
@@ -574,10 +585,11 @@
       drawn.add(key);
       svg.append(shape);
     }
-    guide.remove();
     drawnLinks = drawn;
   }
-  new ResizeObserver(() => { if (lastLinks) drawLinks(lastLinks); }).observe($('msgs'));
+  // 크기가 바뀌면(보관함 열고 닫기, 창 크기 조절) 한 화면에 한 번만 다시 그린다.
+  let linkRaf = 0;
+  new ResizeObserver(() => { if (lastLinks && !linkRaf) linkRaf = requestAnimationFrame(() => { linkRaf = 0; drawLinks(lastLinks); }); }).observe($('msgs'));
 
   function timeline(tab) {
     return [...messages, ...Object.values(transcripts).flat()]
@@ -644,6 +656,20 @@
   }
 
   let lastTab = null;
+  // 작업 중 표시의 글. 상태가 5분 넘게 그대로면 멈췄을 수 있다(긴 명령이거나, 답이 대화창으로 안 넘어왔거나). 사용자가 알 수 있게 적는다.
+  function fillTyping(ty, st) {
+    const label = ty.querySelector('.tylabel');
+    label.textContent = st.state === 'permission' ? st.detail || '터미널에서 승인을 기다리는 중' : `작업 중 · ${st.detail || '생각하는 중'}`;
+    const still = Math.floor((Date.now() - Date.parse(st.at)) / 60_000);
+    ty.classList.toggle('stale', st.state === 'working' && still >= 5);
+    if (st.state === 'working' && still >= 5) label.textContent += ` · ${still}분째 그대로예요. 답이 안 오면 터미널을 확인해 주세요`;
+  }
+  function updateTyping() {
+    const ty = $('msgs').querySelector('.typing');
+    const st = sessionById(activeTab)?.status;
+    if (ty && st && (st.state === 'working' || st.state === 'permission')) fillTyping(ty, st);
+  }
+
   function render() {
     renderTabs();
     const box = $('msgs');
@@ -839,14 +865,9 @@
       dots.className = 'dots';
       dots.innerHTML = '<i></i><i></i><i></i>';
       const label = document.createElement('span');
-      label.textContent = st.state === 'permission' ? st.detail || '터미널에서 승인을 기다리는 중' : `작업 중 · ${st.detail || '생각하는 중'}`;
-      // 상태가 5분 넘게 그대로면 멈췄을 수 있다(긴 명령이거나, 답이 대화창으로 안 넘어왔거나). 사용자가 알 수 있게 적는다.
-      const still = Math.floor((Date.now() - Date.parse(st.at)) / 60_000);
-      if (st.state === 'working' && still >= 5) {
-        ty.classList.add('stale');
-        label.textContent += ` · ${still}분째 그대로예요. 답이 안 오면 터미널을 확인해 주세요`;
-      }
+      label.className = 'tylabel';
       ty.append(dots, label);
+      fillTyping(ty, st);
       box.append(ty);
     } else if (last && last.from === 'user' && last.context !== 'terminal') {
       const w = document.createElement('p');
@@ -912,7 +933,9 @@
     markSeenVisible();
     updateBadges();
     updateDraftsBtn();
-    if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts(); // 고치는 중인 글은 다시 그리지 않는다
+    // 보관함은 담긴 글이나 세션 목록이 바뀔 때만 다시 그린다(작업 상태가 바뀔 때마다 새로 그리면 버벅이고 스크롤이 맨 위로 돌아간다).
+    const dk = draftsKey + '|' + sessions.map((x) => x.id).join();
+    if (showDrafts && dk !== draftsRenderedKey && !$('drafts').contains(root.activeElement)) renderDrafts(); // 고치는 중인 글은 다시 그리지 않는다
   }
 
   function updateBadges() {
@@ -1006,6 +1029,7 @@
   }
 
   let key = '';
+  let statusKey = '';
   async function poll() {
     try {
       const [c, ss, dd, sv, pf, cp] = await Promise.all([
@@ -1048,10 +1072,15 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold).map((d) => d.id + d.to).join() + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold).map((d) => d.id + d.to).join() + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
+      const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
-      if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; render(); }
-      else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
+      if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; render(); }
+      else {
+        if (sk !== statusKey) { statusKey = sk; updateTyping(); }
+        updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
+      }
       peekNew();
     } catch {}
   }
@@ -1218,6 +1247,7 @@
 
   // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(리뷰 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
   let drafts = [];
+  let draftsRenderedKey = ''; // 보관함을 마지막으로 그렸을 때의 내용
   let trash = []; // 최근 7일 보낸 것·지운 것
   let showTrash = false;
   const openGone = new Set(); // 펼친 보낸 것·지운 것(항목 번호)
@@ -1377,7 +1407,10 @@
 
   function renderDrafts() {
     const box = $('drafts');
+    const keepTop = box.scrollTop; // 다시 그려도 보던 자리를 지킨다
+    draftsRenderedKey = draftsKey + '|' + sessions.map((x) => x.id).join();
     box.textContent = '';
+    const fits = [];
     renderTrash(box); // 최근 보낸 것·지운 것은 맨 위(접혀 있음)
     const list = mine();
     for (const id of [...checked]) if (!list.some((d) => d.id === id)) checked.delete(id);
@@ -1436,14 +1469,14 @@
       more.type = 'button';
       more.className = 'dmore';
       more.hidden = true;
-      const fit = () => {
-        ta.style.height = 'auto';
-        ta.style.paddingBottom = '';
-        const full = ta.scrollHeight + 2;
+      // 재기(measure)와 높이 바꾸기(apply)를 나눠, 보관함을 처음 열 때 모든 칸을 한 번에 재고 한 번에 바꾼다(칸마다 번갈아 하면 화면 계산이 칸 수만큼 반복돼 버벅인다).
+      const measure = () => {
         const cs = getComputedStyle(ta);
         const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
         const edge = parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
-        const four = Math.floor(lh * 4 + edge + parseFloat(cs.paddingBottom));
+        return { full: ta.scrollHeight + 2, lh, edge, four: Math.floor(lh * 4 + edge + parseFloat(cs.paddingBottom)) };
+      };
+      const apply = ({ full, lh, edge, four }) => {
         const open = openDrafts.has(d.id);
         // 접힌 칸은 아래 여백을 없애고 4줄에 딱 맞춘다(여백이 있으면 그 자리에 5번째 줄 윗부분이 비친다).
         if (!open && full > four + 1) { ta.style.paddingBottom = '0'; ta.style.height = Math.floor(lh * 4 + edge) + 'px'; }
@@ -1451,10 +1484,11 @@
         more.hidden = full <= four + 1;
         more.textContent = open ? '접기' : '펼치기';
       };
+      const fit = () => { ta.style.height = 'auto'; ta.style.paddingBottom = ''; apply(measure()); };
       more.onclick = () => { openDrafts.has(d.id) ? openDrafts.delete(d.id) : openDrafts.add(d.id); fit(); };
       ta.addEventListener('input', fit);
       ta.addEventListener('focus', () => { if (!openDrafts.has(d.id)) { openDrafts.add(d.id); fit(); } });
-      requestAnimationFrame(fit);
+      fits.push({ measure, apply });
       ta.setAttribute('aria-label', '보관한 메시지');
       ta.onchange = () => { if (ta.value.trim()) draftsApi({ action: 'update', id: d.id, text: ta.value }); };
       top.append(cb, ta);
@@ -1520,6 +1554,10 @@
     }
     updateFoot();
     updateDraftsBtn(); // 보내거나 지운 뒤 머리말 개수도 바로 맞춘다
+    // 새로 만든 칸은 rows=1 이라 바로 잴 수 있다: 모두 잰 뒤 모두 바꾼다.
+    const ms = fits.map((f) => f.measure());
+    fits.forEach((f, i) => f.apply(ms[i]));
+    box.scrollTop = keepTop;
   }
 
   // 보관함 맨 위: 최근 7일 보낸 것·지운 것(접혀 있음). "다시 담기"로 보관함에 되돌린다.
