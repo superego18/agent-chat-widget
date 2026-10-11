@@ -342,6 +342,7 @@
   let editing = null; // 말풍선 안에서 고치는 중인 내 메시지 { id, text }
   let holdEdit = null; // 고치는 중인 보류 { id, text }
   let editEl = null;
+  let editStartAt = 0;
   async function resend(m) {
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
     const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
@@ -955,7 +956,7 @@
           again.type = 'button';
           again.className = 'rp';
           again.textContent = '다시 보내기';
-          again.onclick = () => { editing = m.draft ? { id: m.id, items: m.draft.items.map((it) => it.text) } : { id: m.id, text: m.text }; render(); editEl?.focus(); };
+          again.onclick = () => { editing = m.draft ? { id: m.id, items: m.draft.items.map((it) => it.text) } : { id: m.id, text: m.text }; editStartAt = Date.now(); render(); editEl?.focus(); };
           small.append(again);
         }
       }
@@ -1035,7 +1036,7 @@
         mk('수정 취소', '', () => { holdEdit = null; render(); });
         mk('저장', 'save', async () => { if (await saveEdit()) render(); });
         acts.append(Object.assign(document.createElement('i'), { className: 'brk' })); // 고치기 단추와 나머지 단추를 두 줄로 나눈다
-      } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; render(); editEl?.focus(); });
+      } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; editStartAt = Date.now(); render(); editEl?.focus(); });
       mk('지우기', '', async () => { if (ed) holdEdit = null; await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
       mk('보관함', 'tostash', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
       // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
@@ -1411,6 +1412,8 @@
     if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
   }
   $('input').addEventListener('input', () => autoGrow($('input')));
+  // 폰에서 "다시 보내기"·"수정"을 누른 직후 그 탭이 아래 입력칸에 한 번 더 닿아 초점을 가져가는 일이 있다. 방금 고치기를 시작했으면 말풍선 칸으로 돌려준다.
+  $('input').addEventListener('focus', () => { if ((editing || holdEdit) && Date.now() - editStartAt < 1000 && editEl?.isConnected) editEl.focus(); });
   $('input').addEventListener('pointerdown', () => {
     const el = $('input');
     el.style.maxHeight = inputMax() + 'px';
