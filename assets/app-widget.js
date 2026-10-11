@@ -56,6 +56,8 @@
   .msg.user.held .meta span, .msg.user.cancelled .meta span { background: rgba(79,70,229,.1); }
   .msg .editdraft { display: block; }
   .msg .editdraft .meta { margin: 3px 0 8px; }
+  .msg.flashing { animation: flashm 2s ease-out; }
+  @keyframes flashm { 0%, 70% { outline: 3px solid #f59e0b; outline-offset: 2px; } 100% { outline: 3px solid transparent; outline-offset: 2px; } }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
@@ -530,7 +532,12 @@
         go.onclick = () => {
           const el = box.querySelector(`.msg[data-id="${m.replyTo}"]`);
           if (!el) return;
-          flash(el);
+          // 화면 고정 상자(flash)는 스크롤하면 다른 메시지 위에 남으므로, 메시지 자체를 잠시 테두리로 강조한다.
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          el.classList.remove('flashing');
+          void el.offsetWidth;
+          el.classList.add('flashing');
+          setTimeout(() => el.classList.remove('flashing'), 2000);
           if (m.replyQuote) { markQuote(m.replyTo, m.replyQuote); setTimeout(() => markQuote(replyTo, replyQuote), 2500); }
         };
         bar.append(toggle, go);
