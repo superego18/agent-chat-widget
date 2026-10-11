@@ -236,17 +236,9 @@
     return key + '~';
   }
 
-  // 세션끼리 메시지를 보내는 중(보낸 쪽이 SendMessage 를 쓰는 중)이거나 방금(8초 안) 보냈으면 [보낸 세션, 받는 세션] 쌍을 돌려준다.
-  // 방금 보낸 것은 이 화면이 처음 본 시각으로 잰다(폰과 컴퓨터 시계가 달라도 맞게).
-  const peerSeenAt = {};
-  let peerPrimed = false;
+  // 세션끼리 메시지를 보내는 중(보낸 쪽 상태가 SendMessage 사용 중)인 [보낸 세션, 받는 세션] 쌍.
   function flows() {
-    const now = Date.now();
-    for (const m of messages) if (m.from === 'peer' && !peerSeenAt[m.id]) peerSeenAt[m.id] = peerPrimed ? now : 1;
-    peerPrimed = true;
-    const pairs = sessions.filter((x) => x.status?.state === 'working' && x.status.peerTo).map((x) => [x.id, x.status.peerTo]);
-    for (const m of messages) if (m.from === 'peer' && m.session && m.to && now - peerSeenAt[m.id] < 8000) pairs.push([m.session, m.to]);
-    return pairs.filter(([a, b], i) => a !== b && pairs.findIndex(([c, d]) => c === a && d === b) === i);
+    return sessions.filter((x) => x.status?.state === 'working' && x.status.peerTo && x.status.peerTo !== x.id).map((x) => [x.id, x.status.peerTo]);
   }
 
   function renderTabs() {
