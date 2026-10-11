@@ -624,6 +624,9 @@ function readReviewWatch(sessionKey, round) {
   const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone && (w.round == null || !round || String(w.round) === round));
   if (live[0]) return live[0];
   const s = findSessionByKey(sessionKey);
+  // 평가 완료는 대화로도 그 세션에 가므로(onDone → addChat), 그 세션의 대화 감시가 살아 있어도 이어진다.
+  const chatWatch = s && readWatchFile(`watch-${s.sessionId}.json`);
+  if (chatWatch?.active) return { ...chatWatch, handlesDone: true, via: 'chat' };
   if (s?.tool === 'codex') return { active: true, via: 'queue', agent: s.agent || s.name, session: s.sessionId, handlesDone: true };
   return { active: false };
 }
