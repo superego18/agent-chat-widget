@@ -1063,7 +1063,7 @@
       // 새 답이 왔으면 그 답의 처음이 보이게 둔다(긴 답이면 끝부터 보이지 않게). 짧으면 어차피 맨 아래까지 내려간다.
       const fresh = [...box.querySelectorAll('.msg.agent, .msg.peer')].find((el) => renderedTab === activeTab && rendered.size > 0 && !rendered.has(el.dataset.id));
       if (fresh) box.scrollTop = fresh.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
-      else if (gapBottom < 8) box.scrollTop = box.scrollHeight;
+      else if (gapBottom < 8 && !editing && !holdEdit) box.scrollTop = box.scrollHeight;
       else { box.scrollTop = prevTop; keepPlace(); } // 맨 아래 근처에서 읽던 중이면 맨 아래로 끌어내리지 않는다
     } else {
       box.scrollTop = prevTop;
@@ -1447,7 +1447,13 @@
   {
     let gap = 0;
     $('msgs').addEventListener('scroll', () => { const b = $('msgs'); gap = b.scrollHeight - b.scrollTop - b.clientHeight; });
-    new ResizeObserver(() => { const b = $('msgs'); if (gap < 40) b.scrollTop = b.scrollHeight; }).observe($('msgs'));
+    new ResizeObserver(() => {
+      const b = $('msgs');
+      // 말풍선 안에서 고치는 중이면(키보드가 올라와 목록이 줄어듦) 맨 아래로 끌어내리지 않고 고치는 칸이 보이게 둔다.
+      const a = root.activeElement;
+      if (a?.classList?.contains('edit') && b.contains(a)) { a.scrollIntoView({ block: 'nearest' }); return; }
+      if (gap < 40) b.scrollTop = b.scrollHeight;
+    }).observe($('msgs'));
   }
   $('input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); }
