@@ -1255,7 +1255,7 @@
         sel.setAttribute('aria-label', '받을 세션 바꾸기');
         for (const x of sessions) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.id === d.to ? `${x.name}에게` : `${x.name}(으)로 옮기기`; sel.append(o); }
         sel.value = d.to;
-        sel.onchange = () => { const to = sel.value; moveDraft(d.id, { to }, `✓ ${nameOf(to)} 보관함으로 옮김`, { label: '보러 가기', fn: () => { tabSetAt = Date.now(); switchTab(to); savePrefs({ tab: to }); setDraftsView(true); } }); };
+        sel.onchange = () => { const to = sel.value; moveDraft(d.id, { to }, `✓ ${nameOf(to)} 보관함으로 옮김`, { label: `${nameOf(to)} 열기`, fn: () => { tabSetAt = Date.now(); switchTab(to); savePrefs({ tab: to }); setDraftsView(true); } }); };
         acts.append(sel);
       }
       {
@@ -1266,7 +1266,7 @@
         ls.value = d.label || '';
         // "+ 새 분류…"를 고르면 그 자리에 이름 칸을 띄운다(Enter 저장, Esc·바깥 누르면 취소)
         ls.onchange = () => {
-          if (ls.value !== '\u0000new') return moveDraft(d.id, { label: ls.value }, `✓ ${ls.value || '미분류'}(으)로 옮김`, { label: '보러 가기', fn: () => openSheet(ls.value) });
+          if (ls.value !== '\u0000new') return moveDraft(d.id, { label: ls.value }, `✓ ${ls.value || '미분류'}(으)로 옮김`, { label: `${ls.value || '미분류'} 열기`, fn: () => openSheet(ls.value) });
           const inp = document.createElement('input');
           inp.className = 'newlb';
           inp.placeholder = '새 분류 이름';
@@ -1274,7 +1274,7 @@
           inp.style.cssText = 'font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid #4f46e5;width:110px';
           const cancel = () => { inp.remove(); ls.hidden = false; ls.value = d.label || ''; };
           inp.onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`, { label: '보러 가기', fn: () => openSheet(v) }); else cancel(); }
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`, { label: `${v} 열기`, fn: () => openSheet(v) }); else cancel(); }
             if (e.key === 'Escape') cancel();
           };
           inp.onblur = () => { if (inp.isConnected) cancel(); };
@@ -1341,7 +1341,7 @@
     movedId = id;
     await draftsApi({ action: 'update', id, ...patch });
     renderDrafts();
-    // "보러 가기"로 옮겨 간 곳을 바로 열 수 있다. 연 뒤에도 옮긴 항목이 테두리로 보인다.
+    // "○○ 열기"로 옮겨 간 곳을 바로 열 수 있다. 연 뒤에도 옮긴 항목이 테두리로 보인다.
     toast(msg, go && { label: go.label, fn: () => { movedId = id; go.fn(); setTimeout(() => $('drafts').querySelector(`.draft[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 100); setTimeout(() => { if (movedId === id) movedId = null; }, 1800); } });
     $('drafts').querySelector(`.draft[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     setTimeout(() => { if (movedId === id) { movedId = null; $('drafts').querySelector(`.draft[data-id="${id}"]`)?.classList.remove('moved'); } }, 1800);
