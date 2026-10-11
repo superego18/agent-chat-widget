@@ -1,7 +1,7 @@
 // 리뷰 서버·앱 프록시를 다른 기기(폰 등)에서도 열 때 쓰는 접속 키. 의존성 없음 (Node 18+).
 // --lan 을 켜면 모든 네트워크에서 받되, 이 컴퓨터 밖에서 온 요청은 접속 키가 있어야 통과한다.
 //   처음 한 번 http://<주소>:<포트>/?k=<키> 로 열면 그 브라우저에 30일짜리 쿠키를 남기고 k 없는 주소로 다시 보낸다.
-//   이 컴퓨터 안(127.0.0.1)에서 온 요청(내 브라우저·에이전트 스크립트·훅·앱 프록시)은 키 없이 통과한다.
+//   이 컴퓨터 안(127.0.0.1)에서 온 요청(내 브라우저·에이전트 스크립트·훅·앱 프록시)은 키 없이 통과한다(tailscale serve 로 전달된 요청은 제외).
 // 키는 <dir>/lan-key 에 두어 서버를 다시 켜도 같은 키를 쓴다(폰을 다시 등록할 필요 없음). 바꾸려면 그 파일을 지운다.
 
 import fs from 'node:fs';
@@ -26,7 +26,8 @@ export function lanAuth({ dir, lan }) {
       fs.writeFileSync(file, key + '\n', { mode: 0o600 });
     }
   }
-  const isLocal = (req) => LOCAL.has(req.socket.remoteAddress);
+  // tailscale serve(HTTPS)로 들어온 요청은 이 컴퓨터(127.0.0.1)에서 온 것처럼 보이지만, 전달 헤더가 붙으므로 바깥 요청으로 보고 키를 확인한다.
+  const isLocal = (req) => LOCAL.has(req.socket.remoteAddress) && !req.headers['tailscale-user-login'] && !req.headers['x-forwarded-for'];
   const hasCookie = (req) => (req.headers.cookie || '').split(/;\s*/).some((c) => c === `${COOKIE}=${key}`);
   const ok = (req) => !lan || isLocal(req) || hasCookie(req);
 
