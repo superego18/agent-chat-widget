@@ -347,6 +347,13 @@
   let holdEdit = null; // 고치는 중인 보류 { id, text }
   let editEl = null;
   let editStartAt = 0;
+  // 보내기를 취소한(또는 막 취소한) 글을 보류로 돌린다. 답장·참고·위치 정보도 함께 가져간다.
+  async function moveToHold(m) {
+    const text = m.draft ? m.draft.items.map((it) => it.text).join('\n') : m.text;
+    await draftsApi({ action: 'add', hold: true, fromMsg: m.id, cid: 'tohold-' + m.id, ...(m.replyTo ? { replyTo: m.replyTo, replyQuote: m.replyQuote, refer: m.refer } : {}), to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
+    toast('✓ 보류로 옮김');
+    render();
+  }
   async function resend(m) {
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
     const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
@@ -928,12 +935,7 @@
             bk.type = 'button';
             bk.className = 'rp';
             bk.textContent = '보류로';
-            bk.onclick = () => withBusy(bk, async () => {
-              const text = m.draft ? m.draft.items.map((it) => it.text).join('\n') : m.text;
-              await draftsApi({ action: 'add', hold: true, fromMsg: m.id, cid: 'tohold-' + m.id, ...(m.replyTo ? { replyTo: m.replyTo, replyQuote: m.replyQuote, refer: m.refer } : {}), to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
-              toast('✓ 보류로 옮김');
-              render();
-            });
+            bk.onclick = () => withBusy(bk, () => moveToHold(m));
             small.append(bk);
           }
         }
@@ -965,6 +967,17 @@
             render();
           });
           small.append(cx);
+          // 아직 안 읽힌 글은 보내기를 취소하면서 바로 보류로 돌릴 수도 있다.
+          const bh = document.createElement('button');
+          bh.type = 'button';
+          bh.className = 'rp';
+          bh.textContent = '보류로';
+          bh.onclick = () => withBusy(bh, async () => {
+            const r = await fetch('/__uifb/api/chat-cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) }).catch(() => null);
+            if (!r?.ok) { alert((await r?.json().catch(() => ({})))?.error || '이미 읽혀서 보류로 돌리지 못했습니다.'); await poll(); render(); return; }
+            await moveToHold(m);
+          });
+          small.append(bh);
         }
         if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
         if (editing?.id === m.id) {
