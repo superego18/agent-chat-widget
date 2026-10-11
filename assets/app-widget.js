@@ -111,6 +111,14 @@
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
   .chipbtn { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #5a5852; cursor: pointer; }
   .chipbtn[aria-pressed="true"] { background: #1c1b18; color: #fff; border-color: transparent; }
+  /* 일부만 인용: 원문을 문장 칩으로 나눠, 누른 문장만 인용한다(폰 사파리는 대화창 안 글 선택을 읽을 수 없어서). */
+  #replyText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rpart { font: inherit; font-size: 11px; font-weight: 600; color: #4f46e5; background: #fff; border: 1px solid #c7c9f5; border-radius: 999px; padding: 1px 8px; cursor: pointer; flex-shrink: 0; }
+  .rpart[aria-expanded="true"] { background: #4f46e5; color: #fff; }
+  .sents { margin: 4px 10px 0; display: flex; flex-wrap: wrap; gap: 4px; max-height: 30vh; overflow-y: auto; }
+  .sents[hidden] { display: none; }
+  .sents button { font: inherit; font-size: 12px; line-height: 1.4; text-align: left; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #1c1b18; cursor: pointer; }
+  .sents button[aria-pressed="true"] { background: #4f46e5; border-color: #4f46e5; color: #fff; }
   .where { margin: 6px 10px 0; font-size: 12px; background: #eef0ff; color: #3730a3; border-radius: 6px; padding: 5px 8px; display: flex; gap: 6px; align-items: center; }
   .where[hidden] { display: none; }
   .where span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -193,7 +201,8 @@
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
-  <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
+  <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" class="rpart" id="replyPart" aria-expanded="false">일부만</button><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
+  <div class="sents" id="sents" hidden></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
@@ -275,13 +284,49 @@
     t = plain(t);
     if (t) lastSel = { text: t.slice(0, 500), at: Date.now() };
   });
+  let replyMsg = null;
+  const sentencesOf = (t) => plain(t).split(/(?<=[.!?。…])\s+|(?<=다\.)\s*|\s*\d+\.\s+/).map((x) => x.trim()).filter((x) => x.length > 1).slice(0, 40);
+  function showReplyText() {
+    const m = replyMsg;
+    if (!m) return;
+    $('replyText').textContent = '↩ 답장 · ' + (replyQuote ? `${quoteOf(m).split(':')[0]}의 일부: "${replyQuote}"` : quoteOf(m));
+  }
+  function renderSents() {
+    const box = $('sents');
+    box.textContent = '';
+    const m = replyMsg;
+    if (!m || box.hidden) return;
+    const picked = new Set(replyQuote ? replyQuote.split(' … ') : []);
+    for (const t of sentencesOf(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = t;
+      b.setAttribute('aria-pressed', String(picked.has(t)));
+      b.onclick = () => {
+        picked.has(t) ? picked.delete(t) : picked.add(t);
+        const order = sentencesOf(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text).filter((x) => picked.has(x));
+        replyQuote = order.length ? order.join(' … ') : null;
+        b.setAttribute('aria-pressed', String(picked.has(t)));
+        showReplyText();
+      };
+      box.append(b);
+    }
+  }
+  $('replyPart').onclick = () => {
+    $('sents').hidden = !$('sents').hidden;
+    $('replyPart').setAttribute('aria-expanded', String(!$('sents').hidden));
+    renderSents();
+  };
   function setReply(m) {
     replyTo = m ? m.id : null;
+    replyMsg = m || null;
+    $('sents').hidden = true;
+    $('replyPart').setAttribute('aria-expanded', 'false');
     const body = m ? plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text) : '';
     replyQuote = m && lastSel && Date.now() - lastSel.at < 60_000 && lastSel.text !== body && body.includes(lastSel.text) ? lastSel.text : null;
     lastSel = null;
     $('reply').hidden = !m;
-    if (m) { $('replyText').textContent = '↩ 답장 · ' + (replyQuote ? `${quoteOf(m).split(':')[0]}의 일부: "${replyQuote}"` : quoteOf(m)); $('input').focus(); }
+    if (m) { showReplyText(); $('input').focus(); }
   }
 
   // 보관함에서 보낸 메시지: 사용자가 쓴 글과, 서버가 덧붙인 정보(위치·저장 시각·커밋·담은 화면)를 나눠 보인다.
