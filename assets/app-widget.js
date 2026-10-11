@@ -265,6 +265,10 @@
   @media (prefers-reduced-motion: reduce) { #draftsBtn.got { animation: gotc 1s; } @keyframes gotc { 0%, 60% { background: #4f46e5; color: #fff; } } }
   /* 오른쪽 단추는 두 줄로 묶는다: [보내기 / 끼워넣기] [보류하기 / 보관함 담기] */
   form .bcol { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; align-self: stretch; justify-content: flex-end; }
+  button.busy { pointer-events: none; color: transparent !important; position: relative; }
+  button.busy::before { content: none !important; }
+  button.busy::after { content: ''; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -8px 0 0 -8px; border: 2px solid var(--spb, rgba(0,0,0,.15)); border-top-color: var(--spt, #57534e); border-radius: 50%; animation: rspin .7s linear infinite; }
+  form button[type="submit"].busy, form .now.busy, .hacts .go.busy, .hacts .now.busy { --spb: rgba(255,255,255,.35); --spt: #fff; }
   form .bcol button { height: 38px; padding: 0 10px; font-size: 12.5px; }
   form .bcol button[type="submit"] { height: auto; flex: 1; min-height: 38px; } /* 끼워넣기가 없으면 보내기가 칸 높이를 다 채운다 */
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
@@ -310,6 +314,18 @@
   $('heading').textContent = `대화/피드백 · ${CFG.label}`;
   if (!CFG.pick) $('pick').classList.add('off');
   let messages = [];
+  const sentTexts = new Map(); // 보낸 글 → 보낸 시각(입력칸에 다시 채우지 않게)
+  // 단추를 누르면 서버가 받을 때까지 그 단추를 돌린다. 8초 넘게 답이 없으면 다시 누를 수 있게 풀고,
+  // 같은 글을 다시 보내도 같은 cid 를 붙여 서버가 한 번만 받는다(먼저 보낸 것이 늦게 도착해도 두 번 생기지 않게).
+  const cids = new Map(); // 종류+글 → cid
+  const cidFor = (kind, text) => { const k = kind + '\n' + text; if (!cids.has(k)) cids.set(k, kind + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)); return cids.get(k); };
+  const doneCid = (kind, text) => cids.delete(kind + '\n' + text);
+  async function withBusy(btn, fn) {
+    if (!btn || btn.classList.contains('busy')) return;
+    btn.classList.add('busy');
+    const t = setTimeout(() => btn.classList.remove('busy'), 8000);
+    try { return await fn(); } finally { clearTimeout(t); btn.classList.remove('busy'); }
+  }
   let sessions = [];
   const transcripts = {};
   let activeTab = null;
@@ -1008,7 +1024,7 @@
       };
       const acts = document.createElement('span');
       acts.className = 'hacts';
-      const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
+      const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = () => withBusy(b, fn); acts.append(b); };
       if (ed) {
         mk('수정 취소', '', () => { holdEdit = null; render(); });
         mk('저장', 'save', async () => { if (await saveEdit()) render(); });
@@ -1348,25 +1364,28 @@
     const interject = interjectNext;
     interjectNext = false;
     const text = $('input').value.trim();
-    if (!text) return;
-    $('input').value = '';
-    autoGrow($('input'));
-    clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
-    if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo, ...(replyQuote ? { replyQuote } : {}), ...(refMode ? { refer: true } : {}) } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
-    try {
-      await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      where = null;
-      $('where').hidden = true;
-      setReply(null);
-      await poll();
-      // 세션이 쉬는 중이면 감시 명령이 1초 안에 받아 간다. 3초마다 확인하면 그동안 "안 읽음"으로 보여서, 보낸 직후 몇 초는 자주 확인한다.
-      for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500);
-      render();
-    } catch {
-      $('input').value = text;
-      saveCompose(activeTab, text);
-    }
+    if (!text || !sessionById(activeTab)) return;
+    const kind = 'chat:' + activeTab;
+    const body = { from: 'user', text, cid: cidFor(kind, text), to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo, ...(replyQuote ? { replyQuote } : {}), ...(refMode ? { refer: true } : {}) } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    // 서버가 받은 뒤에 입력칸을 비운다. 못 보내면 글은 입력칸에 남고, 단추를 다시 누르면 된다.
+    await withBusy(interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
+      try {
+        const r = await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error('send');
+        doneCid(kind, text);
+        sentTexts.set(text, Date.now());
+        if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
+        where = null;
+        $('where').hidden = true;
+        setReply(null);
+        await poll();
+        // 세션이 쉬는 중이면 감시 명령이 1초 안에 받아 간다. 3초마다 확인하면 그동안 "안 읽음"으로 보여서, 보낸 직후 몇 초는 자주 확인한다.
+        for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500);
+        render();
+      } catch {
+        toast('보내지 못했어요. 글은 입력칸에 남겨 뒀어요');
+      }
+    });
   };
   // 입력칸: 글이 길어지면 자동으로 늘어나고(화면 절반까지), 오른쪽 아래 모서리를 끌어 직접 키우거나 줄일 수도 있다.
   // 입력칸은 대화 창 높이의 40%까지만 커진다. 커진 만큼 대화 목록이 줄어들 뿐 겹치지 않고, 아래 끝을 보던 중이면 계속 아래 끝을 보여 준다.
@@ -1856,12 +1875,15 @@
   async function saveLater(toDrafts) {
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
-    flyToDrafts(text, toDrafts ? () => $('draftsBtn') : () => [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
-    $('input').value = '';
-    autoGrow($('input'));
-    clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
+    const kind = 'draft:' + activeTab;
+    await withBusy($(toDrafts ? 'stash' : 'later'), async () => {
     try {
-      await draftsApi({ action: 'add', ...(toDrafts ? {} : { hold: true }), to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      const r = await draftsApi({ action: 'add', cid: cidFor(kind, text), ...(toDrafts ? {} : { hold: true }), to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      if (!r?.id) throw new Error('add');
+      doneCid(kind, text);
+      sentTexts.set(text, Date.now());
+      flyToDrafts(text, toDrafts ? () => $('draftsBtn') : () => [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
+      if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
       render();
       $('msgs').scrollTop = $('msgs').scrollHeight;
       where = null;
@@ -1869,9 +1891,9 @@
       updateDraftsBtn();
       if (toDrafts) toast('✓ 보관함에 담음', { label: `${draftLabel || '미분류'} 열기`, fn: () => openSheet(draftLabel || '') });
     } catch {
-      $('input').value = text;
-      saveCompose(activeTab, text);
+      toast('담지 못했어요. 글은 입력칸에 남겨 뒀어요');
     }
+    });
   }
   $('later').onclick = () => saveLater(false);
   $('stash').onclick = () => saveLater(true);
@@ -1955,7 +1977,10 @@
   // force: 탭을 바꿨을 때. 아니면 지금 쓰는 중(최근 3초 안에 입력)에는 덮어쓰지 않는다.
   function loadCompose(force) {
     const el = $('input');
-    const want = composed[activeTab]?.text || '';
+    let want = composed[activeTab]?.text || '';
+    // 이미 보낸 글이 서버 임시 저장에 남아 있으면(먼저 출발한 저장이 비우기보다 늦게 도착한 경우) 되살리지 않고 서버도 비운다.
+    const sentAt = sentTexts.get(want.trim());
+    if (want && sentAt && Date.now() - sentAt < 10 * 60_000) { want = ''; saveCompose(activeTab, ''); }
     if (!force && (Date.now() - typedAt < 3000 || composeT)) return;
     if (el.value !== want) { el.value = want; autoGrow(el); }
   }
