@@ -21,6 +21,12 @@
   :host { all: initial; }
   * { box-sizing: border-box; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
   .btn { position: fixed; left: 16px; bottom: 72px; padding: 10px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; gap: 6px; align-items: center; }
+  /* 세션이 작업 중이면 버튼에 움직이는 점 세 개(승인 대기면 주황). 안 읽은 개수 배지와 따로 보인다. */
+  .btn .work { display: inline-flex; gap: 2px; align-items: center; padding: 0 2px; }
+  .btn .work[hidden] { display: none; }
+  .btn .work i { width: 4px; height: 4px; border-radius: 50%; background: #a5b4fc; animation: blink 1.2s infinite; }
+  .btn .work i:nth-child(2) { animation-delay: .2s; } .btn .work i:nth-child(3) { animation-delay: .4s; }
+  .btn .work.permission i { background: #fbbf24; }
   .btn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: #4f46e5; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
   .panel { position: fixed; left: 16px; bottom: 124px; width: min(360px, calc(100vw - 32px)); height: min(520px, calc(100vh - 160px)); background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
   .panel[hidden] { display: none; }
@@ -234,7 +240,7 @@
   .box[hidden] { display: none; }
 </style>
 <div class="peek" id="peek" hidden role="status"></div>
-<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="badge" id="badge" hidden></span></button>
+<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
   <header><button class="close" id="close" type="button">닫기</button><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
@@ -880,6 +886,11 @@
   }
 
   function updateBadges() {
+    const states = sessions.map((x) => x.status?.state);
+    const busy = states.some((st) => st === 'working' || st === 'permission');
+    $('work').hidden = !busy;
+    $('work').classList.toggle('permission', states.includes('permission'));
+    $('work').title = busy ? (states.includes('permission') ? '세션이 터미널에서 승인을 기다리는 중' : '세션이 작업 중') : '';
     const unread = timeline('all').filter(isUnread).length;
     $('badge').hidden = unread === 0;
     $('badge').textContent = String(unread);
