@@ -158,7 +158,7 @@
   form .now { background: #b45309; padding: 0 9px; }
   form .now[hidden] { display: none; }
   .msg.user .tag.now { background: #fde68a; color: #78350f; }
-  .fly { position: fixed; z-index: 2147483647; pointer-events: none; padding: 7px 10px; border-radius: 10px; background: #4f46e5; color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px rgba(0,0,0,.25); transform-origin: center; box-sizing: border-box; }
+  .fly { position: fixed; z-index: 2147483647; pointer-events: none; padding: 5px 9px; border-radius: 10px; background: #4f46e5; color: #fff; font-size: 12px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px rgba(0,0,0,.25); transform-origin: center; }
   #draftsBtn.got { animation: got .7s ease-out; }
   @keyframes got { 0% { transform: scale(1); } 30% { transform: scale(1.18); background: #4f46e5; color: #fff; } 100% { transform: scale(1); } }
   @media (prefers-reduced-motion: reduce) { #draftsBtn.got { animation: gotc 1s; } @keyframes gotc { 0%, 60% { background: #4f46e5; color: #fff; } } }
@@ -1054,25 +1054,44 @@
   $('dsend').onclick = () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id));
 
   // "나중에"로 담으면 입력한 글이 보관함 버튼으로 날아 들어가고, 버튼이 한 번 튀며 개수가 오른다.
+  // 폰에서는 "나중에"를 누르면 키보드가 닫히며 화면 배치가 바뀌므로, 날아가는 동안 매 프레임 버튼 위치를 다시 읽어 따라간다.
   function flyToDrafts(text) {
-    const from = $('input').getBoundingClientRect();
-    const to = $('draftsBtn').getBoundingClientRect();
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!reduce) {
-      const g = document.createElement('div');
-      g.className = 'fly';
-      g.textContent = text.replace(/\s+/g, ' ').slice(0, 40);
-      Object.assign(g.style, { left: from.left + 'px', top: from.top + 'px', width: from.width + 'px' });
-      root.append(g);
-      const dx = to.left + to.width / 2 - (from.left + from.width / 2);
-      const dy = to.top + to.height / 2 - (from.top + 14);
-      g.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${dx}px,${dy}px) scale(.15)`, opacity: .3 }], { duration: 450, easing: 'cubic-bezier(.5,0,.75,0)' }).finished.then(() => g.remove(), () => g.remove());
-    }
-    setTimeout(() => {
+    const bump = () => {
       $('draftsBtn').classList.remove('got');
       void $('draftsBtn').offsetWidth;
       $('draftsBtn').classList.add('got');
-    }, reduce ? 0 : 430);
+    };
+    if (reduce) return bump();
+    const g = document.createElement('div');
+    g.className = 'fly';
+    g.textContent = text.replace(/\s+/g, ' ').slice(0, 24);
+    const from = $('input').getBoundingClientRect();
+    g.style.left = from.left + 8 + 'px';
+    g.style.top = from.top + 6 + 'px';
+    root.append(g);
+    const start = performance.now();
+    const dur = 500;
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / dur);
+      const e = t * t * (3 - 2 * t); // 부드럽게 출발해 부드럽게 도착
+      const src = $('input').getBoundingClientRect();
+      const to = $('draftsBtn').getBoundingClientRect();
+      const gw = g.offsetWidth;
+      const gh = g.offsetHeight;
+      const x0 = src.left + 8;
+      const y0 = src.top + 6;
+      const x1 = to.left + to.width / 2 - gw / 2;
+      const y1 = to.top + to.height / 2 - gh / 2;
+      const sc = 1 - 0.75 * e;
+      g.style.left = x0 + (x1 - x0) * e + 'px';
+      g.style.top = y0 + (y1 - y0) * e - Math.sin(Math.PI * e) * 24 + 'px'; // 살짝 위로 휘어 날아간다
+      g.style.transform = `scale(${sc})`;
+      g.style.opacity = String(1 - 0.6 * e);
+      if (t < 1) requestAnimationFrame(step);
+      else { g.remove(); bump(); }
+    };
+    requestAnimationFrame(step);
   }
 
   $('later').onclick = async () => {
