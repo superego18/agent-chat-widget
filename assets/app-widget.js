@@ -508,8 +508,8 @@
     const lanes = { right: [], left: [] }; // 오른쪽·왼쪽 가장자리마다 따로 줄을 나눈다
     const drawn = new Set();
     // 잇는 쌍: 질문 → 그에 대한 답들(남보라), 원문 → 그 원문에 단 답장(주황). 위에서부터 차례로 그려 겹치면 안쪽 줄로 비킨다.
-    // 선은 보낸 쪽 가장자리에 둔다: 내 메시지(오른쪽 말풍선)에서 나가는 연결은 오른쪽, 세션 답(왼쪽 말풍선)에서 나가는 답장 연결은 왼쪽.
-    const sideOf = (id) => (messages.find((x) => x.id === id)?.from === 'user' ? 'right' : 'left');
+    // 선은 받는 쪽 가장자리에 둔다: 내 메시지에서 세션 답으로 가는 연결은 왼쪽(세션 답 쪽), 세션 답에 단 내 답장 연결은 오른쪽(내 쪽).
+    const sideOf = (id) => (messages.find((x) => x.id === id)?.from === 'user' ? 'left' : 'right');
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
     for (const m of messages) if (m.replyTo && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
     const placed = pairs.map((p) => ({ ...p, q: pos(p.from), ends: p.tos.map(pos).filter(Boolean) })).filter((p) => p.q && p.ends.length && p.ends[0].y > p.q.y).sort((a, b) => a.q.y - b.q.y);
