@@ -452,6 +452,7 @@
     const m = replyMsg;
     if (!m) return;
     $('reply').classList.toggle('ref', refMode);
+    saveReplyState();
     $('replyText').textContent = (refMode ? '📎 참고 · ' : '↩ 답장 · ') + (replyQuote ? `${quoteOf(m).split(':')[0]}의 일부: "${replyQuote}"` : quoteOf(m));
   }
   // 메시지 본문에서 인용한 부분의 범위를 찾는다(공백은 하나로 본다). 못 찾으면 null.
@@ -518,7 +519,24 @@
     lastSel = null;
     $('reply').hidden = !m;
     markQuote(replyTo, replyQuote);
-    if (m) { showReplyText(); $('input').focus(); }
+    if (m) { showReplyText(); $('input').focus(); } else saveReplyState();
+  }
+  // 붙여 둔 답장·참고는 이 기기에 기억해, 새로고침해도 다시 붙인다(입력칸 글처럼 이어 쓸 수 있게).
+  function saveReplyState() {
+    try { if (replyTo) localStorage.setItem('__uifb_reply', JSON.stringify({ tab: activeTab, id: replyTo, quote: replyQuote, ref: refMode })); else localStorage.removeItem('__uifb_reply'); } catch {}
+  }
+  function restoreReplyState() {
+    let st = null;
+    try { st = JSON.parse(localStorage.getItem('__uifb_reply') || 'null'); } catch {}
+    const m = st && st.tab === activeTab && messages.find((x) => x.id === st.id);
+    if (!m) return;
+    replyTo = m.id;
+    replyMsg = m;
+    refMode = !!st.ref;
+    replyQuote = st.quote || null;
+    $('reply').hidden = false;
+    showReplyText();
+    markQuote(replyTo, replyQuote);
   }
 
   // 보관함에서 보낸 메시지: 사용자가 쓴 글과, 서버가 덧붙인 정보(위치·저장 시각·커밋·담은 화면)를 나눠 보인다.
@@ -2299,6 +2317,6 @@
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
   try { wasOpen = localStorage.getItem('__uifb_open') === '1'; } catch {}
-  poll().then(() => { if (wasOpen && $('panel').hidden) $('btn').click(); });
+  poll().then(() => { restoreReplyState(); if (wasOpen && $('panel').hidden) $('btn').click(); });
   setInterval(poll, 3000);
 })();
