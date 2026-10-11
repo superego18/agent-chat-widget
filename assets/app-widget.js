@@ -271,6 +271,8 @@
     const read = delivered._read?.[m.id];
     if (!read) return String(delivered._at?.[m.id] || m.at);
     // 일이 끝날 때(Stop) 마지막 답이 거의 같은 순간에 기록되므로, 몇 초 안의 그 세션 답 뒤에 놓는다.
+    // 끼워넣기로 일하는 도중에 읽은 것은 그 시각 그대로 둔다(뒤이은 답 아래로 밀지 않는다).
+    if (!delivered._after?.[m.id]) return read + '~';
     let key = read;
     const limit = new Date(Date.parse(read) + 5000).toISOString();
     for (const x of messages) if (x.from === 'agent' && x.session === m.to && x.at > key && x.at <= limit) key = x.at;
