@@ -144,6 +144,7 @@
   .cats .cat.pressing .fill { transform: scaleX(1); transition: transform .5s linear; }
   .cats .cat.pop { animation: catpop .25s; }
   @keyframes catpop { 50% { transform: scale(1.12); } }
+  .cats .addcat { border-style: dashed; border-color: rgba(0,0,0,.2); background: #fff; color: #5a5852; }
   .cats .newlb { width: 84px; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px dashed rgba(0,0,0,.2); background: #fff; color: #5a5852; }
   .dsheet .dhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 0; font-size: 12px; font-weight: 600; color: #3730a3; }
   .dsheet .dhead button { border: 0; background: none; font-size: 12px; color: #5a5852; cursor: pointer; padding: 2px 4px; }
@@ -222,7 +223,7 @@
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
-  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
+  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <button type="button" class="selreply" id="selReply" hidden>↩ 고른 부분에 답장</button>
   <div class="toast" id="toast" hidden role="status"></div>
@@ -1058,10 +1059,10 @@
 
   function updateDraftsBtn() {
     const n = mine().length;
-    $('draftsBtn').textContent = (n ? `보관함 ${n}` : '보관함') + (showDrafts && sheetLabel === null ? ' ▾' : ' ▴');
+    $('draftsBtn').textContent = (n ? `전체 ${n}` : '전체') + (showDrafts && sheetLabel === null ? ' ▾' : ' ▴');
     $('draftsBtn').setAttribute('aria-pressed', String(showDrafts && sheetLabel === null));
     const inLabel = sheetLabel === null ? n : mine().filter((d) => (d.label || '') === sheetLabel).length;
-    $('dtitle').textContent = sheetLabel === null ? (n ? `보관함 ${n}개` : '보관함') : `보관함 · ${sheetLabel || '미분류'} ${inLabel}개`;
+    $('dtitle').textContent = sheetLabel === null ? `보관함 · 전체 ${n}개` : `보관함 · ${sheetLabel || '미분류'} ${inLabel}개`;
     renderCats();
   }
 
@@ -1088,17 +1089,28 @@
       holdable(b, () => setDraftLabel(name || null), () => (showDrafts && sheetLabel === name ? setDraftsView(false) : openSheet(name)), () => showDrafts && sheetLabel === name);
       box.append(b);
     }
-    // 새 분류는 그 자리에서 이름을 쓰고 Enter(취소는 Esc). 만들면 그 분류가 담을 분류가 된다.
-    const add = document.createElement('input');
-    add.className = 'newlb';
-    add.placeholder = '+ 새 분류';
-    add.setAttribute('aria-label', '새 분류 이름');
-    add.maxLength = 30;
-    add.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); if (v) setDraftLabel(v); }
-      if (e.key === 'Escape') add.value = '';
+    // 새 분류: 평소에는 다른 분류 칩과 같은 크기의 "+ 새 분류" 칩이고, 누르면 그 자리에서 이름 칸으로 바뀐다
+    // (폰은 글자가 16px보다 작은 칸에 쓰면 화면이 확대되므로, 쓰는 동안만 칸이 커진다). Enter 만들기, Esc·비우고 나가면 취소.
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'cat addcat';
+    addBtn.textContent = '+ 새 분류';
+    addBtn.onclick = () => {
+      const add = document.createElement('input');
+      add.className = 'newlb';
+      add.placeholder = '새 분류 이름';
+      add.setAttribute('aria-label', '새 분류 이름');
+      add.maxLength = 30;
+      const back = () => { box.dataset.key = ''; renderCats(); };
+      add.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); add.blur(); if (v) setDraftLabel(v); else back(); }
+        if (e.key === 'Escape') { add.value = ''; add.blur(); back(); }
+      };
+      add.onblur = () => { if (!add.value.trim()) back(); };
+      addBtn.replaceWith(add);
+      add.focus();
     };
-    box.append(add);
+    box.append(addBtn);
   }
   // 짧게 누르면 tap, 꾹 누르면 hold. 누르는 동안 칩이 차오르고, 다 차면 튀어 오르며 (안드로이드는) 짧게 진동한다.
   // isOpen 이 참이면 짧게 눌러도 hold(닫기)를 한다. 칩 줄을 스크롤하느라 움직이면 취소한다.
