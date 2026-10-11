@@ -1964,7 +1964,8 @@
   $('rbtn').onclick = () => location.reload();
   const placeRbtn = () => {
     const b = $('btn').getBoundingClientRect();
-    $('rbtn').style.left = b.left + 'px';
+    // 아래 오른쪽 끝에 맞춘다(왼쪽 아래 구석의 앱 개발 도구 단추, 예: Next.js 의 N 과 겹치지 않게).
+    $('rbtn').style.left = b.right - 34 + 'px';
     $('rbtn').style.top = b.bottom + 6 + 'px';
   };
   new ResizeObserver(placeRbtn).observe($('btn'));
