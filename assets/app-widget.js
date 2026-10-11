@@ -2071,7 +2071,9 @@
     let want = composed[activeTab]?.text || '';
     // 이미 보낸 글이 서버 임시 저장에 남아 있으면(먼저 출발한 저장이 비우기보다 늦게 도착한 경우) 되살리지 않고 서버도 비운다.
     const sentAt = sentTexts.get(want.trim());
-    if (want && sentAt && Date.now() - sentAt < 10 * 60_000) { want = ''; saveCompose(activeTab, ''); }
+    // 새로고침 등으로 보낸 기록(sentTexts)이 사라졌어도, 같은 글이 2분 안에 이미 이 세션에 보내졌으면 되살리지 않는다.
+    const justSent = want && messages.some((m) => m.from === 'user' && m.to === activeTab && m.text === want.trim() && Date.now() - Date.parse(m.at) < 120_000);
+    if (want && ((sentAt && Date.now() - sentAt < 10 * 60_000) || justSent)) { want = ''; saveCompose(activeTab, ''); }
     if (!force && (Date.now() - typedAt < 3000 || composeT)) return;
     if (el.value !== want) { el.value = want; autoGrow(el); }
   }
@@ -2249,12 +2251,16 @@
     clearTimeout(reloadT);
     let selecting = false;
     try { selecting = !!(((root.getSelection && root.getSelection()) || getSelection())?.toString()); } catch {}
-    const busy = editing || holdEdit || replyTo || where || selecting || root.querySelector('button.busy') || Date.now() - typedAt < 8000 || Date.now() - lastScrollAt < 3000 || (root.activeElement?.tagName === 'TEXTAREA' && root.activeElement.value.trim() && document.visibilityState === 'visible');
-    if (busy) { reloadT = setTimeout(reloadWhenIdle, 2000); return; }
+    // 입력칸에 글이 남아 있으면(곧 보낼 수 있으니) 새로고침하지 않고 기다린다. 보내다가 새로고침되면 "못 보냄"이 뜨고 글이 되살아난다.
+    const busy = () => editing || holdEdit || replyTo || where || selecting || root.querySelector('button.busy') || $('input').value.trim() || Date.now() - typedAt < 8000 || Date.now() - lastScrollAt < 3000;
+    if (busy()) { reloadT = setTimeout(reloadWhenIdle, 2000); return; }
     flushCompose();
     $('reload').classList.add('reloading');
     $('rbtn').classList.add('reloading');
-    setTimeout(() => location.reload(), 300);
+    setTimeout(() => {
+      if (busy()) { $('reload').classList.remove('reloading'); $('rbtn').classList.remove('reloading'); reloadT = setTimeout(reloadWhenIdle, 2000); return; } // 그사이 손을 댔으면 미룬다
+      location.reload();
+    }, 300);
   }
   checkVersion();
   setInterval(checkVersion, 10_000);
