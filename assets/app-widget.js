@@ -174,9 +174,9 @@
   .selreply[hidden] { display: none; }
   .selreply { display: flex; padding: 0; overflow: hidden; }
   .selreply button { font: inherit; color: inherit; background: none; border: 0; padding: 7px 14px; cursor: pointer; }
-  .selreply button + button { border-left: 1px solid #d6d3cb; }
-  /* 글을 고르면 뜨는 답장·참고: 보관함 단추와 같은 베이지 상자 */
-  .selreply { background: #ece9e1 !important; color: #57534e !important; box-shadow: inset 0 0 0 1px #d6d3cb, inset 0 -3px 0 #d6d3cb, 0 6px 18px rgba(0,0,0,.18) !important; border-radius: 10px !important; }
+  .selreply button + button { border-left: 1px solid #c7c9f5; }
+  /* 글을 고르면 뜨는 답장·참고: 보관함에서 보냈을 때 뜨는 알림(.toast)과 같은 연보라 */
+  .selreply { background: #eef0ff !important; color: #3730a3 !important; box-shadow: 0 0 0 1px #c7c9f5, 0 3px 10px rgba(55,48,163,.15) !important; }
   /* 참고(답장 아님): 회색 점선 인용, 원문과 잇는 선 없음 */
   .msg .quote.ref { background: rgba(127,127,127,.08); color: inherit; border-left: 0; outline: 1.5px dashed rgba(127,127,127,.55); outline-offset: -1.5px; opacity: .9; }
   #reply.ref { background: #f1f1ef; color: #44403c; outline: 1.5px dashed #a8a29e; outline-offset: -1.5px; }
