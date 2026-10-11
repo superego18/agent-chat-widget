@@ -129,6 +129,13 @@
   @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
   .notif { float: right; margin-right: 6px; border: 0; background: #f6f5f1; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #5a5852; cursor: pointer; }
   .notif.on { background: #eef0ff; color: #3730a3; }
+  .nset { position: absolute; right: 10px; top: 44px; z-index: 5; width: 250px; background: #fff; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.2); padding: 10px 12px; font-size: 13px; color: #1c1b18; }
+  .nset[hidden] { display: none; }
+  .nset b { display: block; font-size: 12px; color: #8f8c84; margin: 2px 0 6px; }
+  .nset label { display: flex; gap: 8px; align-items: center; padding: 4px 0; cursor: pointer; }
+  .nset hr { border: 0; border-top: 1px solid rgba(0,0,0,.08); margin: 6px 0; }
+  .nset .nbtns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+  .nset .nbtns button { font: inherit; font-size: 12px; border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; background: #f1f1ef; color: #5a5852; }
   .close { display: none; float: right; border: 0; background: #f6f5f1; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #1c1b18; cursor: pointer; }
   /* 모바일(768px 미만): 앱 위에 떠 있는 작은 창 대신 화면을 채우는 창으로 연다. 크기 조절 손잡이는 쓰지 않는다. */
   @media (max-width: 767px) {
@@ -255,7 +262,8 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="세션이 답하면 이 기기에 알림">🔕 알림</button><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
@@ -1876,19 +1884,60 @@
     $('notif').classList.toggle('on', on);
     $('notif').textContent = on ? '🔔 알림' : '🔕 알림';
   }
+  // 알림 설정 창: 받을 알림 종류와 "보고 있을 땐 보내지 않기". 이 기기에만 적용된다(서버에 기기마다 저장).
+  const NKINDS = [['answer', '세션 답장'], ['done', '작업 끝남'], ['permission', '승인 필요'], ['review', '비교 페이지 준비'], ['stale', '오래 멈춤(5분 그대로)'], ['peer', '세션끼리 메시지']];
+  async function openNotifSettings(sub) {
+    const box = $('nset');
+    const post = (body) => fetch('/__uifb/api/push-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, ...body }) }).then((r) => r.json());
+    const { prefs = {} } = await post({});
+    box.textContent = '';
+    const h = document.createElement('b');
+    h.textContent = '이 기기에 알림 받을 때';
+    box.append(h);
+    const row = (key, text) => {
+      const l = document.createElement('label');
+      const c = document.createElement('input');
+      c.type = 'checkbox';
+      c.checked = !!prefs[key];
+      c.onchange = () => post({ prefs: { [key]: c.checked } });
+      l.append(c, text);
+      box.append(l);
+    };
+    for (const [k, t] of NKINDS) row(k, t);
+    box.append(document.createElement('hr'));
+    row('quiet', '대화창을 보고 있을 땐 보내지 않기');
+    const bar = document.createElement('div');
+    bar.className = 'nbtns';
+    const btn = (t, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.onclick = fn; bar.append(b); };
+    btn('시험 알림', async () => { await fetch('/__uifb/api/push-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); toast('시험 알림을 보냈어요'); });
+    btn('알림 끄기', async () => {
+      await sub.unsubscribe();
+      await fetch('/__uifb/api/push-unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+      box.hidden = true;
+      toast('알림을 껐어요');
+      showNotif();
+    });
+    btn('닫기', () => { box.hidden = true; });
+    box.append(bar);
+    box.hidden = false;
+  }
+  // 이 기기에서 대화창을 보고 있으면 15초마다 알려, 서버가 그동안 이 기기에는 알림을 보내지 않게 한다("보고 있을 땐 보내지 않기").
+  const viewing = async () => {
+    if ($('panel').hidden || document.visibilityState !== 'visible') return;
+    const sub = await currentSub().catch(() => null);
+    if (sub) fetch('/__uifb/api/push-viewing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
+  };
+  setInterval(viewing, 15_000);
+  document.addEventListener('visibilitychange', viewing);
   $('notif').onclick = async () => {
+    if (!$('nset').hidden) { $('nset').hidden = true; return; }
     if (!pushReady()) {
       const ios = /iPhone|iPad/.test(navigator.userAgent);
       return toast(!window.isSecureContext ? 'https:// 주소로 열어야 알림을 켤 수 있어요' : ios ? '사파리 공유 → 홈 화면에 추가한 앱에서 켜 주세요' : '이 브라우저는 알림을 지원하지 않아요');
     }
     try {
       const old = await currentSub();
-      if (old && Notification.permission === 'granted') {
-        await old.unsubscribe();
-        await fetch('/__uifb/api/push-unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: old.endpoint }) });
-        toast('알림을 껐어요');
-        return showNotif();
-      }
+      if (old && Notification.permission === 'granted') return openNotifSettings(old);
       if ((await Notification.requestPermission()) !== 'granted') return toast('알림 권한이 꺼져 있어요(설정에서 허용해 주세요)');
       const reg = await navigator.serviceWorker.register('/__uifb/sw.js', { scope: '/' });
       await navigator.serviceWorker.ready;
@@ -1898,6 +1947,7 @@
       await fetch('/__uifb/api/push-subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub.toJSON(), url: location.pathname, device: deviceNow() }) });
       await fetch('/__uifb/api/push-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       toast('✓ 알림을 켰어요. 시험 알림을 보냈어요');
+      openNotifSettings(sub);
     } catch (e) {
       toast('알림을 켜지 못했어요: ' + (e?.message || e));
     }
