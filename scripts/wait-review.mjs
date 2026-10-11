@@ -3,8 +3,7 @@
 // 사용: node wait-review.mjs --session <이름 또는 id> [--round <N> --done] [--dir .ui-feedback] [--minutes <분>] [--agent "Claude Code"]
 //   --session: register-session.mjs 로 등록한 이 세션. 이 세션에게 온(to) 메시지에만 깨어난다.
 //   --done:    리뷰 완료 표시도 받는다(리뷰를 반영하는 작업 세션만 붙인다). --round 와 함께 쓴다.
-//   --seen <id>: 이 번호까지의 메시지는 이미 처리한 것으로 본다. 답을 턴의 마지막 문장으로 쓰고 감시를 먼저 다시 켤 때,
-//                답이 훅으로 전달되기 전에 같은 메시지로 다시 깨어나지 않게 한다.
+//   --seen <id>: 예전 호환용으로 받기만 하고 쓰지 않는다. 받아 간 메시지는 delivered.json 에 번호별로 남아 다시 넘기지 않는다.
 //   기다리는 동안 <dir>/watch-<세션 id>.json 을 남겨, 페이지가 이 세션의 "바로 읽음" 상태를 표시하게 한다.
 //   - 답하지 않은 메시지: CHAT 과 그 메시지들을 출력하고 0으로 끝난다(답하면 같은 명령으로 다시 켠다).
 //   - 완료 표시(--done): REVIEW_DONE 과 평가 JSON 을 출력하고 0으로 끝난다.
@@ -24,7 +23,6 @@ const round = arg('round', '');
 const handlesDone = process.argv.includes('--done');
 const minutes = Number(arg('minutes', '0')) || 0;
 const want = arg('session', '');
-const seen = Number(arg('seen', '0')) || 0;
 
 function findSession(key) {
   let files = [];
@@ -83,7 +81,9 @@ function pendingMessages() {
   } catch {}
   let d = {};
   try { d = JSON.parse(fs.readFileSync(path.join(dir, 'delivered.json'), 'utf8')); } catch {}
-  return pendingFor(messages, sid, seen, d).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
+  // --seen 은 더 이상 걸러내는 데 쓰지 않는다. 받아 간 메시지는 delivered.json 에 번호별로 남아 다시 넘기지 않고,
+  // --seen 으로 걸러 내면 그보다 앞에 있었지만 아직 못 받아 간 메시지(작업 중에 온 것)가 영영 빠진다.
+  return pendingFor(messages, sid, 0, d).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
 }
 
 let timer;
