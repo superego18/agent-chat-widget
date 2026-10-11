@@ -171,6 +171,8 @@
   .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #4f46e5; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
   .dgroup.trash { opacity: .9; }
   .dgroup.only > header { justify-content: flex-end; }
+  .draft .dmore { display: block; margin: 2px 0 0 auto; font: inherit; font-size: 11px; font-weight: 600; color: #4f46e5; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+  .draft .dmore[hidden] { display: none; }
   .draft.moved { animation: moved 1.8s ease-out; }
   @keyframes moved { 0%, 60% { box-shadow: 0 0 0 2px #4f46e5; } 100% { box-shadow: 0 0 0 2px transparent; } }
   .gone { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 6px 2px; border-top: 1px solid rgba(0,0,0,.06); font-size: 12px; }
@@ -1022,6 +1024,7 @@
   let trash = []; // 최근 7일 보낸 것·지운 것
   let showTrash = false;
   const openGone = new Set(); // 펼친 보낸 것·지운 것(항목 번호)
+  const openDrafts = new Set(); // 펼친 보관함 항목(항목 번호)
   // 보관함에서 보내거나 지운 직후 잠깐 띄우는 알림. 지운 것은 "되살리기"로 바로 되돌릴 수 있다.
   let toastT = null;
   // undo: 되살리기 함수, 또는 { label, fn } 으로 다른 동작 단추(예: "그 분류 열기").
@@ -1228,10 +1231,26 @@
       cb.onchange = () => { cb.checked ? checked.add(d.id) : checked.delete(d.id); updateFoot(); };
       const ta = document.createElement('textarea');
       ta.value = d.text;
-      // 글이 잘려 보이지 않게, 그려진 뒤와 고칠 때마다 글 높이에 맞춘다.
+      // 인용과 같은 방식: 4줄까지 보이고, 길면 "펼치기"로 전체를 본다(고치려고 누르면 저절로 펼친다).
       ta.rows = 1;
-      const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'dmore';
+      more.hidden = true;
+      const fit = () => {
+        ta.style.height = 'auto';
+        const full = ta.scrollHeight + 2;
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+        const pad = parseFloat(getComputedStyle(ta).paddingTop) + parseFloat(getComputedStyle(ta).paddingBottom);
+        const four = Math.round(lh * 4 + pad + 2);
+        const open = openDrafts.has(d.id);
+        ta.style.height = (open ? full : Math.min(full, four)) + 'px';
+        more.hidden = full <= four + 1;
+        more.textContent = open ? '접기' : '펼치기';
+      };
+      more.onclick = () => { openDrafts.has(d.id) ? openDrafts.delete(d.id) : openDrafts.add(d.id); fit(); };
       ta.addEventListener('input', fit);
+      ta.addEventListener('focus', () => { if (!openDrafts.has(d.id)) { openDrafts.add(d.id); fit(); } });
       requestAnimationFrame(fit);
       ta.setAttribute('aria-label', '보관한 메시지');
       ta.onchange = () => { if (ta.value.trim()) draftsApi({ action: 'update', id: d.id, text: ta.value }); };
@@ -1292,7 +1311,7 @@
         await draftsApi({ action: 'delete', ids: [d.id] });
         toast('지웠어요', () => draftsApi({ action: 'restore', ids: [d.id] }));
       });
-      card.append(top, meta, acts);
+      card.append(top, more, meta, acts);
       g.append(card);
     }
     }
