@@ -405,9 +405,22 @@
   const plain = (t) => String(t).replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
   document.addEventListener('selectionchange', () => {
     let t = '';
-    try { t = ((root.getSelection && root.getSelection()) || getSelection())?.toString() || ''; } catch {}
+    let bodyId = null;
+    try {
+      const sel = (root.getSelection && root.getSelection()) || getSelection();
+      t = sel?.toString() || '';
+      // 고른 곳이 메시지 본문(.mbody)일 때만 답장·참고 대상으로 본다. 메타·꼬리표·빈 곳을 꾹 눌러 생긴 선택은 넘긴다.
+      // (Safari는 shadow DOM 안의 선택 노드를 돌려주지 않으므로, 선택 범위 한가운데 점에 있는 요소로 판단한다)
+      if (t && sel.rangeCount) {
+        const rc = sel.getRangeAt(0).getBoundingClientRect();
+        const hit = rc.width || rc.height ? root.elementFromPoint(rc.left + Math.min(rc.width / 2, 4), rc.top + rc.height / 2) : null;
+        const body = hit?.closest?.('.mbody');
+        if (hit && !body) t = '';
+        else bodyId = body?.closest('.msg')?.dataset.id || null;
+      }
+    } catch {}
     t = plain(t);
-    if (t) lastSel = { text: t.slice(0, 500), at: Date.now() };
+    if (t) lastSel = { text: t.slice(0, 500), at: Date.now(), id: bodyId };
   });
   let replyMsg = null;
   const openQuotes = new Set(); // 펼친 인용(메시지 번호)
@@ -452,7 +465,7 @@
   // 글을 고르면(이 탭의 메시지 안 글일 때만) 입력칸 위에 "고른 부분에 답장" 버튼을 띄운다.
   const msgOfSel = (t) => (t ? timeline(activeTab).filter((m) => typeof m.id === 'number' && !isHeld(m)).reverse().find((m) => plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text).includes(t)) : null);
   document.addEventListener('selectionchange', () => {
-    const m = lastSel && Date.now() - lastSel.at < 300 ? msgOfSel(lastSel.text) : null;
+    const m = lastSel && Date.now() - lastSel.at < 300 ? (lastSel.id ? messages.find((x) => String(x.id) === lastSel.id) : msgOfSel(lastSel.text)) : null;
     const b = $('selReply');
     if (!m) { if (!b.matches(':hover')) setTimeout(() => { if (!lastSel || Date.now() - lastSel.at > 300) b.hidden = true; }, 400); return; }
     const p = $('panel').getBoundingClientRect();
