@@ -71,8 +71,8 @@ process.on('SIGINT', () => { cleanup(); process.exit(130); });
 process.on('SIGTERM', () => { cleanup(); process.exit(143); });
 
 // 이 세션에게 온 페이지·앱 메시지 중, 이 세션이 그 뒤에 아직 답하지 않은 것.
-// 세션이 일하는 중이면 기다린다. 그동안 온 메시지는 중계 훅이 도구 사이에 끼워 넣고(PostToolUse), 남은 것은 일이 끝나면 넘긴다.
-// 훅이 이미 넘긴 것(delivered.json 의 이 세션 번호)은 다시 넘기지 않는다.
+// 세션이 일하는 중이면 기다린다. 그동안 "끼워넣기"로 온 메시지는 중계 훅이 도구 사이에 넣고(PostToolUse), 나머지는 일이 끝나면 넘긴다.
+// 이미 넘긴 것(delivered.json 의 이 세션 번호와 _at)은 다시 넘기지 않는다.
 function pendingMessages() {
   let st = {};
   try { st = JSON.parse(fs.readFileSync(path.join(dir, `status-${sid}.json`), 'utf8')); } catch {}
@@ -83,7 +83,7 @@ function pendingMessages() {
   } catch {}
   let d = {};
   try { d = JSON.parse(fs.readFileSync(path.join(dir, 'delivered.json'), 'utf8')); } catch {}
-  return pendingFor(messages, sid, Math.max(seen, d[sid] || 0)).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
+  return pendingFor(messages, sid, Math.max(seen, d[sid] || 0)).filter((m) => !d._at?.[m.id]).map((m) => ({ ...m, lines: formatMessage(m, messages) }));
 }
 
 let timer;

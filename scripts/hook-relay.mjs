@@ -3,7 +3,7 @@
 // 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, PostToolUse, Stop, Notification 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
 //   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답, 세션끼리 주고받은 메시지(SendMessage)를 chat.json 으로 보낸다.
 //   - 상태: 작업 시작·도구 사용·응답 끝·승인 대기를 /api/status 로 보내, 대화 창에 "작업 중" 표시를 한다.
-//   - 끼워 넣기: 작업 중에 대화창에서 온 메시지를 도구를 하나 쓸 때마다(PostToolUse) 세션에 바로 넣는다(터미널에서 작업 중에 입력하는 것처럼).
+//   - 끼워 넣기: 작업 중에 대화창에서 "끼워넣기"로 보낸 메시지를 도구를 하나 쓸 때마다(PostToolUse) 세션에 바로 넣는다(터미널에서 작업 중에 입력하는 것처럼).
 //   - 입력 JSON 은 표준 입력으로 받는다. 표준 출력에는 끼워 넣기(PostToolUse) 말고는 아무것도 쓰지 않는다(MessageDisplay 는 출력이 없으면 원문을 그대로 표시한다).
 //   - <cwd>/.ui-feedback/sessions/<session_id>.json 으로 등록된 세션일 때만 보낸다.
 //     그 밖의 프로젝트·세션에서는 아무것도 하지 않고 끝난다.
@@ -99,14 +99,15 @@ try {
     const file = path.join(dir, 'delivered.json');
     let d = {};
     try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-    const pending = pendingFor(all, session.sessionId, d[session.sessionId] || 0);
+    // 사용자가 "끼워넣기"로 보낸 것만 넣는다. 나머지는 일이 끝난 뒤 감시 명령이 넘긴다.
+    const pending = pendingFor(all, session.sessionId, d[session.sessionId] || 0).filter((m) => m.interject && !d._at?.[m.id]);
     if (pending.length) {
       const now = new Date().toISOString();
-      const ids = pending.map((m) => m.id);
+      const stamp = Object.fromEntries(pending.map((m) => [m.id, now]));
       const recent = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[0] - a[0]).slice(0, 500));
-      // 바로 읽은 것으로 적는다(대화창에서 그 자리로 떨어진다).
-      fs.writeFileSync(file, JSON.stringify({ ...d, [session.sessionId]: Math.max(d[session.sessionId] || 0, ...ids), _at: recent({ ...(d._at || {}), ...Object.fromEntries(ids.map((id) => [id, now])) }), _read: recent({ ...(d._read || {}), ...Object.fromEntries(ids.map((id) => [id, now])) }) }, null, 2) + '\n');
-      const lines = ['[대화창 · 작업 중에 온 메시지] 사용자가 작업하는 동안 대화창에서 보냈습니다. 지금 읽고 하던 일에 반영하세요. 답은 이번 턴의 마지막 답에 함께 쓰면 대화창에 보입니다.'];
+      // 받은 번호(_at)와 읽은 시각(_read)만 적는다. 마지막 번호는 올리지 않는다(그 앞의 끼워넣지 않은 메시지는 감시 명령이 넘겨야 한다).
+      fs.writeFileSync(file, JSON.stringify({ ...d, _at: recent({ ...(d._at || {}), ...stamp }), _read: recent({ ...(d._read || {}), ...stamp }) }, null, 2) + '\n');
+      const lines = ['[대화창 · 작업 중에 끼워넣은 메시지] 사용자가 작업하는 동안 대화창에서 "끼워넣기"로 보냈습니다. 지금 읽고 하던 일에 반영하세요. 답은 이번 턴의 마지막 답에 함께 쓰면 대화창에 보입니다.'];
       for (const m of pending) lines.push(...formatMessage(m, all));
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: lines.join('\n') } }));
     }

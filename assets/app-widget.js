@@ -151,6 +151,9 @@
   form .clr { position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; padding: 0; border-radius: 12px; background: rgba(0,0,0,.08); color: #5a5852; font-size: 14px; font-weight: 400; line-height: 24px; }
   form .clr[hidden] { display: none; }
   .inwrap textarea { padding-right: 32px; }
+  form .now { background: #b45309; padding: 0 9px; }
+  form .now[hidden] { display: none; }
+  .msg.user .tag.now { background: #fde68a; color: #78350f; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -176,7 +179,7 @@
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false">보관함</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
+  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="box" id="box" hidden></div>`;
@@ -257,8 +260,10 @@
   }
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
   // 일하는 중에 받아 갔으면(_after) 그 일이 끝난 시각(_read)에 놓고, 아직 안 끝났으면 맨 아래에 둔다.
+  // 세션이 받아 갔는지: 감시 명령이 넘긴 마지막 번호까지, 또는 끼워넣기로 따로 넘긴 것(_at).
+  const got = (m) => m.id <= (delivered[m.to] || 0) || !!delivered._at?.[m.id];
   const waitingTurn = (m) => delivered._after?.[m.id] && !delivered._read?.[m.id];
-  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && (!(m.id <= (delivered[m.to] || 0)) || waitingTurn(m));
+  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && (!got(m) || waitingTurn(m));
   let wasHeld = new Set();
   function orderAt(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
@@ -391,6 +396,7 @@
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
         if (m.resendOf) tag.textContent += ' · 다시 보냄';
+        if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
         if (editing?.id === m.id) {
           d.classList.add('editing');
           const ta = document.createElement('textarea');
@@ -450,7 +456,7 @@
       w.className = 'empty';
       w.style.margin = '0';
       const s = sessionById(ownerOf(last));
-      w.textContent = last.id <= (delivered[ownerOf(last)] || 0) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
+      w.textContent = got(last) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
     }
     box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
@@ -471,6 +477,8 @@
       box.scrollTop = prevTop; // 다시 그려도 읽던 위치를 유지한다
     }
     const target = sessionById(activeTab);
+    // 세션이 일하는 중이고 Claude 세션(중계 훅이 끼워 넣음)일 때만 "끼워넣기"를 보인다.
+    $('now').hidden = !(target && target.tool !== 'codex' && ['working', 'permission'].includes(target.status?.state));
     $('mode').className = target?.watch?.active ? 'on' : 'off';
     $('mode').textContent = !target
       ? '등록된 세션이 없습니다.'
@@ -702,15 +710,19 @@
   $('whereClear').onclick = () => { where = null; $('where').hidden = true; };
   $('replyClear').onclick = () => setReply(null);
 
+  let interjectNext = false;
+  $('now').onclick = () => { interjectNext = true; $('form').requestSubmit(); };
   $('form').onsubmit = async (e) => {
     e.preventDefault();
+    const interject = interjectNext;
+    interjectNext = false;
     const text = $('input').value.trim();
     if (!text) return;
     $('input').value = '';
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     if (!sessionById(activeTab)) return;
-    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(replyTo ? { replyTo } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const body = { from: 'user', text, to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...(replyTo ? { replyTo } : {}), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     try {
       await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       where = null;
@@ -770,9 +782,9 @@
   let delivered = {};
   function readMark(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
-    if (m.id <= (delivered[m.to] || 0)) return waitingTurn(m) ? ' · 받음(하던 일 끝나면 읽음)' : ' · 읽음';
+    if (got(m)) return waitingTurn(m) ? ' · 받음(하던 일 끝나면 읽음)' : ' · 읽음';
     const s = sessionById(m.to);
-    if (s?.status?.state === 'working' || s?.status?.state === 'permission') return ' · 안 읽음(작업 중이라 끝나면 읽음)';
+    if (s?.status?.state === 'working' || s?.status?.state === 'permission') return m.interject ? ' · 안 읽음(다음 단계에서 바로 읽음)' : ' · 안 읽음(작업 중이라 끝나면 읽음)';
     return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';
   }
 
