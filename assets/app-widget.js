@@ -417,6 +417,10 @@
         const body = hit?.closest?.('.mbody');
         if (hit && !body) t = '';
         else bodyId = body?.closest('.msg')?.dataset.id || null;
+        // 진단(임시): 폰에서 엉뚱한 메시지가 잡히는 원인을 보려고 선택 위치를 남긴다.
+        clearTimeout(window.__uifbSelT);
+        const info = { kind: 'sel', text: t.slice(0, 80), rc: [Math.round(rc.left), Math.round(rc.top), Math.round(rc.width), Math.round(rc.height)], hit: hit ? hit.tagName + '.' + hit.className : null, bodyId, anchor: sel.anchorNode ? (sel.anchorNode.nodeType === 3 ? '#text:' + sel.anchorNode.data.slice(0, 30) : sel.anchorNode.nodeName + '.' + (sel.anchorNode.className || '')) : null, ua: navigator.userAgent.slice(0, 60) };
+        window.__uifbSelT = setTimeout(() => fetch('/__uifb/api/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(info) }).catch(() => {}), 600);
       }
     } catch {}
     t = plain(t);
