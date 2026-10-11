@@ -1148,7 +1148,7 @@
       head.append(fold, n, gs);
       g.append(head);
       box.append(g);
-    for (const d of [...items].reverse()) {
+    for (const d of items) { // 같은 분류 안에서도 최근에 담은 것이 위
       const card = document.createElement('div');
       card.className = 'draft';
       const top = document.createElement('div');
