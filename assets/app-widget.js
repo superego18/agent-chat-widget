@@ -61,10 +61,11 @@
   /* 답 잇는 선: 대화 목록 오른쪽 가장자리를 따라, 질문(내 메시지)과 그에 대한 답을 꺾쇠 모양 선으로 잇는다. */
   .msgs { position: relative; padding-right: 18px; }
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
-  .links path { fill: none; stroke: url(#uifbLinkGrad) #a5b4fc; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .8; }
-  .links path.new { stroke-dasharray: 1; stroke-dashoffset: 1; animation: linkdraw .7s ease-out forwards; }
-  @keyframes linkdraw { to { stroke-dashoffset: 0; } }
-  @media (prefers-reduced-motion: reduce) { .links path.new { animation: none; stroke-dashoffset: 0; } }
+  .links .taper { opacity: .85; } /* 조각이 겹치는 둥근 끝이 진해지지 않게 묶음째 투명도를 준다 */
+  .links line { stroke: url(#uifbLinkGrad) #a5b4fc; stroke-linecap: round; }
+  .links line.new { opacity: 0; animation: linkdraw .2s ease-out forwards; }
+  @keyframes linkdraw { to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .links line.new { animation: none; opacity: 1; } }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .9; }
   .msg .quote .qt { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; white-space: pre-wrap; }
   .msg .quote.open .qt { display: block; -webkit-line-clamp: unset; }
@@ -470,6 +471,7 @@
     };
     // 연한 남보라→보라 그라데이션 선, 둥근 모서리. 새로 생긴 연결은 선이 그려지듯 나타난다.
     svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>';
+    box.prepend(svg); // 경로 길이를 재려면 문서에 붙어 있어야 한다
     const rail = box.clientWidth - 8;
     const R = 8;
     const lanes = [];
@@ -488,14 +490,37 @@
       const isNew = drawnLinks.size > 0 && !drawnLinks.has(u);
       drawn.add(u);
       const r = Math.min(R, (bottom - q.y) / 2);
-      const seg = (d) => { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); p.setAttribute('pathLength', '1'); if (isNew) p.classList.add('new'); svg.append(p); };
+      // 질문 쪽은 굵고 답 쪽으로 갈수록 가늘어지는 선(이전 대화가 뒤 대화로 모여드는 느낌). SVG 선은 굵기가 하나라,
+      // 경로를 잘게 나눠 조각마다 굵기를 줄여 그린다. 새 연결은 조각이 차례로 나타나 그려지듯 보인다.
+      const seg = (d, w0, w1) => {
+        const guide = document.createElementNS(NS, 'path');
+        guide.setAttribute('d', d);
+        svg.append(guide);
+        const L = guide.getTotalLength();
+        const n = Math.max(8, Math.round(L / 5));
+        const pts = Array.from({ length: n + 1 }, (_, i) => guide.getPointAtLength((L * i) / n));
+        guide.remove();
+        const g = document.createElementNS(NS, 'g');
+        g.setAttribute('class', 'taper');
+        let prev = pts[0];
+        for (let i = 1; i <= n; i++) {
+          const pt = pts[i];
+          const ln = document.createElementNS(NS, 'line');
+          ln.setAttribute('x1', String(prev.x)); ln.setAttribute('y1', String(prev.y));
+          ln.setAttribute('x2', String(pt.x)); ln.setAttribute('y2', String(pt.y));
+          ln.setAttribute('stroke-width', String(w0 + ((w1 - w0) * i) / n));
+          if (isNew) { ln.classList.add('new'); ln.style.animationDelay = `${Math.round((i / n) * 600)}ms`; }
+          g.append(ln);
+          prev = pt;
+        }
+        svg.append(g);
+      };
       // 질문 → 오른쪽 기둥 → 마지막 답(둥근 모서리)
-      seg(`M ${q.right + 3} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right + 3}`);
+      seg(`M ${q.right + 3} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right + 3}`, 5, 1);
       // 그 사이의 답들로 갈라지는 가지(부드러운 곡선)
-      for (const e of ends.slice(0, -1)) seg(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right + 3}`);
+      for (const e of ends.slice(0, -1)) seg(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right + 3}`, 3, 1);
     }
     drawnLinks = drawn;
-    box.prepend(svg);
   }
   new ResizeObserver(() => { if (lastLinks) drawLinks(lastLinks); }).observe($('msgs'));
 
