@@ -79,9 +79,9 @@
   .msg.user.drop { animation: drop .45s cubic-bezier(.3,1.4,.5,1); }
   @keyframes hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @keyframes drop { from { transform: translateY(-16px); opacity: .55; } to { transform: none; opacity: 1; } }
-  /* 세션끼리 주고받은 메시지: 사람이 쓴 글이 아니라는 게 한눈에 보이게 점선 테두리·다른 색으로 둔다. 보낸 세션 탭에서는 오른쪽, 받은 세션 탭에서는 왼쪽. */
+  /* 세션끼리 주고받은 메시지: 사람이 쓴 글이 아니라는 게 한눈에 보이게 점선 테두리·다른 색으로 둔다. 받은 세션 탭에서는 오른쪽, 보낸 세션 탭에서는 왼쪽(그 세션이 말한 쪽). */
   .msg.peer { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
-  .msg.peer.out { align-self: flex-end; }
+  .msg.peer.in { align-self: flex-end; }
   .msg.peer .tag { background: #fed7aa; color: #9a3412; }
   .msg.peer .route { display: block; font-size: 11px; font-weight: 600; color: #c2410c; margin-bottom: 3px; }
   .tabs .flow { display: inline-block; align-self: center; font-weight: 700; color: #d97706; animation: flow .9s ease-in-out infinite; }
