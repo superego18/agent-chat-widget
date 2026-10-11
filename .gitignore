@@ -1,1 +1,6 @@
 node_modules/
+
+# UX 키트 복사본: 비공개 키트(ai-native-ux-process)라 이 컴퓨터에만 두고 올리지 않는다. 다른 기기에서는 키트 저장소에서 복사한다(CLAUDE.md).
+.claude/
+templates/
+CODING_STANDARDS.md
