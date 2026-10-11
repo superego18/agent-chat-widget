@@ -60,7 +60,7 @@
   .msg.flashing { animation: flashm 2s ease-out; }
   @keyframes flashm { 0%, 70% { outline: 3px solid #f59e0b; outline-offset: 2px; } 100% { outline: 3px solid transparent; outline-offset: 2px; } }
   /* 답 잇는 선: 대화 목록 오른쪽 가장자리를 따라, 질문(내 메시지)과 그에 대한 답을 꺾쇠 모양 선으로 잇는다. */
-  .msgs { position: relative; padding-right: 18px; }
+  .msgs { position: relative; padding-right: 18px; padding-left: 18px; }
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
   .links { z-index: 0; }
   .msgs > .msg { position: relative; z-index: 1; } /* 선 끝이 말풍선 뒤로 들어가게 말풍선을 선 위에 둔다 */
@@ -122,7 +122,7 @@
     .close { display: inline-block; }
     header { padding: 10px 12px 8px; }
     .msgs, .drafts { padding: 10px 10px 14px; }
-    .msgs { padding-right: 18px; }
+    .msgs { padding-right: 18px; padding-left: 18px; }
     .msg { font-size: 15px; max-width: 92%; }
     /* iPhone 은 16px 보다 작은 입력칸을 누르면 화면을 확대하므로, 모든 입력칸·선택칸을 16px 로 둔다(아래 일반 규칙보다 앞에 있어 !important) */
     textarea, input, select { font-size: 16px !important; }
@@ -480,7 +480,7 @@
     const pos = (id) => {
       const el = box.querySelector(`.msg[data-id="${id}"]`);
       if (!el || el.classList.contains('held')) return null;
-      return { y: el.offsetTop + Math.min(16, el.offsetHeight / 2), right: el.offsetLeft + el.offsetWidth };
+      return { y: el.offsetTop + Math.min(16, el.offsetHeight / 2), left: el.offsetLeft, right: el.offsetLeft + el.offsetWidth };
     };
     const guide = document.createElementNS(NS, 'path');
     svg.append(guide);
@@ -504,27 +504,33 @@
       });
       return `M ${left.join(' L ')} L ${right.reverse().join(' L ')} Z`;
     };
-    const rail = box.clientWidth - 8;
     const R = 8;
-    const lanes = [];
+    const lanes = { right: [], left: [] }; // 오른쪽·왼쪽 가장자리마다 따로 줄을 나눈다
     const drawn = new Set();
     // 잇는 쌍: 질문 → 그에 대한 답들(남보라), 원문 → 그 원문에 단 답장(주황). 위에서부터 차례로 그려 겹치면 안쪽 줄로 비킨다.
+    // 선은 보낸 쪽 가장자리에 둔다: 내 메시지(오른쪽 말풍선)에서 나가는 연결은 오른쪽, 세션 답(왼쪽 말풍선)에서 나가는 답장 연결은 왼쪽.
+    const sideOf = (id) => (messages.find((x) => x.id === id)?.from === 'user' ? 'right' : 'left');
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
     for (const m of messages) if (m.replyTo && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
     const placed = pairs.map((p) => ({ ...p, q: pos(p.from), ends: p.tos.map(pos).filter(Boolean) })).filter((p) => p.q && p.ends.length && p.ends[0].y > p.q.y).sort((a, b) => a.q.y - b.q.y);
     for (const { from: u, q, ends, kind } of placed) {
+      const side = sideOf(u);
       const last = ends[ends.length - 1];
       const bottom = Math.max(q.y, last.y);
-      let lane = lanes.findIndex((end) => end < Math.min(q.y, ends[0].y) - 2);
-      if (lane < 0) lane = lanes.length;
-      lanes[lane] = bottom;
-      const x = rail - lane * 6;
+      const ln = lanes[side];
+      let lane = ln.findIndex((end) => end < Math.min(q.y, ends[0].y) - 2);
+      if (lane < 0) lane = ln.length;
+      ln[lane] = bottom;
       const r = Math.min(R, (bottom - q.y) / 2);
       const shape = document.createElementNS(NS, 'path');
-      // 질문 → 오른쪽 기둥 → 마지막 답(둥근 모서리), 그 사이의 답들로 갈라지는 가지
+      // 보낸 말풍선 → 그쪽 가장자리 기둥 → 마지막 받는 말풍선(둥근 모서리), 그 사이로 갈라지는 가지.
       // 양 끝은 말풍선 뒤로 10px 들어가게 그려, 선이 말풍선 테두리에서 자연스럽게 나오고 들어가 보이게 한다(잘린 끝이 안 보임).
-      let d = taper(`M ${q.right - 10} ${q.y} H ${x - r} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x - r} ${bottom} H ${last.right - 10}`, 5, 1);
-      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x - r} ${e.y} H ${e.right - 10}`, 3, 1);
+      const R1 = side === 'right';
+      const x = R1 ? box.clientWidth - 8 - lane * 6 : 8 + lane * 6;
+      const edge = (p) => (R1 ? p.right - 10 : p.left + 10);
+      const k = R1 ? -r : r; // 모서리가 기둥 안쪽으로 휘는 방향
+      let d = taper(`M ${edge(q)} ${q.y} H ${x + k} Q ${x} ${q.y} ${x} ${q.y + r} V ${bottom - r} Q ${x} ${bottom} ${x + k} ${bottom} H ${edge(last)}`, 5, 1);
+      for (const e of ends.slice(0, -1)) d += ' ' + taper(`M ${x} ${e.y - r} Q ${x} ${e.y} ${x + k} ${e.y} H ${edge(e)}`, 3, 1);
       shape.setAttribute('d', d);
       if (kind === 'reply') shape.classList.add('reply');
       const key = kind + u + ':' + ends.length;
