@@ -1017,7 +1017,8 @@
           body.replaceWith(ta);
           small.after(bar);
           editEl = ta.matches('textarea') ? ta : ta.querySelector('textarea');
-        } else {
+        } else if (!(isHeld(m) && sessionById(m.to)?.tool !== 'codex')) {
+          // 아직 안 읽힌 글은 "보내기 취소"·"보류로"로 고칠 수 있으니 "다시 보내기"는 읽힌 뒤에만 보인다.
           const again = document.createElement('button');
           again.type = 'button';
           again.className = 'rp';
