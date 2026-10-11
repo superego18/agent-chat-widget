@@ -360,6 +360,24 @@
         rp.textContent = '답장';
         rp.onclick = () => setReply(m);
         small.append(rp);
+        // 내가 보낸 글은 입력칸에 다시 채워, 고쳐서 다시 보낼 수 있게 한다(찍은 위치도 함께).
+        if (m.from === 'user' && m.context !== 'terminal') {
+          const again = document.createElement('button');
+          again.type = 'button';
+          again.className = 'rp';
+          again.textContent = '다시 보내기';
+          again.onclick = () => {
+            $('input').value = m.text;
+            autoGrow($('input'));
+            if (m.where?.selector) {
+              where = m.where;
+              $('whereText').textContent = '위치: ' + (where.text || where.selector.replace(WIDGET_PREFIX, '대화창 › '));
+              $('where').hidden = false;
+            }
+            $('input').focus();
+          };
+          small.append(again);
+        }
       }
       if (isHeld(m)) { d.classList.add('held'); nowHeld.add(m.id); heldEls.push(d); continue; }
       if (wasHeld.has(m.id)) d.classList.add('drop');
