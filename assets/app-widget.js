@@ -1116,6 +1116,7 @@
   function renderDrafts() {
     const box = $('drafts');
     box.textContent = '';
+    renderTrash(box); // 최근 보낸 것·지운 것은 맨 위(접혀 있음)
     const list = mine();
     for (const id of [...checked]) if (!list.some((d) => d.id === id)) checked.delete(id);
     if (!list.length) {
@@ -1227,12 +1228,11 @@
       g.append(card);
     }
     }
-    renderTrash(box);
     updateFoot();
     updateDraftsBtn(); // 보내거나 지운 뒤 머리말 개수도 바로 맞춘다
   }
 
-  // 보관함 맨 아래: 최근 7일 보낸 것·지운 것(접혀 있음). "다시 담기"로 보관함에 되돌린다.
+  // 보관함 맨 위: 최근 7일 보낸 것·지운 것(접혀 있음). "다시 담기"로 보관함에 되돌린다.
   function renderTrash(box) {
     const list = trash.filter((d) => d.to === activeTab && (sheetLabel === null || (d.label || '') === sheetLabel)).sort((a, b) => String(b.goneAt).localeCompare(String(a.goneAt)));
     if (!list.length) return;
@@ -1281,7 +1281,7 @@
   async function sendDrafts(ids) {
     const out = await draftsApi({ action: 'send', ids, combine: true, device: deviceNow() });
     const sent = out?.sent || [];
-    if (sent.length) toast(`${ids.length}개 보냄 → ${nameOf(sent[0].to)} (#${sent.map((m) => m.id).join(', #')}) · 보관함 아래 "최근 보낸 것"에 7일 남아요`);
+    if (sent.length) toast(`${ids.length}개 보냄 → ${nameOf(sent[0].to)} (#${sent.map((m) => m.id).join(', #')}) · 보관함 위 "최근 보낸 것"에 7일 남아요`);
     ids.forEach((id) => checked.delete(id));
     if (!mine().length) setDraftsView(false);
     else renderDrafts();
