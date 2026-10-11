@@ -222,6 +222,8 @@
   /* 맨 아래로: 위쪽 기록을 보고 있을 때만 대화 목록 오른쪽 아래에 뜬다. */
   .tobottom { position: fixed; z-index: 2147483646; width: 38px; height: 38px; border-radius: 50%; border: 0; background: #fff; color: #1c1b18; font-size: 18px; font-weight: 700; box-shadow: 0 0 0 1px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.18); cursor: pointer; }
   .tobottom[hidden] { display: none; }
+  .tobottom.new { background: #4f46e5; color: #fff; box-shadow: 0 0 0 3px rgba(79,70,229,.25), 0 4px 12px rgba(55,48,163,.35); }
+  .tobottom.new::after { content: attr(data-n); position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: #ef4444; color: #fff; font-size: 11px; line-height: 18px; font-weight: 700; }
   .toast { position: fixed; z-index: 2147483647; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; max-width: min(280px, calc(100vw - 32px)); white-space: nowrap; font-size: 11.5px; line-height: 1.3; padding: 5px 11px; border-radius: 999px; background: #eef0ff; color: #3730a3; box-shadow: 0 0 0 1px #c7c9f5, 0 3px 10px rgba(55,48,163,.15); animation: toastin .18s ease-out; }
   .toast > span { overflow: hidden; text-overflow: ellipsis; }
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, 6px); } }
@@ -1128,6 +1130,11 @@
     btn.hidden = !far || $('panel').hidden || showDrafts;
     if (btn.hidden) return;
     const r = b.getBoundingClientRect();
+    // 아래쪽(화면 밖)에 안 읽은 새 답이 있으면 남색으로 바꾸고 개수를 붙인다.
+    const below = [...b.querySelectorAll('.msg.unread')].filter((el) => el.getBoundingClientRect().top > r.bottom - 4).length;
+    btn.classList.toggle('new', below > 0);
+    btn.dataset.n = below > 9 ? '9+' : String(below);
+    btn.setAttribute('aria-label', below ? `맨 아래로 · 새 답 ${below}개` : '맨 아래로');
     btn.style.left = r.right - 50 + 'px';
     btn.style.top = r.bottom - 50 + 'px';
   }
@@ -1189,6 +1196,7 @@
     for (const el of $('msgs').querySelectorAll('.msg.unread')) { const m = byId.get(el.dataset.id); if (m && !isUnread(m)) el.classList.remove('unread'); }
     renderTabs();
     updateBadges();
+    placeToBottom();
   }
   async function poll() {
     try {
