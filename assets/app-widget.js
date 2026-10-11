@@ -991,7 +991,7 @@
       hh.type = 'button';
       hh.className = 'holdhead';
       hh.textContent = (folded.has(HOLD_FOLD) ? '▸ ' : '▾ ') + `보류 ${hs.length}개` + (folded.has(HOLD_FOLD) ? ' · 펼치기' : '');
-      hh.onclick = () => { folded.has(HOLD_FOLD) ? folded.delete(HOLD_FOLD) : folded.add(HOLD_FOLD); saveFold(); render(); };
+      hh.onclick = () => { folded.has(HOLD_FOLD) ? folded.delete(HOLD_FOLD) : folded.add(HOLD_FOLD); foldSetAt = Date.now(); saveFold(); render(); };
       box.append(hh);
     }
     for (const d of folded.has(HOLD_FOLD) ? [] : hs) {
@@ -1231,7 +1231,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      const k = JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
       const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
@@ -1921,6 +1921,9 @@
     // 처음 받을 때와, 이 화면에서 방금 고르지 않았을 때는 서버에 저장된 담을 분류를 바로 따른다.
     if (!prefsReady || Date.now() - labelSetAt > 5000) draftLabel = prefs.draftLabels?.[activeTab] ?? null;
     prefsReady = true;
+    // 보류 묶음 접힘은 새로고침·다른 화면에서도 따른다(보관함 창이 열려 있으면 그쪽 접힘을 건드리지 않게 넘어감, 방금 접었으면 서버 옛 값으로 되돌리지 않음).
+    // 여기서 바로 그리지 않는다(첫 확인 때는 세션 목록이 아직 비어 있어 엉뚱한 탭으로 그려진다). 접힘은 poll 의 다시 그리기 키에 들어 있다.
+    if (!showDrafts && Date.now() - foldSetAt > 5000) loadFold();
     renderCats();
     if (dragging) return;
     const mine = prefs[device()] || {};
@@ -1938,6 +1941,7 @@
     activeTab = id;
     labelSetAt = 0;
     draftLabel = prefs?.draftLabels?.[id] ?? null; // 그 세션에서 고른 분류로 바꾼다
+    if (!showDrafts) loadFold();
     scrollToUnread = true;
     try { localStorage.setItem('__uifb_tab', activeTab); } catch {}
     render();
@@ -2003,6 +2007,7 @@
   let draftLabel = null;
   let labelSetAt = 0; // 방금 이 화면에서 고른 분류를 서버의 옛 값으로 되돌리지 않게
   const folded = new Set();
+  let foldSetAt = 0;
   const HOLD_FOLD = '__보류__'; // 보류 묶음 접힘도 같은 곳에 남긴다(분류 이름과 겹치지 않는 이름)
   // 접은 분류와 "최근 보낸 것·지운 것" 펼침은 서버 설정에 세션마다 남겨, 새로고침해도(다른 화면에서도) 그대로 둔다.
   const saveFold = () => savePrefs({ fold: { session: activeTab, labels: [...folded], trash: showTrash } });
