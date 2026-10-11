@@ -155,7 +155,7 @@
   .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
   .draft .top { display: flex; gap: 7px; align-items: flex-start; }
   .draft input[type=checkbox] { margin-top: 6px; flex-shrink: 0; }
-  .draft textarea { height: auto; min-height: 36px; max-height: none; overflow: hidden; background: #fff; }
+  .draft textarea { height: auto; min-height: 36px; max-height: none; overflow: hidden; background: #fff; line-height: 1.45; } /* 줄 높이를 정해 두어야 4줄 높이를 정확히 잰다 */
   .draft .meta { font-size: 11px; color: #8f8c84; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
   .draft .loc.same { color: #15803d; } .draft .loc.changed { color: #b45309; } .draft .loc.other { color: #5a5852; }
   .draft .acts { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1239,12 +1239,16 @@
       more.hidden = true;
       const fit = () => {
         ta.style.height = 'auto';
+        ta.style.paddingBottom = '';
         const full = ta.scrollHeight + 2;
-        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-        const pad = parseFloat(getComputedStyle(ta).paddingTop) + parseFloat(getComputedStyle(ta).paddingBottom);
-        const four = Math.round(lh * 4 + pad + 2);
+        const cs = getComputedStyle(ta);
+        const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
+        const edge = parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+        const four = Math.floor(lh * 4 + edge + parseFloat(cs.paddingBottom));
         const open = openDrafts.has(d.id);
-        ta.style.height = (open ? full : Math.min(full, four)) + 'px';
+        // 접힌 칸은 아래 여백을 없애고 4줄에 딱 맞춘다(여백이 있으면 그 자리에 5번째 줄 윗부분이 비친다).
+        if (!open && full > four + 1) { ta.style.paddingBottom = '0'; ta.style.height = Math.floor(lh * 4 + edge) + 'px'; }
+        else ta.style.height = full + 'px';
         more.hidden = full <= four + 1;
         more.textContent = open ? '접기' : '펼치기';
       };
