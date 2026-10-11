@@ -43,6 +43,8 @@ npm install   # 시험용 playwright-core 만 설치(설치된 크롬을 씀)
 npm test      # 휴대폰 크기 크롬으로 대화창 핵심 흐름 시험
 ```
 
+커밋할 때마다 시험이 저절로 돌게 하려면 저장소마다 한 번 `git config core.hooksPath .githooks` 를 실행합니다. 시험이 깨지면 커밋이 멈춥니다.
+
 ## 라이선스
 
 MIT

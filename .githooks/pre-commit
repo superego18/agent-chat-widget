@@ -1,0 +1,12 @@
+#!/bin/sh
+# 커밋할 때마다 대화창 자동 시험을 돌린다. 깨지면 커밋이 멈춘다.
+# 켜기(저장소마다 한 번): git config core.hooksPath .githooks   (macOS·Windows Git Bash 공통)
+# 급할 때만 건너뛰기: git commit --no-verify
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if [ ! -d node_modules/playwright-core ]; then
+  echo "시험 도구가 없습니다. npm install 을 먼저 실행하세요(또는 --no-verify)." >&2
+  exit 1
+fi
+echo "대화창 자동 시험을 돌립니다(약 1분)..."
+npm test --silent >/tmp/agent-chat-widget-test.log 2>&1 || { grep -E "^not ok|AssertionError|expected|actual" /tmp/agent-chat-widget-test.log | head -20 >&2; echo "시험이 깨져 커밋을 멈췄습니다. 전체 기록: /tmp/agent-chat-widget-test.log" >&2; exit 1; }
+echo "시험 통과."
