@@ -62,6 +62,10 @@
   .msg.user.cancelled { background: #e7e5e0; color: #6b6860; box-shadow: none; }
   .msg.user.cancelled > .mbody { text-decoration: line-through; } /* 글에만 긋는다(다시 보내기의 취소·다시 보내기 버튼 줄은 빼고) */
   .msg.user.cancelled .tag { background: rgba(0,0,0,.08); }
+  .holdhead { align-self: flex-end; border: 0; background: none; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: #4f46e5; padding: 2px 4px; }
+  .msg.user.hold { max-width: 100%; }
+  .msg.user.hold .hacts { flex-wrap: wrap; gap: 5px; }
+  .msg.user.hold .hacts button { padding: 4px 8px; }
   .msg.user.hold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #a5b4fc; }
   .msg.user.hold .tag { background: #e0e7ff; }
   .msg.user.hold .hacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
@@ -297,6 +301,7 @@
   let prefsReady = false; // 서버 설정(prefs)을 한 번이라도 받았는지
   let replyTo = null; // 답장할 메시지 번호
   let editing = null; // 말풍선 안에서 고치는 중인 내 메시지 { id, text }
+  let holdEdit = null; // 고치는 중인 보류 { id, text }
   let editEl = null;
   async function resend(m) {
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
@@ -808,7 +813,24 @@
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
         if (m.draft) tag.textContent += ` · 보관함 › ${m.draft.label}`;
         if (m.resendOf) tag.textContent += ' · 다시 보냄';
-        if (m.cancelled) d.classList.add('cancelled');
+        if (m.cancelled) {
+          d.classList.add('cancelled');
+          // 취소한 글을 보류로 돌려 다시 다듬어 보낼 수 있게 한다(한 번 돌린 글은 "보류로 옮김"으로만 표시).
+          if (drafts.some((x) => x.fromMsg === m.id) || trash.some((x) => x.fromMsg === m.id)) tag.textContent += ' · 보류로 옮김';
+          else if (m.to) {
+            const bk = document.createElement('button');
+            bk.type = 'button';
+            bk.className = 'rp';
+            bk.textContent = '보류로';
+            bk.onclick = async () => {
+              const text = m.draft ? m.draft.items.map((it) => it.text).join('\n') : m.text;
+              await draftsApi({ action: 'add', hold: true, fromMsg: m.id, to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
+              toast('✓ 보류로 옮김');
+              render();
+            };
+            small.append(bk);
+          }
+        }
         // 아직 안 받아 간 메시지는 끼워넣기로 바꾸거나(세션이 작업 중일 때) 끼워넣기를 되돌릴 수 있다.
         const tgt = sessionById(m.to);
         if (isHeld(m) && tgt && tgt.tool !== 'codex' && (m.interject || ['working', 'permission'].includes(tgt.status?.state))) {
@@ -913,7 +935,17 @@
     }
     box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
     // 보류: 아직 보내지 않은 글. 점선 말풍선으로 맨 아래에 쌓이고, 보내기를 누를 때까지 세션에 가지 않는다.
-    for (const d of holds()) {
+    const hs = holds();
+    if (hs.length) {
+      // 보류가 쌓이면 대화를 가리므로 접을 수 있게 한다(접힘은 세션마다 기억).
+      const hh = document.createElement('button');
+      hh.type = 'button';
+      hh.className = 'holdhead';
+      hh.textContent = (folded.has(HOLD_FOLD) ? '▸ ' : '▾ ') + `보류 ${hs.length}개` + (folded.has(HOLD_FOLD) ? ' · 펼치기' : '');
+      hh.onclick = () => { folded.has(HOLD_FOLD) ? folded.delete(HOLD_FOLD) : folded.add(HOLD_FOLD); saveFold(); render(); };
+      box.append(hh);
+    }
+    for (const d of folded.has(HOLD_FOLD) ? [] : hs) {
       const h = document.createElement('div');
       h.className = 'msg user hold';
       const tag = document.createElement('span');
@@ -924,10 +956,34 @@
       t.innerHTML = mdLite(d.text);
       const sm = document.createElement('small');
       sm.textContent = shortAt(d.at) + ' · 보내기를 누를 때까지 세션에 가지 않음';
+      if (holdEdit?.id === d.id) {
+        const ta = document.createElement('textarea');
+        ta.className = 'edit';
+        ta.value = holdEdit.text;
+        ta.setAttribute('aria-label', '보류 글 고치기');
+        ta.oninput = () => { holdEdit.text = ta.value; };
+        const bar = document.createElement('span');
+        bar.className = 'hacts';
+        const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; bar.append(b); };
+        mk('취소', '', () => { holdEdit = null; render(); });
+        mk('저장', 'go', async () => { const v = holdEdit.text.trim(); if (!v) return; holdEdit = null; await draftsApi({ action: 'update', id: d.id, text: v }); render(); });
+        h.classList.add('editing');
+        h.append(tag, ta, sm, bar);
+        box.append(h);
+        editEl = ta;
+        continue;
+      }
       const acts = document.createElement('span');
       acts.className = 'hacts';
       const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
+      mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; render(); editEl?.focus(); });
+      mk('지우기', '', async () => { await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
       mk('보관함으로', '', async () => { await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
+      // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
+      const tgt = sessionById(d.to);
+      if (tgt && tgt.tool !== 'codex' && ['working', 'permission'].includes(tgt.status?.state)) {
+        mk('끼워넣기', 'go', async () => { await draftsApi({ action: 'send', ids: [d.id], plain: true, interject: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
+      }
       mk('보내기', 'go', async () => { await draftsApi({ action: 'send', ids: [d.id], plain: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
       h.append(tag, t, sm, acts);
       box.append(h);
@@ -1118,13 +1174,13 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold).map((d) => d.id + d.to).join() + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      const k = JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
       const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
       // 읽음(seen)만 바뀐 것은 다시 그리지 않고 표시만 고친다(스크롤하며 읽을 때마다 전체를 다시 그리면 화면이 얼고 스크롤이 튄다).
       const seenK = JSON.stringify(seen);
-      if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; seenKey = seenK; render(); }
+      if (k !== key && !((editing || holdEdit) && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; seenKey = seenK; render(); }
       else {
         if (seenK !== seenKey) { seenKey = seenK; refreshUnread(); }
         if (sk !== statusKey) { statusKey = sk; updateTyping(); }
@@ -1881,6 +1937,7 @@
   let draftLabel = null;
   let labelSetAt = 0; // 방금 이 화면에서 고른 분류를 서버의 옛 값으로 되돌리지 않게
   const folded = new Set();
+  const HOLD_FOLD = '__보류__'; // 보류 묶음 접힘도 같은 곳에 남긴다(분류 이름과 겹치지 않는 이름)
   // 접은 분류와 "최근 보낸 것·지운 것" 펼침은 서버 설정에 세션마다 남겨, 새로고침해도(다른 화면에서도) 그대로 둔다.
   const saveFold = () => savePrefs({ fold: { session: activeTab, labels: [...folded], trash: showTrash } });
   function loadFold() {
