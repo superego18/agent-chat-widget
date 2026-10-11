@@ -726,6 +726,21 @@
         if (m.draft) tag.textContent += ` · 보관함 › ${m.draft.label}`;
         if (m.resendOf) tag.textContent += ' · 다시 보냄';
         if (m.cancelled) d.classList.add('cancelled');
+        // 아직 안 받아 간 메시지는 끼워넣기로 바꾸거나(세션이 작업 중일 때) 끼워넣기를 되돌릴 수 있다.
+        const tgt = sessionById(m.to);
+        if (isHeld(m) && tgt && tgt.tool !== 'codex' && (m.interject || ['working', 'permission'].includes(tgt.status?.state))) {
+          const ij = document.createElement('button');
+          ij.type = 'button';
+          ij.className = 'rp';
+          ij.textContent = m.interject ? '끼워넣기 취소' : '끼워넣기';
+          ij.onclick = async () => {
+            const r = await fetch('/__uifb/api/chat-interject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, on: !m.interject }) }).catch(() => null);
+            if (r && !r.ok) alert((await r.json().catch(() => ({}))).error || '바꾸지 못했습니다.');
+            await poll();
+            render();
+          };
+          small.append(ij);
+        }
         // 세션이 아직 안 받아 간 메시지는 보내기를 취소할 수 있다.
         if (isHeld(m) && sessionById(m.to)?.tool !== 'codex') {
           const cx = document.createElement('button');
@@ -985,7 +1000,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
       if (k !== key && !(editing && root.activeElement?.classList?.contains('edit'))) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
