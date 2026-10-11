@@ -1661,12 +1661,13 @@
       add.placeholder = '새 분류 이름';
       add.setAttribute('aria-label', '새 분류 이름');
       add.maxLength = 30;
-      const back = () => { box.dataset.key = ''; renderCats(); };
+      const back = () => { saveSheet({ newCat: '' }); box.dataset.key = ''; renderCats(); };
       add.onkeydown = (e) => {
-        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); add.blur(); if (v) setDraftLabel(v); else back(); }
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = add.value.trim(); saveSheet({ newCat: '' }); add.blur(); if (v) setDraftLabel(v); else back(); }
         if (e.key === 'Escape') { add.value = ''; add.blur(); back(); }
       };
       add.onblur = () => { if (!add.value.trim()) back(); };
+      add.oninput = () => saveSheet({ newCat: add.value });
       addBtn.replaceWith(add);
       add.focus();
     };
@@ -1852,9 +1853,10 @@
           inp.placeholder = '새 분류 이름';
           inp.maxLength = 30;
           inp.style.cssText = 'font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid #4f46e5;width:110px';
-          const cancel = () => { inp.remove(); ls.hidden = false; ls.value = d.label || ''; };
+          const cancel = () => { saveSheet({ moveNew: null }); inp.remove(); ls.hidden = false; ls.value = d.label || ''; };
+          inp.oninput = () => saveSheet({ moveNew: { id: d.id, value: inp.value } });
           inp.onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`, { label: `${v} 열기`, fn: () => openSheet(v) }); else cancel(); }
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); saveSheet({ moveNew: null }); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`, { label: `${v} 열기`, fn: () => openSheet(v) }); else cancel(); }
             if (e.key === 'Escape') cancel();
           };
           inp.onblur = () => { if (inp.isConnected) cancel(); };
@@ -1936,6 +1938,7 @@
     $('dsend').disabled = n === 0;
     $('dsend').textContent = n > 1 ? `선택한 ${n}개 한 번에 보내기` : '선택한 것 보내기';
     $('dall').checked = n > 0 && n === mine().length;
+    saveSheet({ checked: [...checked] });
   }
 
   async function sendDrafts(ids) {
@@ -1955,12 +1958,17 @@
   }
   new ResizeObserver(placeSheet).observe($('form'));
   let sheetLabel = null; // null 이면 전체, '' 이면 미분류, 그 밖에는 그 분류만
+  // 보관함 창에서 하던 것(열린 분류, 체크 표시, 새 분류 이름 칸에 쓰던 글)도 이 기기에 남겨 새로고침 뒤 되살린다.
+  const sheetState = () => { try { return JSON.parse(localStorage.getItem('__uifb_sheet') || '{}'); } catch { return {}; } };
+  const saveSheet = (patch) => { try { localStorage.setItem('__uifb_sheet', JSON.stringify({ ...sheetState(), ...patch })); } catch {} };
   function openSheet(label) {
     sheetLabel = label;
+    saveSheet({ open: true, label, tab: activeTab });
     if (showDrafts) { updateDraftsBtn(); renderDrafts(); } else setDraftsView(true);
   }
   function setDraftsView(on) {
     if (!on) sheetLabel = null;
+    saveSheet({ open: on, label: sheetLabel, tab: activeTab });
     if (on && !showDrafts) loadFold();
     showDrafts = on;
     placeToBottom();
@@ -2353,6 +2361,21 @@
     const el = st.focus === 'input' ? $('input') : st.focus === 'edit' ? editEl : null;
     if (el?.isConnected) { el.focus(); try { if (st.caret) el.setSelectionRange(st.caret[0], st.caret[1]); } catch {} }
   }
-  poll().then(() => { restoreReplyState(); if (wasOpen && $('panel').hidden) $('btn').click(); restoreEditState(); });
+  function restoreSheetState() {
+    const st = sheetState();
+    if (st.tab && st.tab !== activeTab) return;
+    for (const id of st.checked || []) if (drafts.some((d) => d.id === id)) checked.add(id);
+    if (st.open) openSheet(st.label ?? null);
+    if (st.newCat) {
+      const b = $('cats').querySelector('.addcat');
+      if (b) { b.click(); const i = $('cats').querySelector('.newlb'); if (i) i.value = st.newCat; }
+    }
+    if (st.moveNew && st.open) {
+      const card = $('drafts').querySelector(`.draft[data-id="${st.moveNew.id}"]`);
+      const ls = card?.querySelector('select[aria-label="분류 바꾸기"]');
+      if (ls) { ls.value = '\u0000new'; ls.onchange(); const i = card.querySelector('.newlb'); if (i) i.value = st.moveNew.value; }
+    }
+  }
+  poll().then(() => { restoreReplyState(); if (wasOpen && $('panel').hidden) $('btn').click(); restoreSheetState(); restoreEditState(); });
   setInterval(poll, 3000);
 })();
