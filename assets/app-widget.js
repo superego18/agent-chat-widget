@@ -27,6 +27,8 @@
   .btn .work i { width: 4px; height: 4px; border-radius: 50%; background: #a5b4fc; animation: blink 1.2s infinite; }
   .btn .work i:nth-child(2) { animation-delay: .2s; } .btn .work i:nth-child(3) { animation-delay: .4s; }
   .btn .work.permission i { background: #fbbf24; }
+  .rbtn { position: fixed; width: 34px; height: 34px; border-radius: 50%; border: 0; background: #fff; color: #1c1b18; font-size: 16px; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 4px 12px rgba(0,0,0,.18); }
+  .btn[aria-expanded="true"] + .rbtn { display: none; }
   .btn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: #4f46e5; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
   .panel { position: fixed; left: 16px; bottom: 124px; width: min(360px, calc(100vw - 32px)); height: min(520px, calc(100vh - 160px)); background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 12px 32px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
   .panel[hidden] { display: none; }
@@ -259,10 +261,10 @@
   .box[hidden] { display: none; }
 </style>
 <div class="peek" id="peek" hidden role="status"></div>
-<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button>
+<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침">↻</button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button><button class="notif" id="reload" type="button" title="새로고침" hidden>↻</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button><button class="notif" id="reload" type="button" title="새로고침">↻</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
@@ -1871,6 +1873,7 @@
     if (!document.querySelector('link[rel="manifest"]')) add('link', { rel: 'manifest', href: '/__uifb/manifest.webmanifest?start=' + encodeURIComponent(location.pathname) });
     if (!document.querySelector('link[rel="apple-touch-icon"]')) add('link', { rel: 'apple-touch-icon', href: '/__uifb/icon-180.png' });
     if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
+    if (!document.querySelector('meta[name="mobile-web-app-capable"]')) add('meta', { name: 'mobile-web-app-capable', content: 'yes' });
   }
   const pushReady = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   async function currentSub() {
@@ -1955,10 +1958,17 @@
   };
   showNotif();
 
-  // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 머리말에 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
-  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-  $('reload').hidden = !standalone;
+  // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
+  // 새로고침: 대화창 머리말과, 대화창을 닫았을 때 여는 단추 옆(화면 전체를 새로 읽는다).
   $('reload').onclick = () => location.reload();
+  $('rbtn').onclick = () => location.reload();
+  const placeRbtn = () => {
+    const b = $('btn').getBoundingClientRect();
+    $('rbtn').style.left = b.right + 6 + 'px';
+    $('rbtn').style.top = b.top + (b.height - 34) / 2 + 'px';
+  };
+  new ResizeObserver(placeRbtn).observe($('btn'));
+  addEventListener('resize', placeRbtn);
   let widgetV = null;
   const checkVersion = async () => {
     const v = await fetch('/__uifb/api/widget-version').then((r) => r.json()).then((j) => j.v).catch(() => null);
