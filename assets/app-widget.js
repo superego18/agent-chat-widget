@@ -1024,13 +1024,21 @@
   const openGone = new Set(); // 펼친 보낸 것·지운 것(항목 번호)
   // 보관함에서 보내거나 지운 직후 잠깐 띄우는 알림. 지운 것은 "되살리기"로 바로 되돌릴 수 있다.
   let toastT = null;
+  // undo: 되살리기 함수, 또는 { label, fn } 으로 다른 동작 단추(예: "그 분류 열기").
   function toast(text, undo) {
     const t = $('toast');
     t.textContent = '';
     const sp = document.createElement('span');
     sp.textContent = text;
     t.append(sp);
-    if (undo) { const b = document.createElement('button'); b.type = 'button'; b.textContent = '되살리기'; b.onclick = () => { undo(); t.hidden = true; }; t.append(b); }
+    if (undo) {
+      const act = typeof undo === 'function' ? { label: '되살리기', fn: undo } : undo;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = act.label;
+      b.onclick = () => { act.fn(); t.hidden = true; };
+      t.append(b);
+    }
     const c = $('composeRow').getBoundingClientRect();
     const p = $('panel').getBoundingClientRect();
     t.style.left = p.left + p.width / 2 + 'px';
@@ -1247,7 +1255,7 @@
         sel.setAttribute('aria-label', '받을 세션 바꾸기');
         for (const x of sessions) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.id === d.to ? `${x.name}에게` : `${x.name}(으)로 옮기기`; sel.append(o); }
         sel.value = d.to;
-        sel.onchange = () => moveDraft(d.id, { to: sel.value }, `✓ ${nameOf(sel.value)} 보관함으로 옮김`);
+        sel.onchange = () => { const to = sel.value; moveDraft(d.id, { to }, `✓ ${nameOf(to)} 보관함으로 옮김`, { label: '그 세션 열기', fn: () => { tabSetAt = Date.now(); switchTab(to); savePrefs({ tab: to }); setDraftsView(true); } }); };
         acts.append(sel);
       }
       {
@@ -1258,7 +1266,7 @@
         ls.value = d.label || '';
         // "+ 새 분류…"를 고르면 그 자리에 이름 칸을 띄운다(Enter 저장, Esc·바깥 누르면 취소)
         ls.onchange = () => {
-          if (ls.value !== '\u0000new') return moveDraft(d.id, { label: ls.value }, `✓ ${ls.value || '미분류'}(으)로 옮김`);
+          if (ls.value !== '\u0000new') return moveDraft(d.id, { label: ls.value }, `✓ ${ls.value || '미분류'}(으)로 옮김`, { label: '그 분류 열기', fn: () => openSheet(ls.value) });
           const inp = document.createElement('input');
           inp.className = 'newlb';
           inp.placeholder = '새 분류 이름';
@@ -1266,7 +1274,7 @@
           inp.style.cssText = 'font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid #4f46e5;width:110px';
           const cancel = () => { inp.remove(); ls.hidden = false; ls.value = d.label || ''; };
           inp.onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`); else cancel(); }
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`, { label: '그 분류 열기', fn: () => openSheet(v) }); else cancel(); }
             if (e.key === 'Escape') cancel();
           };
           inp.onblur = () => { if (inp.isConnected) cancel(); };
@@ -1329,11 +1337,12 @@
 
   // 분류나 받을 세션을 바꾸면 알림을 띄우고, 옮겨 간 항목을 잠깐 테두리로 보여 준다(다른 세션으로 옮긴 것은 이 목록에서 빠진다).
   let movedId = null;
-  async function moveDraft(id, patch, msg) {
+  async function moveDraft(id, patch, msg, go) {
     movedId = id;
     await draftsApi({ action: 'update', id, ...patch });
     renderDrafts();
-    toast(msg);
+    // "그 분류 열기" 등으로 옮겨 간 곳을 바로 열 수 있다. 연 뒤에도 옮긴 항목이 테두리로 보인다.
+    toast(msg, go && { label: go.label, fn: () => { movedId = id; go.fn(); setTimeout(() => $('drafts').querySelector(`.draft[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 100); setTimeout(() => { if (movedId === id) movedId = null; }, 1800); } });
     $('drafts').querySelector(`.draft[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     setTimeout(() => { if (movedId === id) { movedId = null; $('drafts').querySelector(`.draft[data-id="${id}"]`)?.classList.remove('moved'); } }, 1800);
   }
