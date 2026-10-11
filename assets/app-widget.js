@@ -231,6 +231,10 @@
   #draftsBtn.got { animation: got .7s ease-out; }
   @keyframes got { 0% { transform: scale(1); } 30% { transform: scale(1.18); background: #4f46e5; color: #fff; } 100% { transform: scale(1); } }
   @media (prefers-reduced-motion: reduce) { #draftsBtn.got { animation: gotc 1s; } @keyframes gotc { 0%, 60% { background: #4f46e5; color: #fff; } } }
+  form .later { position: relative; overflow: hidden; }
+  form .later .fill { position: absolute; inset: 0; background: rgba(79,70,229,.25); transform-origin: left; transform: scaleX(0); pointer-events: none; }
+  form .later.pressing { transform: scale(.96); }
+  form .later.pressing .fill { transform: scaleX(1); transition: transform .5s linear; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   .off { display: none !important; }
   .hint { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #1c1b18; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -259,7 +263,7 @@
   <div class="toast" id="toast" hidden role="status"></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="보내지 않고 보관함에 담아 두기">나중에</button></form>
+  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button><button type="button" class="later" id="later" title="짧게: 보류(맨 아래에 잠깐 대기) · 꾹: 바로 보관함"><span class="fill"></span>나중에</button></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="box" id="box" hidden></div>`;
@@ -1656,26 +1660,28 @@
     requestAnimationFrame(step);
   }
 
-  $('later').onclick = async () => {
+  // 나중에: 짧게 누르면 보류(대화창 맨 아래에 잠깐 대기), 꾹 누르면 바로 보관함(완전 나중).
+  async function saveLater(toDrafts) {
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
-    // 나중에 = 보류: 대화창 맨 아래에 잠깐 대기시킨다(보관함으로는 보류 말풍선의 "보관함으로"로 옮긴다).
-    flyToDrafts(text, () => [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
+    flyToDrafts(text, toDrafts ? () => $('draftsBtn') : () => [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
     $('input').value = '';
     autoGrow($('input'));
     clearTimeout(composeT); composeT = null; saveCompose(activeTab, '');
     try {
-      await draftsApi({ action: 'add', hold: true, to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      await draftsApi({ action: 'add', ...(toDrafts ? {} : { hold: true }), to: activeTab, text, label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
       render();
       $('msgs').scrollTop = $('msgs').scrollHeight;
       where = null;
       $('where').hidden = true;
       updateDraftsBtn();
+      if (toDrafts) toast('✓ 보관함에 담음', { label: `${draftLabel || '미분류'} 열기`, fn: () => openSheet(draftLabel || '') });
     } catch {
       $('input').value = text;
       saveCompose(activeTab, text);
     }
-  };
+  }
+  holdable($('later'), () => saveLater(false), () => saveLater(true), () => false);
 
   // 오른쪽 위 손잡이를 끌어 창 크기를 바꾼다(창은 왼쪽 아래에 붙어 있다). 크기는 이 브라우저에 기억한다.
   function applySize(sz) {
