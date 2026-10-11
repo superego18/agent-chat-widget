@@ -946,7 +946,7 @@
           go.type = 'button';
           go.className = 'go';
           go.textContent = '다시 보내기';
-          go.onclick = () => withBusy(go, () => resend(m));
+          go.onclick = () => { window.__uifbDiag?.(); withBusy(go, () => resend(m)); };
           bar.append(cancel, go);
           body.replaceWith(ta);
           small.after(bar);
@@ -956,7 +956,7 @@
           again.type = 'button';
           again.className = 'rp';
           again.textContent = '다시 보내기';
-          again.onclick = () => { editing = m.draft ? { id: m.id, items: m.draft.items.map((it) => it.text) } : { id: m.id, text: m.text }; editStartAt = Date.now(); render(); editEl?.focus(); };
+          again.onclick = () => { editing = m.draft ? { id: m.id, items: m.draft.items.map((it) => it.text) } : { id: m.id, text: m.text }; editStartAt = Date.now(); window.__uifbDiag?.(); render(); editEl?.focus(); };
           small.append(again);
         }
       }
@@ -1036,7 +1036,7 @@
         mk('수정 취소', '', () => { holdEdit = null; render(); });
         mk('저장', 'save', async () => { if (await saveEdit()) render(); });
         acts.append(Object.assign(document.createElement('i'), { className: 'brk' })); // 고치기 단추와 나머지 단추를 두 줄로 나눈다
-      } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; editStartAt = Date.now(); render(); editEl?.focus(); });
+      } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; editStartAt = Date.now(); window.__uifbDiag?.(); render(); editEl?.focus(); });
       mk('지우기', '', async () => { if (ed) holdEdit = null; await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
       mk('보관함', 'tostash', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
       // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
@@ -1412,8 +1412,28 @@
     if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
   }
   $('input').addEventListener('input', () => autoGrow($('input')));
-  // 폰에서 "다시 보내기"·"수정"을 누른 직후 그 탭이 아래 입력칸에 한 번 더 닿아 초점을 가져가는 일이 있다. 방금 고치기를 시작했으면 말풍선 칸으로 돌려준다.
-  $('input').addEventListener('focus', () => { if ((editing || holdEdit) && Date.now() - editStartAt < 1000 && editEl?.isConnected) editEl.focus(); });
+  // 진단(임시): 고치기를 시작한 뒤 3초 동안의 터치·클릭·초점 순서를 모아 서버(.ui-feedback/diag.jsonl)에 남긴다.
+  // 폰에서 "다시 보내기"를 누르면 아래 입력칸으로 초점이 가는 원인을 보려는 것이다. 원인을 찾으면 지운다.
+  {
+    const evs = [];
+    const desc = (t) => (t && t.nodeType === 1 ? t.tagName.toLowerCase() + (t.id ? '#' + t.id : '') + (t.className && typeof t.className === 'string' ? '.' + t.className.trim().replace(/\s+/g, '.') : '') + (t.tagName === 'BUTTON' ? '[' + t.textContent.trim().slice(0, 12) + ']' : '') : String(t));
+    const rec = (e) => {
+      const t = e.composedPath ? e.composedPath()[0] : e.target;
+      const p = e.changedTouches?.[0] || e;
+      evs.push({ t: Math.round(performance.now()), type: e.type, el: desc(t), x: Math.round(p.clientX ?? -1), y: Math.round(p.clientY ?? -1), active: desc(root.activeElement), editing: !!(editing || holdEdit) });
+      if (evs.length > 80) evs.shift();
+    };
+    for (const type of ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'focusin', 'focusout']) root.addEventListener(type, rec, true);
+    let diagT = null;
+    window.__uifbDiag = () => {
+      clearTimeout(diagT);
+      const startAt = performance.now();
+      diagT = setTimeout(() => {
+        const list = evs.filter((x) => x.t >= startAt - 1500);
+        fetch('/__uifb/api/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'edit-focus', ua: navigator.userAgent, w: innerWidth, h: innerHeight, vv: window.visualViewport ? [Math.round(visualViewport.height), Math.round(visualViewport.offsetTop)] : null, startAt: Math.round(startAt), events: list, finalActive: desc(root.activeElement) }) }).catch(() => {});
+      }, 3000);
+    };
+  }
   $('input').addEventListener('pointerdown', () => {
     const el = $('input');
     el.style.maxHeight = inputMax() + 'px';
