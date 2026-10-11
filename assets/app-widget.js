@@ -694,11 +694,20 @@
   function render() {
     renderTabs();
     const box = $('msgs');
-    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    const gapBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    const nearBottom = gapBottom < 80;
     const rendered = new Set([...box.querySelectorAll('.msg')].map((el) => el.dataset.id));
     const renderedTab = lastTab;
     lastTab = activeTab;
     const prevTop = box.scrollTop;
+    // 보던 위치는 화면 맨 위에 걸린 메시지를 기준으로 기억한다(위쪽 내용 높이가 바뀌어도 그 메시지가 같은 자리에 오게).
+    const boxTop = box.getBoundingClientRect().top;
+    const anchorEl = [...box.querySelectorAll('.msg[data-id]')].find((el) => el.getBoundingClientRect().bottom > boxTop + 1);
+    const anchorId = anchorEl?.dataset.id, anchorOff = anchorEl ? anchorEl.getBoundingClientRect().top - boxTop : 0;
+    const keepPlace = () => {
+      const el = anchorId && renderedTab === activeTab ? box.querySelector(`.msg[data-id="${CSS.escape(anchorId)}"]`) : null;
+      box.scrollTop = el ? box.scrollTop + (el.getBoundingClientRect().top - box.getBoundingClientRect().top) - anchorOff : prevTop;
+    };
     box.textContent = '';
     const items = timeline(activeTab);
     if (!items.length && !holds().length) {
@@ -932,9 +941,12 @@
     } else if (nearBottom) {
       // 새 답이 왔으면 그 답의 처음이 보이게 둔다(긴 답이면 끝부터 보이지 않게). 짧으면 어차피 맨 아래까지 내려간다.
       const fresh = [...box.querySelectorAll('.msg.agent, .msg.peer')].find((el) => renderedTab === activeTab && rendered.size > 0 && !rendered.has(el.dataset.id));
-      box.scrollTop = fresh ? fresh.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8 : box.scrollHeight;
+      if (fresh) box.scrollTop = fresh.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
+      else if (gapBottom < 8) box.scrollTop = box.scrollHeight;
+      else { box.scrollTop = prevTop; keepPlace(); } // 맨 아래 근처에서 읽던 중이면 맨 아래로 끌어내리지 않는다
     } else {
-      box.scrollTop = prevTop; // 다시 그려도 읽던 위치를 유지한다
+      box.scrollTop = prevTop;
+      keepPlace(); // 다시 그려도 읽던 메시지가 같은 자리에 있게
     }
     markQuote(replyTo, replyQuote); // 다시 그리면 범위가 사라지므로 음영을 다시 칠한다
     placeToBottom();
