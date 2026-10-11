@@ -403,6 +403,10 @@
   let refMode = false; // true 면 답장이 아니라 참고로만 붙인다
   let lastSel = null;
   const plain = (t) => String(t).replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
+  // 마지막으로 누른 곳(꾹 눌러 글을 고를 때 그 자리). Safari는 shadow DOM 안 선택의 위치·노드를 알려 주지 않아(본문 노드 대신 BODY, 크기 0) 누른 곳으로 판단한다.
+  let lastPress = null;
+  root.addEventListener('pointerdown', (e) => { lastPress = { el: e.composedPath()[0], at: Date.now() }; }, true);
+  let selFrom; // 이번 선택이 시작된 메시지 본문 번호(본문 밖이면 null). 선택이 이어지는 동안(손잡이로 넓힐 때) 유지한다
   document.addEventListener('selectionchange', () => {
     let t = '';
     let bodyId = null;
@@ -410,17 +414,22 @@
       const sel = (root.getSelection && root.getSelection()) || getSelection();
       t = sel?.toString() || '';
       // 고른 곳이 메시지 본문(.mbody)일 때만 답장·참고 대상으로 본다. 메타·꼬리표·빈 곳을 꾹 눌러 생긴 선택은 넘긴다.
-      // (Safari는 shadow DOM 안의 선택 노드를 돌려주지 않으므로, 선택 범위 한가운데 점에 있는 요소로 판단한다)
-      if (t && sel.rangeCount) {
-        const rc = sel.getRangeAt(0).getBoundingClientRect();
-        const hit = rc.width || rc.height ? root.elementFromPoint(rc.left + Math.min(rc.width / 2, 4), rc.top + rc.height / 2) : null;
-        const body = hit?.closest?.('.mbody');
-        if (hit && !body) t = '';
-        else bodyId = body?.closest('.msg')?.dataset.id || null;
-        // 진단(임시): 폰에서 엉뚱한 메시지가 잡히는 원인을 보려고 선택 위치를 남긴다.
-        clearTimeout(window.__uifbSelT);
-        const info = { kind: 'sel', text: t.slice(0, 80), rc: [Math.round(rc.left), Math.round(rc.top), Math.round(rc.width), Math.round(rc.height)], hit: hit ? hit.tagName + '.' + hit.className : null, bodyId, anchor: sel.anchorNode ? (sel.anchorNode.nodeType === 3 ? '#text:' + sel.anchorNode.data.slice(0, 30) : sel.anchorNode.nodeName + '.' + (sel.anchorNode.className || '')) : null, ua: navigator.userAgent.slice(0, 60) };
-        window.__uifbSelT = setTimeout(() => fetch('/__uifb/api/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(info) }).catch(() => {}), 600);
+      if (!t) selFrom = undefined;
+      else {
+        const an = sel.anchorNode;
+        const rc = sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+        if (an && root.contains(an)) {
+          selFrom = (an.nodeType === 3 ? an.parentElement : an)?.closest?.('.mbody')?.closest('.msg')?.dataset.id || null;
+        } else if (rc && (rc.width || rc.height)) {
+          const hit = root.elementFromPoint(rc.left + Math.min(rc.width / 2, 4), rc.top + rc.height / 2);
+          selFrom = hit?.closest?.('.mbody')?.closest('.msg')?.dataset.id || null;
+        } else if (selFrom === undefined) {
+          const press = lastPress && Date.now() - lastPress.at < 3000 ? lastPress.el : null;
+          const el = press?.nodeType === 3 ? press.parentElement : press;
+          selFrom = el?.closest?.('.mbody')?.closest('.msg')?.dataset.id || null;
+        }
+        if (!selFrom) t = '';
+        bodyId = selFrom;
       }
     } catch {}
     t = plain(t);
