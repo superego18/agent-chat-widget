@@ -163,9 +163,11 @@
   /* 맨 아래로: 위쪽 기록을 보고 있을 때만 대화 목록 오른쪽 아래에 뜬다. */
   .tobottom { position: fixed; z-index: 2147483646; width: 38px; height: 38px; border-radius: 50%; border: 0; background: #fff; color: #1c1b18; font-size: 18px; font-weight: 700; box-shadow: 0 0 0 1px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.18); cursor: pointer; }
   .tobottom[hidden] { display: none; }
-  .toast { position: fixed; z-index: 2147483647; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; max-width: min(340px, calc(100vw - 32px)); font-size: 12px; line-height: 1.4; padding: 8px 12px; border-radius: 10px; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  .toast { position: fixed; z-index: 2147483647; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; max-width: min(280px, calc(100vw - 32px)); white-space: nowrap; font-size: 11.5px; line-height: 1.3; padding: 5px 11px; border-radius: 999px; background: #eef0ff; color: #3730a3; box-shadow: 0 0 0 1px #c7c9f5, 0 3px 10px rgba(55,48,163,.15); animation: toastin .18s ease-out; }
+  .toast > span { overflow: hidden; text-overflow: ellipsis; }
+  @keyframes toastin { from { opacity: 0; transform: translate(-50%, 6px); } }
   .toast[hidden] { display: none; }
-  .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #fde68a; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+  .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #4f46e5; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
   .dgroup.trash { opacity: .9; }
   .dgroup.only > header { justify-content: flex-end; }
   .gone { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 6px 2px; border-top: 1px solid rgba(0,0,0,.06); font-size: 12px; }
@@ -1021,7 +1023,7 @@
     const c = $('composeRow').getBoundingClientRect();
     const p = $('panel').getBoundingClientRect();
     t.style.left = p.left + p.width / 2 + 'px';
-    t.style.top = c.top - 46 + 'px';
+    t.style.top = c.top - 36 + 'px';
     t.hidden = false;
     clearTimeout(toastT);
     toastT = setTimeout(() => { t.hidden = true; }, undo ? 6000 : 3500);
@@ -1252,7 +1254,7 @@
       }
       btn('지우기', async () => {
         await draftsApi({ action: 'delete', ids: [d.id] });
-        toast('지웠어요 · 7일 동안 되살릴 수 있어요', () => draftsApi({ action: 'restore', ids: [d.id] }));
+        toast('지웠어요', () => draftsApi({ action: 'restore', ids: [d.id] }));
       });
       card.append(top, meta, acts);
       g.append(card);
@@ -1294,7 +1296,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = '다시 담기';
-      b.onclick = async () => { await draftsApi({ action: 'restore', ids: [d.id] }); toast('보관함에 다시 담았어요'); };
+      b.onclick = async () => { await draftsApi({ action: 'restore', ids: [d.id] }); toast('✓ 다시 담음'); };
       row.append(what, tx, b);
       sec.append(row);
     }
@@ -1311,7 +1313,7 @@
   async function sendDrafts(ids) {
     const out = await draftsApi({ action: 'send', ids, combine: true, device: deviceNow() });
     const sent = out?.sent || [];
-    if (sent.length) toast(`${ids.length}개 보냄 → ${nameOf(sent[0].to)} (#${sent.map((m) => m.id).join(', #')}) · 보관함 위 "최근 보낸 것"에 7일 남아요`);
+    if (sent.length) toast(`✓ ${ids.length}개 보냄 → ${nameOf(sent[0].to)}`);
     ids.forEach((id) => checked.delete(id));
     if (!mine().length) setDraftsView(false);
     else renderDrafts();
