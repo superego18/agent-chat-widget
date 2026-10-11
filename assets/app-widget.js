@@ -171,6 +171,8 @@
   .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #4f46e5; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
   .dgroup.trash { opacity: .9; }
   .dgroup.only > header { justify-content: flex-end; }
+  .draft.moved { animation: moved 1.8s ease-out; }
+  @keyframes moved { 0%, 60% { box-shadow: 0 0 0 2px #4f46e5; } 100% { box-shadow: 0 0 0 2px transparent; } }
   .gone { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 6px 2px; border-top: 1px solid rgba(0,0,0,.06); font-size: 12px; }
   .gone .gwhat { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
   .gone .gwhat.sent { background: #dcfce7; color: #166534; }
@@ -1207,7 +1209,8 @@
       box.append(g);
     for (const d of items) { // 같은 분류 안에서도 최근에 담은 것이 위
       const card = document.createElement('div');
-      card.className = 'draft';
+      card.className = 'draft' + (movedId === d.id ? ' moved' : '');
+      card.dataset.id = String(d.id);
       const top = document.createElement('div');
       top.className = 'top';
       const cb = document.createElement('input');
@@ -1244,7 +1247,7 @@
         sel.setAttribute('aria-label', '받을 세션 바꾸기');
         for (const x of sessions) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.id === d.to ? `${x.name}에게` : `${x.name}(으)로 옮기기`; sel.append(o); }
         sel.value = d.to;
-        sel.onchange = () => draftsApi({ action: 'update', id: d.id, to: sel.value });
+        sel.onchange = () => moveDraft(d.id, { to: sel.value }, `✓ ${nameOf(sel.value)} 보관함으로 옮김`);
         acts.append(sel);
       }
       {
@@ -1255,7 +1258,7 @@
         ls.value = d.label || '';
         // "+ 새 분류…"를 고르면 그 자리에 이름 칸을 띄운다(Enter 저장, Esc·바깥 누르면 취소)
         ls.onchange = () => {
-          if (ls.value !== '\u0000new') return draftsApi({ action: 'update', id: d.id, label: ls.value });
+          if (ls.value !== '\u0000new') return moveDraft(d.id, { label: ls.value }, `✓ ${ls.value || '미분류'}(으)로 옮김`);
           const inp = document.createElement('input');
           inp.className = 'newlb';
           inp.placeholder = '새 분류 이름';
@@ -1263,7 +1266,7 @@
           inp.style.cssText = 'font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid #4f46e5;width:110px';
           const cancel = () => { inp.remove(); ls.hidden = false; ls.value = d.label || ''; };
           inp.onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) draftsApi({ action: 'update', id: d.id, label: v }); else cancel(); }
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const v = inp.value.trim(); if (v) moveDraft(d.id, { label: v }, `✓ 새 분류 ${v}(으)로 옮김`); else cancel(); }
             if (e.key === 'Escape') cancel();
           };
           inp.onblur = () => { if (inp.isConnected) cancel(); };
@@ -1322,6 +1325,17 @@
       sec.append(row);
     }
     box.append(sec);
+  }
+
+  // 분류나 받을 세션을 바꾸면 알림을 띄우고, 옮겨 간 항목을 잠깐 테두리로 보여 준다(다른 세션으로 옮긴 것은 이 목록에서 빠진다).
+  let movedId = null;
+  async function moveDraft(id, patch, msg) {
+    movedId = id;
+    await draftsApi({ action: 'update', id, ...patch });
+    renderDrafts();
+    toast(msg);
+    $('drafts').querySelector(`.draft[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    setTimeout(() => { if (movedId === id) { movedId = null; $('drafts').querySelector(`.draft[data-id="${id}"]`)?.classList.remove('moved'); } }, 1800);
   }
 
   function updateFoot() {
