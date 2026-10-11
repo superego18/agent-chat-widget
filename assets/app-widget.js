@@ -164,6 +164,7 @@
   .toast[hidden] { display: none; }
   .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #fde68a; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
   .dgroup.trash { opacity: .9; }
+  .dgroup.only > header { justify-content: flex-end; }
   .gone { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 6px 2px; border-top: 1px solid rgba(0,0,0,.06); font-size: 12px; }
   .gone .gwhat { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
   .gone .gwhat.sent { background: #dcfce7; color: #166534; }
@@ -1134,7 +1135,9 @@
     }
     for (const [label, items] of groups) {
       const g = document.createElement('section');
-      g.className = 'dgroup' + (folded.has(label) ? ' folded' : '');
+      // 분류 버튼으로 그 분류만 열었으면 제목에 이미 분류 이름이 있으니 접기 줄을 빼고 보내기만 둔다.
+      const only = sheetLabel !== null;
+      g.className = 'dgroup' + (folded.has(label) && !only ? ' folded' : '') + (only ? ' only' : '');
       const head = document.createElement('header');
       const fold = document.createElement('button');
       fold.type = 'button';
@@ -1149,7 +1152,8 @@
       gs.className = 'gsend';
       gs.textContent = items.length > 1 ? '이 분류 모두 보내기' : '보내기';
       gs.onclick = () => sendDrafts(items.map((d) => d.id));
-      head.append(fold, n, gs);
+      if (only) head.append(gs);
+      else head.append(fold, n, gs);
       g.append(head);
       box.append(g);
     for (const d of items) { // 같은 분류 안에서도 최근에 담은 것이 위
