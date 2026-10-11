@@ -2132,13 +2132,21 @@
     box.hidden = false;
   }
   // 이 기기에서 대화창을 보고 있으면 15초마다 알려, 서버가 그동안 이 기기에는 알림을 보내지 않게 한다("보고 있을 땐 보내지 않기").
-  const viewing = async () => {
-    if ($('panel').hidden || document.visibilityState !== 'visible') return;
+  // 다른 앱·다른 창으로 가거나 대화창을 닫으면 바로 "안 봄"을 알린다(안 그러면 마지막 신호 뒤 30초 동안 알림이 막혀 놓친다).
+  let lastViewing = null;
+  const viewing = async (force) => {
+    const on = !$('panel').hidden && document.visibilityState === 'visible' && document.hasFocus();
+    if (!on && lastViewing === false && force !== true) return;
+    lastViewing = on;
     const sub = await currentSub().catch(() => null);
-    if (sub) fetch('/__uifb/api/push-viewing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
+    if (sub) fetch('/__uifb/api/push-viewing', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint, off: !on }) }).catch(() => {});
   };
   setInterval(viewing, 15_000);
-  document.addEventListener('visibilitychange', viewing);
+  document.addEventListener('visibilitychange', () => viewing());
+  addEventListener('blur', () => viewing());
+  addEventListener('focus', () => viewing());
+  addEventListener('pagehide', () => viewing(true));
+  new MutationObserver(() => viewing()).observe($('panel'), { attributes: true, attributeFilter: ['hidden'] });
   $('notif').onclick = async () => {
     if (!$('nset').hidden) { $('nset').hidden = true; return; }
     if (!pushReady()) {
