@@ -270,7 +270,10 @@
   button.busy::after { content: ''; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -8px 0 0 -8px; border: 2px solid var(--spb, rgba(0,0,0,.15)); border-top-color: var(--spt, #57534e); border-radius: 50%; animation: rspin .7s linear infinite; }
   form button[type="submit"].busy, form .now.busy, .hacts .go.busy, .hacts .now.busy { --spb: rgba(255,255,255,.35); --spt: #fff; }
   form .bcol button { height: 38px; padding: 0 10px; font-size: 12.5px; }
-  form .bcol button[type="submit"] { height: auto; flex: 1; min-height: 38px; } /* 끼워넣기가 없으면 보내기가 칸 높이를 다 채운다 */
+  /* 단추 칸은 입력칸이 길어져도 늘지 않고 아래에 붙는다. 끼워넣기가 없으면 보내기가 두 칸(보류+보관함) 높이를 채운다 */
+  form .bcol { align-self: flex-end; }
+  form .bcol button[type="submit"] { flex: none; height: 38px; }
+  form .bcol button[type="submit"]:has(+ .now[hidden]) { height: 80px; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   /* 보류 = 대화창 맨 아래 점선 말풍선과 같은 남색 점선, 보관함 = 보관함 창과 같은 베이지 상자 */
   form #later, .msg.user.hold .hacts .tohold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #818cf8; }
