@@ -228,6 +228,9 @@
   .toast > span { overflow: hidden; text-overflow: ellipsis; }
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, 6px); } }
   .toast[hidden] { display: none; }
+  .reloadcover { position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: rgba(238,240,255,.88); color: #3730a3; font-size: 14px; font-weight: 600; backdrop-filter: blur(2px); }
+  .reloadcover[hidden] { display: none; }
+  .reloadcover .ri { font-size: 30px; font-weight: 400; animation: rspin .8s linear infinite; }
   .toast button { flex-shrink: 0; font: inherit; font-weight: 700; color: #4f46e5; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
   .dgroup.trash { opacity: .9; }
   .dgroup.only > header { justify-content: flex-end; }
@@ -309,6 +312,7 @@
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
   <span class="selreply" id="selReply" hidden><button type="button" id="selR">↩ 답장</button><button type="button" id="selF">📎 참고</button></span>
   <div class="toast" id="toast" hidden role="status"></div>
+  <div class="reloadcover" id="reloadCover" hidden role="status"><b class="ri">↻</b><span></span></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button></span></form>
@@ -2235,35 +2239,29 @@
   };
   new ResizeObserver(placeRbtn).observe($('btn'));
   addEventListener('resize', placeRbtn);
-  let widgetV = null;
+  // 대화창 새로고침은 세션이 원할 때만 한다(세션이 /api/reload-widgets 를 부르면 서버의 새로고침 번호가 바뀜).
+  // 그러면 "새로고침 중" 안내를 덮어 띄우고 잠깐 뒤 새로고침한다. 보내는 중(단추가 도는 중)이거나 말풍선을 고치는 중이면 끝날 때까지 기다린다.
+  // 입력칸 글과 보던 위치는 서버에 남아 새로고침 뒤에도 그대로다.
+  let reloadToken = null;
   const checkVersion = async () => {
-    const v = await fetch('/__uifb/api/widget-version').then((r) => r.json()).then((j) => j.v).catch(() => null);
-    if (v == null) return;
-    if (widgetV == null) widgetV = v;
-    else if (v !== widgetV) { widgetV = v; reloadWhenIdle(); }
+    const t = await fetch('/__uifb/api/widget-version').then((r) => r.json()).then((j) => j.r).catch(() => null);
+    if (t == null) return;
+    if (reloadToken == null) reloadToken = t;
+    else if (t !== reloadToken) { reloadToken = t; reloadSoon(); }
   };
-  // 대화창 파일이 바뀌면 알아서 새로고침한다. 다만 쓰거나 고치는 중·답장/위치를 붙여 둔 중·단추가 도는 중·글을 고른 중·방금 스크롤한 중에는
-  // 기다렸다가(2초마다 다시 봄) 손을 뗐을 때 한다. 입력칸 글과 보던 위치는 서버에 남아 새로고침 뒤에도 그대로다.
-  let lastScrollAt = 0;
-  $('msgs').addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
   let reloadT = null;
-  function reloadWhenIdle() {
+  function reloadSoon() {
     clearTimeout(reloadT);
-    let selecting = false;
-    try { selecting = !!(((root.getSelection && root.getSelection()) || getSelection())?.toString()); } catch {}
-    // 입력칸에 글이 남아 있으면(곧 보낼 수 있으니) 새로고침하지 않고 기다린다. 보내다가 새로고침되면 "못 보냄"이 뜨고 글이 되살아난다.
-    const busy = () => editing || holdEdit || replyTo || where || selecting || root.querySelector('button.busy') || $('input').value.trim() || Date.now() - typedAt < 8000 || Date.now() - lastScrollAt < 3000;
-    if (busy()) { reloadT = setTimeout(reloadWhenIdle, 2000); return; }
+    const cover = $('reloadCover');
+    cover.hidden = false;
+    const wait = editing || holdEdit || root.querySelector('button.busy');
+    cover.querySelector('span').textContent = wait ? '대화창을 새로 고칠 거예요 · 지금 하던 것을 마치면 바로' : '대화창을 새로 고치는 중이에요 · 잠시 손대지 마세요';
+    if (wait) { reloadT = setTimeout(reloadSoon, 1000); return; }
     flushCompose();
-    $('reload').classList.add('reloading');
-    $('rbtn').classList.add('reloading');
-    setTimeout(() => {
-      if (busy()) { $('reload').classList.remove('reloading'); $('rbtn').classList.remove('reloading'); reloadT = setTimeout(reloadWhenIdle, 2000); return; } // 그사이 손을 댔으면 미룬다
-      location.reload();
-    }, 300);
+    reloadT = setTimeout(() => location.reload(), 1200);
   }
   checkVersion();
-  setInterval(checkVersion, 10_000);
+  setInterval(checkVersion, 5_000);
 
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
