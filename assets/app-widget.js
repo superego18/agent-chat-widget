@@ -44,6 +44,10 @@
   .msg .editbar { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
   .msg .editbar button { font: inherit; font-size: 12px; font-weight: 600; height: 30px; padding: 0 12px; border-radius: 6px; border: 0; cursor: pointer; background: rgba(255,255,255,.22); color: inherit; }
   .msg .editbar .go { background: #fff; color: #4f46e5; }
+  /* 보내기 취소한 메시지: 흐리게, 글에 줄을 긋는다. */
+  .msg.user.cancelled { background: #e7e5e0; color: #6b6860; box-shadow: none; }
+  .msg.user.cancelled > span:not(.tag):not(.quote) { text-decoration: line-through; }
+  .msg.user.cancelled .tag { background: rgba(0,0,0,.08); }
   .msg .quote { display: block; font-size: 11px; line-height: 1.35; margin: 0 0 4px; padding: 3px 7px; border-left: 3px solid currentColor; border-radius: 4px; background: rgba(127,127,127,.14); opacity: .85; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
@@ -261,7 +265,7 @@
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
   // 세션이 받아 갔는지: 감시 명령이 넘긴 마지막 번호까지, 또는 끼워넣기로 따로 넘긴 것(_at).
   const got = (m) => m.id <= (delivered[m.to] || 0) || !!delivered._at?.[m.id];
-  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && !got(m);
+  const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && !m.cancelled && !got(m);
   let wasHeld = new Set();
   function orderAt(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return String(m.at);
@@ -388,6 +392,21 @@
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
         if (m.resendOf) tag.textContent += ' · 다시 보냄';
+        if (m.cancelled) d.classList.add('cancelled');
+        // 세션이 아직 안 받아 간 메시지는 보내기를 취소할 수 있다.
+        if (isHeld(m) && sessionById(m.to)?.tool !== 'codex') {
+          const cx = document.createElement('button');
+          cx.type = 'button';
+          cx.className = 'rp';
+          cx.textContent = '보내기 취소';
+          cx.onclick = async () => {
+            const r = await fetch('/__uifb/api/chat-cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) }).catch(() => null);
+            if (r && !r.ok) alert((await r.json().catch(() => ({}))).error || '취소하지 못했습니다.');
+            await poll();
+            render();
+          };
+          small.append(cx);
+        }
         if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
         if (editing?.id === m.id) {
           d.classList.add('editing');
@@ -425,7 +444,7 @@
       box.append(d);
     }
     wasHeld = nowHeld;
-    const last = items.filter((m) => m.from !== 'peer').at(-1);
+    const last = items.filter((m) => m.from !== 'peer' && !m.cancelled).at(-1);
     const st = sessionById(activeTab)?.status;
     if (st && (st.state === 'working' || st.state === 'permission')) {
       const ty = document.createElement('div');
@@ -600,7 +619,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer').map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
+      const k = JSON.stringify(seen) + ':' + JSON.stringify(delivered) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(','); // 작업 중이면 1분마다 다시 그려 "N분째"를 갱신
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
       if (k !== key && !(editing && root.activeElement === editEl)) { key = k; render(); }
       else updateBadges(); // 앱이 탭 제목을 다시 써도 개수가 유지되게
@@ -774,6 +793,7 @@
   let delivered = {};
   function readMark(m) {
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
+    if (m.cancelled) return ' · 보내기 취소함';
     if (got(m)) return ' · 읽음';
     const s = sessionById(m.to);
     if (s?.status?.state === 'working' || s?.status?.state === 'permission') return m.interject ? ' · 안 읽음(다음 단계에서 바로 읽음)' : ' · 안 읽음(작업 중이라 끝나면 읽음)';

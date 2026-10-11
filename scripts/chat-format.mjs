@@ -18,7 +18,7 @@ export function formatMessage(m, all) {
 // 이 세션에게 온 페이지·앱 메시지 중, 이 세션이 그 뒤에 아직 답하지 않았고 아직 받아 가지 않은 것.
 // seen: 이 번호까지는 처리한 것으로 본다(감시 --seen, 또는 delivered.json 에 적힌 이미 받아 간 번호).
 export function pendingFor(messages, sid, seen) {
-  const mine = messages.filter((m) => (m.from === 'user' && m.to === sid && m.context !== 'terminal') || (m.from === 'agent' && m.session === sid));
+  const mine = messages.filter((m) => (m.from === 'user' && m.to === sid && m.context !== 'terminal' && !m.cancelled) || (m.from === 'agent' && m.session === sid));
   const lastAgent = mine.map((m) => m.from).lastIndexOf('agent');
   return mine.slice(lastAgent + 1).filter((m) => m.from === 'user' && m.id > seen);
 }
