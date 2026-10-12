@@ -4,7 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { A, makeDir, startServer, openWidget, closeBrowser, sleep } from './helpers.mjs';
+import { A, B, makeDir, startServer, openWidget, closeBrowser, sleep } from './helpers.mjs';
 
 after(closeBrowser);
 
@@ -155,6 +155,23 @@ test('압축: cmux 창이 적힌 세션 탭에만 단추가 있고, 작업 중�
     assert.match(await w.eval((r) => r.getElementById('toast').textContent), /작업 중/);
     await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[1].click());
     assert.equal(await w.eval((r) => r.getElementById('compact').hidden), true, 'cmux 창 정보가 없는 세션은 단추가 없다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('세션 탭에 컨텍스트 사용률: Claude 는 상태 줄이 남긴 값, Codex 는 기록의 token_count (#1856)', async () => {
+  const dir = makeDir();
+  fs.mkdirSync(path.join(dir, 'statusline'));
+  fs.writeFileSync(path.join(dir, 'statusline', `${A}.json`), JSON.stringify({ session_id: A, context_window: { used_percentage: 85.4, total_input_tokens: 170800, context_window_size: 200000 } }));
+  const roll = path.join(dir, 'rollout.jsonl');
+  fs.writeFileSync(roll, JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 64600 }, model_context_window: 258400 } } }) + '\n');
+  const f = path.join(dir, 'sessions', `${B}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), tool: 'codex', path: roll }));
+  const srv = await startServer(dir);
+  try {
+    const { w, ctx } = await openWidget(srv);
+    const chips = await w.eval((r) => [...r.querySelectorAll('#tabs .chipbtn .tctx')].map((c) => [c.textContent, c.classList.contains('hi')]));
+    assert.deepEqual(chips, [['85%', true], ['~25%', false]]);
     await ctx.close();
   } finally { srv.stop(); }
 });

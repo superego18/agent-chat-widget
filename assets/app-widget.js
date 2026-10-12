@@ -122,6 +122,8 @@
   .typing .dots i { width: 5px; height: 5px; border-radius: 50%; background: #8f8c84; animation: blink 1.2s infinite; }
   .typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .tctx { margin-left: 5px; font-size: 10.5px; font-weight: 600; opacity: .7; font-variant-numeric: tabular-nums; }
+  .tctx.hi { opacity: 1; color: #c2410c; }
   .tbadge { display: inline-block; min-width: 15px; height: 15px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 10px; line-height: 15px; text-align: center; padding: 0 4px; margin-left: 4px; font-weight: 600; }
   .more { align-self: center; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #3730a3; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; margin: 2px 0 6px; }
   .newline { align-self: stretch; text-align: center; font-size: 11px; font-weight: 600; color: #4f46e5; margin: 4px 0; }
@@ -852,6 +854,15 @@
         b.append(dot);
       }
       b.append(t.label);
+      const cx = sessionById(t.id)?.ctx;
+      if (cx) {
+        // 컨텍스트 사용률(#1856). 80% 넘으면 눈에 띄게. Codex 는 어림값이라 ~ 를 붙인다.
+        const c = document.createElement('span');
+        c.className = 'tctx' + (cx.pct >= 80 ? ' hi' : '');
+        c.textContent = (cx.approx ? '~' : '') + cx.pct + '%';
+        c.title = `컨텍스트 사용률${cx.approx ? '(어림)' : ''} ${cx.pct}%` + (cx.used && cx.size ? ` · ${Math.round(cx.used / 1000)}k / ${Math.round(cx.size / 1000)}k` : '') + (cx.at ? ` · ${new Date(cx.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 기준` : '');
+        b.append(c);
+      }
       const n = timeline(t.id).filter(isUnread).length;
       if (n) {
         const nb = document.createElement('span');

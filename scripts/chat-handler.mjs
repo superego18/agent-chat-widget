@@ -67,7 +67,37 @@ function listSessions() {
     })
     .filter(Boolean)
     .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)))
-    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? { active: true, via: 'queue' } : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId), compact: !!s.cmux?.surface }));
+    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? { active: true, via: 'queue' } : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId), compact: !!s.cmux?.surface, ctx: readCtx(s) }));
+}
+
+// 컨텍스트 사용률(#1856). Claude 는 상태 줄 스크립트가 남긴 값(.ui-feedback/statusline/<세션>.json)을 쓰고,
+// Codex 는 대화 기록의 마지막 token_count(마지막 요청의 입력 토큰 ÷ 컨텍스트 창)로 어림한다. 모르면 null.
+const ctxCache = new Map();
+function readCtx(s) {
+  try {
+    if (s.tool !== 'codex') {
+      const f = path.join(root, 'statusline', `${s.sessionId}.json`);
+      const j = JSON.parse(fs.readFileSync(f, 'utf8')).context_window || {};
+      if (!Number.isFinite(j.used_percentage)) return null;
+      return { pct: Math.round(j.used_percentage), used: j.total_input_tokens ?? null, size: j.context_window_size ?? null, at: fs.statSync(f).mtime.toISOString() };
+    }
+    const st = fs.statSync(s.path);
+    const key = `${s.path}:${st.size}:${st.mtimeMs}`;
+    if (ctxCache.get(s.sessionId)?.key === key) return ctxCache.get(s.sessionId).v;
+    const len = Math.min(st.size, 512 * 1024);
+    const fd = fs.openSync(s.path, 'r');
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    const line = buf.toString('utf8').split('\n').reverse().find((l) => l.includes('"token_count"') && l.includes('model_context_window'));
+    const info = line && JSON.parse(line).payload?.info;
+    const used = info?.last_token_usage?.input_tokens, size = info?.model_context_window;
+    const v = used && size ? { pct: Math.round((used / size) * 100), used, size, at: st.mtime.toISOString(), approx: true } : null;
+    ctxCache.set(s.sessionId, { key, v });
+    return v;
+  } catch {
+    return null;
+  }
 }
 
 // hook-relay.mjs 가 보낸 세션 상태(작업 중·승인 대기·쉬는 중). 오래된 "작업 중"은 믿지 않는다.
