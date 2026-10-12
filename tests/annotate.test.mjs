@@ -101,14 +101,31 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
     assert.equal(await order(), '나가', '같은 상자 안에서 뒤로 옮겨 보인다(#1801)');
     assert.match(await w.eval((r) => r.getElementById('adjFields').textContent), /2 \/ 2/);
     assert.equal(await w.eval((r) => r.getElementById('adjNext').disabled), true);
-    await w.click('#adjUp');
-    assert.equal(await order(), '가나', '다른 요소로 옮기면 원래 순서로');
-    await w.click('#adjUp');
-    assert.equal(await tag(), 'div#row', '감싼 요소로 옮긴다(#1798). React가 아니면 태그 이름');
-    assert.equal(await w.eval((r) => r.getElementById('adjUp').disabled), true, 'body 바로 안이면 더 못 올라간다');
-    await w.click('#adjDown');
-    assert.equal(await tag(), 'b', '안쪽으로 되돌아온다');
-    await w.click('#adjUp');
+    // 주변 배치(#1819 B안): 버튼을 찍은 채로 든 영역의 간격·줄 안 위치를 바꾸고, 영역과 간격을 화면에 표시한다(#1822)
+    assert.match(await w.eval((r) => !r.getElementById('area').hidden && r.getElementById('areaTag').textContent), /이 영역 안에서 · div#row/);
+    await w.eval((r) => r.getElementById('adj-areaGap').dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+    await w.eval((r) => { const i = r.getElementById('adj-areaGap'); i.value = '20'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).columnGap), '20px', '간격은 든 영역(부모)에 적용');
+    const gap = await w.eval((r) => [...r.querySelectorAll('#gaps .gapz')].map((d) => parseFloat(d.style.width)));
+    assert.equal(gap.length, 1, '간격 자리를 빗금으로 표시');
+    assert.ok(Math.abs(gap[0] - 20) < 1, `빗금 폭이 간격과 같다 (${gap[0]})`);
+    await w.eval((r) => r.querySelector('#adjPlace [data-v="end"]').click());
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).justifyContent), 'flex-end', '남는 자리가 있으면 부모의 분배로');
+    await w.click('#adjDone');
+    await w.type('간격');
+    await w.click('#form button[type="submit"]');
+    await w.idle(1200);
+    const m = readChat(srv).find((x) => x.text === '간격');
+    assert.deepEqual(Object.keys(m.where.adjust).sort(), ['areaGap', 'areaJustify', 'order']);
+    assert.ok(formatMessage(m, [m]).some((l) => l.includes('든 영역(부모)의 요소 사이 간격 0px → 20px')), '세션에 부모에 적용할 값으로 전해진다');
+    assert.equal(await order(), '가나', '보낸 뒤에는 원래대로');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).columnGap), 'normal');
+
+    // 상자 자체를 찍으면 안에 든 것들의 배치
+    await w.click('#pick');
+    await page.mouse.click(375, 30); // 가운데 위는 안내줄이 가린다
+    await w.idle(300);
+    assert.equal(await tag(), 'div#row', 'React가 아니면 태그 이름');
     for (const k of ['flexDirection', 'alignItems', 'justifyContent', 'columnGap', 'rowGap']) assert.ok(await w.eval((r, k) => !!r.querySelector(`#adjFields [data-k="${k}"]`), k), k);
     await w.eval((r) => { const s = r.querySelector('#adjFields [data-k="justifyContent"]'); s.value = 'space-between'; s.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).justifyContent), 'space-between');
@@ -117,6 +134,28 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
     await w.idle(200);
     assert.equal(await w.eval((r) => r.getElementById('adj').hidden), true, '화면의 다른 곳을 누르면 창이 닫힌다(#1804)');
     assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('내용만큼만 넓은 버튼 묶음(ml-auto)은 줄 안 위치가 묶음 자체를 바깥 줄 안에서 옮긴다 (#1822)', async () => {
+  const dir = makeDir();
+  fs.writeFileSync(path.join(dir, 't.html'), '<!doctype html><meta name="viewport" content="width=device-width"><title>t</title><body><div id="g" style="display:flex;margin-top:200px"><span id="tag">태그</span><div id="acts" style="display:flex;gap:8px;margin-left:auto"><button id="b1">담기</button><button>무시</button></div></div><script src="/__uifb/widget.js"></script></body>');
+  const srv = await startServer(dir);
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    await w.click('#pick');
+    const b = await page.evaluate(() => { const r = document.getElementById('b1').getBoundingClientRect(); return { x: r.left + 4, y: r.top + 4 }; });
+    await page.mouse.click(b.x, b.y);
+    await w.idle(300);
+    assert.equal(await w.eval((r) => r.querySelector('#adjPlace [aria-pressed="true"]').dataset.v), 'end', '지금은 오른쪽');
+    assert.equal(await w.eval((r) => !!r.querySelector('#adjPlace [data-v="between"]')), false);
+    await w.eval((r) => r.getElementById('adjPlace').dispatchEvent(new PointerEvent('pointerenter')));
+    await w.eval((r) => r.getElementById('adjPlace').parentElement.dispatchEvent(new PointerEvent('pointerenter')));
+    assert.match(await w.eval((r) => r.getElementById('areaTag').textContent), /이 줄 안에서 · div#g/, '줄 안 위치는 바깥 줄을 영역으로 표시');
+    await w.eval((r) => r.querySelector('#adjPlace [data-v="start"]').click());
+    const x = await page.evaluate(() => [document.getElementById('tag').getBoundingClientRect().right, document.getElementById('acts').getBoundingClientRect().left]);
+    assert.ok(Math.abs(x[0] - x[1]) < 1, `버튼 묶음이 태그 바로 뒤로 (${x})`);
     await ctx.close();
   } finally { srv.stop(); }
 });

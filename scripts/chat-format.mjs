@@ -8,6 +8,7 @@ const ADJUST_LABELS = {
   width: '너비', height: '높이', padding: '안쪽 여백',
   ...Object.fromEntries(Object.entries(SIDE).flatMap(([k, v]) => [[`padding${k}`, `안쪽 여백 ${v}`], [`margin${k}`, `바깥 여백 ${v}`]])),
   flexDirection: '레이아웃 방향', alignItems: '정렬', justifyContent: '분배', columnGap: '가로 간격', rowGap: '세로 간격', order: '같은 상자 안 순서',
+  areaGap: '든 영역(부모)의 요소 사이 간격', areaJustify: '든 영역(부모) 안 위치(justify-content)', areaPlace: '든 묶음(부모) 자체를 조부모 줄 안에서 옮김(바깥 여백 auto)',
 };
 export const ADJUST_KEYS = Object.keys(ADJUST_LABELS);
 export function adjustText(w) {

@@ -334,6 +334,17 @@
   .box .btag:empty { display: none; }
   .slot { position: fixed; pointer-events: none; outline: 1px dashed #4f46e5; border-radius: 3px; }
   .slot b { position: absolute; right: 0; top: 0; background: #eef0ff; color: #3730a3; font: 600 10px/14px system-ui, sans-serif; padding: 0 4px; border-radius: 3px; }
+  .area { position: fixed; pointer-events: none; outline: 2px dashed #ea580c; border-radius: 4px; }
+  .area[hidden] { display: none; }
+  .area .atag { position: absolute; right: -2px; bottom: calc(100% + 2px); max-width: min(320px, 70vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #ea580c; color: #fff; font: 600 11px/18px system-ui, sans-serif; padding: 0 6px; border-radius: 4px; }
+  .area.stack .atag { bottom: calc(100% + 22px); } /* 찍은 요소 이름표와 같은 높이면 한 줄 위로 */
+  .area.low .atag { bottom: auto; top: 2px; right: 2px; }
+  .gapz { position: fixed; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(234,88,12,.5) 0 3px, rgba(234,88,12,.12) 3px 6px); }
+  .adj .seg { display: inline-flex; border: 1px solid rgba(0,0,0,.15); border-radius: 7px; overflow: hidden; }
+  .adj .seg button { border: 0; background: #fff; color: #1c1b18; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+  .adj .seg button + button { border-left: 1px solid rgba(0,0,0,.1); }
+  .adj .seg button[aria-pressed="true"] { background: #ea580c; color: #fff; }
+  .adj .agroup.area-g { color: #c2410c; }
   .adj .apos { align-self: center; font-size: 12px; color: #5a5852; white-space: nowrap; }
 </style>
 <div class="pins" id="pins" hidden></div>
@@ -356,8 +367,8 @@
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
-<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aup" id="adjDown" title="안쪽 요소로">↓ 안쪽</button><button type="button" class="aup" id="adjUp" title="감싼 요소로">↑ 감싼 요소</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
-<div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div><div id="slots"></div>`;
+<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
+<div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div><div id="slots"></div><div class="area" id="area" hidden><span class="atag" id="areaTag"></span></div><div id="gaps"></div>`;
 
   const $ = (s) => root.getElementById(s);
   $('heading').textContent = `대화/피드백 · ${CFG.label}`;
@@ -1479,7 +1490,7 @@
     e.stopPropagation();
     const el = pickedEl(e);
     if (el) {
-      if (!pickFor) { revertAdjust(); adjTrail = []; } // 새로 찍으면 전에 바꿔 보던 요소는 원래대로
+      if (!pickFor) revertAdjust(); // 새로 찍으면 전에 바꿔 보던 요소는 원래대로
       where = whereOf(el);
       if (pickFor) {
         draftsApi({ action: 'update', id: pickFor, where });
@@ -1576,7 +1587,14 @@
     if (adj.text !== null) el.textContent = ch.text ? ch.text.to : adj.text;
     adj.parent.insertBefore(el, adj.next?.parentNode === adj.parent ? adj.next : null);
     if (ch.order) { const others = sibsOf(el).filter((x) => x !== el), i = parseInt(ch.order.to) - 1; el.parentElement.insertBefore(el, others[i] || others[others.length - 1].nextSibling); }
-    for (const [k, v] of Object.entries(ch)) if (k !== 'text' && k !== 'order') el.style[k] = v.to;
+    for (const [k, v] of Object.entries(ch)) if (k !== 'text' && ADJ_KEYS.includes(k)) el.style[k] = v.to;
+    const a = adj.area;
+    if (a) {
+      if (a.style === null) a.p.removeAttribute('style'); else a.p.setAttribute('style', a.style);
+      if (ch.areaGap) a.p.style[a.col ? 'rowGap' : 'columnGap'] = ch.areaGap.to;
+      if (ch.areaJustify) a.p.style.justifyContent = PLACES.find(([v]) => v === ch.areaJustify.to)?.[2] || ch.areaJustify.to;
+      if (ch.areaPlace) Object.assign(a.p.style, PLACES.find(([v]) => v === ch.areaPlace.to)?.[3] || {});
+    }
     // 테두리가 없던 요소는 색·두께만 바꾸면 보이지 않으므로 미리보기에서만 실선을 켠다(보내는 값에는 넣지 않는다).
     if ((ch.borderColor || ch.borderWidth) && getComputedStyle(el).borderTopStyle === 'none') el.style.borderStyle = 'solid';
   }
@@ -1595,30 +1613,69 @@
       Object.assign(now, { text: el.textContent.trim(), color: hexOf(cs.color), backgroundColor: hexOf(cs.backgroundColor), borderColor: hexOf(cs.borderTopColor), borderWidth: cs.borderTopWidth, borderRadius: cs.borderTopLeftRadius });
       const sibs = sibsOf(el);
       now.order = `${sibs.indexOf(el) + 1}/${sibs.length}`;
-      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries([...ADJ_KEYS, 'order'].map((k) => [k, prev[k]?.from ?? now[k]])), layout: /flex|grid/.test(cs.display), flex: /flex/.test(cs.display), parent: el.parentElement, next: el.nextSibling };
+      const area = areaOf(el);
+      if (area) Object.assign(now, area.now);
+      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries([...ADJ_KEYS, ...AREA_KEYS].map((k) => [k, prev[k]?.from ?? now[k]])), layout: /flex|grid/.test(cs.display), flex: /flex/.test(cs.display), parent: el.parentElement, next: el.nextSibling, area };
       applyAdjust(prev);
     }
     $('adjWhat').textContent = [where.component, where.text].filter(Boolean).join(' · ') || where.selector;
-    $('adjUp').disabled = !el.parentElement || el.parentElement === document.body;
-    $('adjDown').hidden = !adjTrail.length;
     const box = $('adjFields');
     box.textContent = '';
-    const sibs = sibsOf(el);
-    if (sibs.length > 1) {
-      const i = sibs.indexOf(el), h = document.createElement('div'), l = document.createElement('span'), row = document.createElement('div'), pos = document.createElement('span');
-      h.className = 'agroup'; h.textContent = '옮기기 · 같은 상자 안 (점선이 옮길 수 있는 자리)';
-      l.className = 'alabel'; l.textContent = '순서';
-      row.className = 'arow';
-      pos.className = 'apos'; pos.textContent = `${i + 1} / ${sibs.length}`;
-      for (const [id, d, t] of [['adjPrev', -1, '◀ 앞으로'], ['adjNext', 1, '뒤로 ▶']]) {
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'aup'; b.id = id; b.textContent = t;
-        b.disabled = !sibs[i + d];
-        b.onclick = () => moveOrder(i + d);
-        row.append(b);
+    const sibs = sibsOf(el), a = adj.area;
+    if (a && (sibs.length > 1 || a.flex)) {
+      // 주변 배치: 찍은 요소가 든 영역(주황 점선) 안에서의 순서·간격·위치(#1819 B안). 줄에 손을 대면 그 영역과 간격을 화면에 표시한다(#1822).
+      const h = document.createElement('div');
+      h.className = 'agroup area-g'; h.textContent = '주변 배치 · 주황 점선 영역 안에서';
+      box.append(h);
+      const line = (focus, label, ...nodes) => {
+        const l = document.createElement('span'), row = document.createElement('div');
+        l.className = 'alabel'; l.textContent = label;
+        row.className = 'arow';
+        row.append(...nodes);
+        for (const x of [l, row]) {
+          x.addEventListener('pointerenter', () => { adjFocus = focus; placeAdjust(); });
+          x.addEventListener('focusin', () => { adjFocus = focus; placeAdjust(); });
+        }
+        box.append(l, row);
+      };
+      if (sibs.length > 1) {
+        const i = sibs.indexOf(el), pos = document.createElement('span');
+        pos.className = 'apos'; pos.textContent = `${i + 1} / ${sibs.length}`;
+        const bs = [['adjPrev', -1, '◀ 앞으로'], ['adjNext', 1, '뒤로 ▶']].map(([id, d, t]) => {
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'aup'; b.id = id; b.textContent = t;
+          b.disabled = !sibs[i + d];
+          b.onclick = () => moveOrder(i + d);
+          return b;
+        });
+        line('order', '순서', ...bs, pos);
       }
-      row.append(pos);
-      box.append(h, l, row);
+      if (a.flex) {
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.min = '0'; inp.step = '1'; inp.id = 'adj-areaGap'; inp.dataset.area = 'areaGap';
+        inp.setAttribute('aria-label', '옆 요소와 간격');
+        const cur = where.adjust?.areaGap?.to ?? adj.from.areaGap;
+        inp.value = String(Math.round(parseFloat(cur) * 10) / 10 || 0);
+        inp.classList.toggle('changed', cur !== adj.from.areaGap);
+        inp.addEventListener('input', () => setArea('areaGap', inp.value ? inp.value + 'px' : adj.from.areaGap, false));
+        const u = document.createElement('span'); u.className = 'apos'; u.textContent = 'px';
+        line('gap', '옆 요소와 간격', inp, u);
+      }
+      if (a.pos) {
+        const k = a.pos.how === 'justify' ? 'areaJustify' : 'areaPlace';
+        const cur = where.adjust?.[k]?.to ?? adj.from[k];
+        const sg = document.createElement('span');
+        sg.className = 'seg'; sg.id = 'adjPlace';
+        for (const [v, t] of PLACES) {
+          if (v === 'between' && k === 'areaPlace') continue;
+          const b = document.createElement('button');
+          b.type = 'button'; b.textContent = t; b.dataset.v = v;
+          b.setAttribute('aria-pressed', String(v === cur));
+          b.onclick = () => setArea(k, v, true);
+          sg.append(b);
+        }
+        line('place', '줄 안 위치', sg);
+      }
     }
     for (const [label, fields, only] of ADJ_ROWS) {
       if ((only === 'layout' && !adj.layout) || (only === 'flex' && !adj.flex)) continue;
@@ -1690,6 +1747,7 @@
       Object.assign(d.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
       sl.append(d);
     });
+    drawArea();
     const r = adj.el.getBoundingClientRect(), s = $('adj').style, w = Math.min(440, innerWidth - 24);
     const below = innerHeight - r.bottom - 22, above = r.top - 38; // 위쪽은 이름표 자리만큼 더 띄운다
     if (Math.max(below, above) < 180) { s.cssText = ''; return; }
@@ -1705,6 +1763,9 @@
   }
   function closeAdjust() {
     document.removeEventListener('pointerdown', outsideAdjust, true);
+    $('area').hidden = true;
+    $('gaps').textContent = '';
+    adjFocus = null;
     $('adj').hidden = true;
     $('slots').textContent = '';
     $('box').hidden = true;
@@ -1716,8 +1777,6 @@
   }
   $('adjBtn').onclick = openAdjust;
   $('adjDone').onclick = closeAdjust;
-  // 안쪽 요소가 먼저 잡혀 감싼 상자를 찍기 어려우므로, 창에서 한 단계씩 바깥·안쪽으로 옮긴다(#1798). 옮기면 바꿔 보던 값은 원래대로.
-  let adjTrail = []; // 바깥으로 옮기기 전 요소들(안쪽으로 되돌아갈 때)
   // 옮기기: 같은 상자 안에서 순서만 바꿔 본다(#1801). 다른 상자로 옮기면 앱 화면이 깨질 수 있어 하지 않는다.
   const sibsOf = (el) => (el.parentElement && el.parentElement !== document.documentElement ? [...el.parentElement.children].filter((x) => x !== host && !/^(SCRIPT|STYLE|TEMPLATE|LINK|META)$/.test(x.tagName)) : []);
   const shortOf = (x) => (x.innerText || x.getAttribute('aria-label') || componentOf(x)).trim().replace(/\s+/g, ' ').slice(0, 20);
@@ -1731,15 +1790,71 @@
     saveWhere();
     openAdjust();
   }
-  function moveAdjust(el) {
-    revertAdjust();
-    where = whereOf(el);
-    setWhereLabel();
-    saveWhere();
-    openAdjust();
+  // 줄 안 위치: [값, 이름, 부모 분배(justify-content), 부모 자체를 조부모 줄 안에서 옮길 때의 바깥 여백]
+  const PLACES = [
+    ['start', '왼쪽', 'flex-start', { marginLeft: '0px', marginRight: 'auto' }],
+    ['center', '가운데', 'center', { marginLeft: 'auto', marginRight: 'auto' }],
+    ['end', '오른쪽', 'flex-end', { marginLeft: 'auto', marginRight: '0px' }],
+    ['between', '양끝', 'space-between'],
+  ];
+  const AREA_KEYS = ['areaGap', 'areaJustify', 'areaPlace'];
+  let adjFocus = null; // 주변 배치에서 손댄 줄: order 순서, gap 간격, place 줄 안 위치
+  // 찍은 요소가 든 영역(부모). 줄 안 위치는 부모에 남는 자리가 있으면 부모의 분배로, 내용만큼만 넓은 묶음이면(예: ml-auto 버튼 묶음) 묶음 자체를 조부모 줄 안에서 옮긴다.
+  function areaOf(el) {
+    const p = el.parentElement;
+    if (!p || p === document.body || p === document.documentElement) return null;
+    const cs = getComputedStyle(p), flex = /flex|grid/.test(cs.display), row = /flex/.test(cs.display) && !/column/.test(cs.flexDirection);
+    const col = /flex/.test(cs.display) && /column/.test(cs.flexDirection);
+    const now = { areaGap: cs[col ? 'rowGap' : 'columnGap'] === 'normal' ? '0px' : cs[col ? 'rowGap' : 'columnGap'] };
+    let pos = null;
+    if (row) {
+      const rs = sibsOf(el).map((x) => x.getBoundingClientRect()).filter((r) => r.width || r.height), pr = p.getBoundingClientRect();
+      const free = pr.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (Math.max(...rs.map((r) => r.right)) - Math.min(...rs.map((r) => r.left)));
+      const g = p.parentElement, gs = g && getComputedStyle(g);
+      if (free > 4) {
+        pos = { how: 'justify', el: p };
+        now.areaJustify = (PLACES.find(([, , j]) => j === cs.justifyContent) || PLACES[0])[0];
+      } else if (g && g !== document.body && /flex/.test(gs.display) && !/column/.test(gs.flexDirection)) {
+        pos = { how: 'margin', el: g };
+        const gr = g.getBoundingClientRect(), l = pr.left - gr.left - parseFloat(gs.paddingLeft), r = gr.right - parseFloat(gs.paddingRight) - pr.right;
+        now.areaPlace = Math.abs(l - r) < 3 && l > 3 ? 'center' : r < 3 && l > 3 ? 'end' : 'start';
+      }
+    }
+    return { p, style: p.getAttribute('style'), flex, col, pos, now };
   }
-  $('adjUp').onclick = () => { const el = whereEl(); if (el?.parentElement && el.parentElement !== document.body) { adjTrail.push(el); moveAdjust(el.parentElement); } };
-  $('adjDown').onclick = () => { const el = adjTrail.pop(); if (el?.isConnected) moveAdjust(el); else { adjTrail = []; $('adjDown').hidden = true; } };
+  function setArea(k, to, redraw) {
+    const ch = { ...(where.adjust || {}) };
+    if (to === adj.from[k]) delete ch[k]; else ch[k] = { from: adj.from[k], to };
+    if (Object.keys(ch).length) where.adjust = ch; else delete where.adjust;
+    applyAdjust(ch);
+    saveWhere();
+    if (redraw) openAdjust(); else placeAdjust();
+  }
+  function drawArea() {
+    const a = adj.area, gz = $('gaps');
+    gz.textContent = '';
+    if (!a || !$('adjFields').querySelector('.area-g')) { $('area').hidden = true; return; }
+    const tgt = adjFocus === 'place' && a.pos ? a.pos.el : a.p;
+    const r = tgt.getBoundingClientRect();
+    Object.assign($('area').style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    $('area').classList.toggle('stack', Math.abs(r.top - adj.el.getBoundingClientRect().top) < 22 && r.top >= 44);
+    $('area').classList.toggle('low', r.top < 22 || (r.top < 44 && Math.abs(r.top - adj.el.getBoundingClientRect().top) < 22));
+    $('areaTag').textContent = (adjFocus === 'place' && a.pos?.how === 'margin' ? '이 줄 안에서 · ' : '이 영역 안에서 · ') + componentOf(tgt);
+    $('area').hidden = false;
+    if (adjFocus !== 'gap') return;
+    // 간격 표시: 같은 줄에서 이웃한 두 요소 사이(세로 배치면 위아래 사이)를 빗금으로
+    const rs = sibsOf(a.p.firstElementChild || adj.el).map((x) => x.getBoundingClientRect()).filter((q) => q.width || q.height);
+    for (let i = 1; i < rs.length; i++) {
+      const x = rs[i - 1], y = rs[i];
+      const box = a.col ? (y.top >= x.bottom - 1 ? { left: Math.min(x.left, y.left), top: x.bottom, width: Math.max(x.right, y.right) - Math.min(x.left, y.left), height: y.top - x.bottom } : null)
+        : (y.left >= x.right - 1 && y.top < x.bottom && x.top < y.bottom ? { left: x.right, top: Math.min(x.top, y.top), width: y.left - x.right, height: Math.max(x.bottom, y.bottom) - Math.min(x.top, y.top) } : null);
+      if (!box || box.width < 0.5 || box.height < 0.5) continue;
+      const d = document.createElement('div');
+      d.className = 'gapz';
+      Object.assign(d.style, { left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px' });
+      gz.append(d);
+    }
+  }
   $('adjReset').onclick = () => { delete where.adjust; if (adj) applyAdjust({}); saveWhere(); openAdjust(); };
 
   try {
