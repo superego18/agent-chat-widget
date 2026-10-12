@@ -95,6 +95,20 @@ test('새로고침해도 입력칸 글과 붙여 둔 참고가 남는다 (하던
   } finally { srv.stop(); }
 });
 
+test('세션이 보낸 마크다운 표는 표로 보인다 (#1812)', async () => {
+  const text = '앞 글\n\n| 바꿀 것 | 찍을 곳 |\n|---|---|\n| 버튼 색 | **그 버튼** |\n| 간격 | 감싼 상자 |\n\n뒷 글';
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'agent', session: A, text, at: iso(5000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    const t = await w.eval((r) => { const tb = r.querySelector('.msg[data-id="1"] table'); return tb && { th: [...tb.querySelectorAll('th')].map((x) => x.textContent), rows: tb.querySelectorAll('tr').length, strong: !!tb.querySelector('td strong'), txt: r.querySelector('.msg[data-id="1"]').textContent }; });
+    assert.deepEqual(t.th, ['바꿀 것', '찍을 곳']);
+    assert.equal(t.rows, 3, '구분줄(|---|)은 줄로 그리지 않는다');
+    assert.ok(t.strong, '칸 안의 굵은 글도 살린다');
+    assert.match(t.txt, /앞 글[\s\S]*뒷 글/);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

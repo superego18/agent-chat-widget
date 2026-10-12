@@ -48,6 +48,10 @@
   .msg.user { align-self: flex-end; background: #4f46e5; color: #fff; }
   .msg.agent { align-self: flex-start; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.1); }
   .msg a { color: inherit; text-decoration: underline; word-break: break-all; }
+  .tbl { overflow-x: auto; margin: 4px 0; white-space: normal; }
+  .tbl table { border-collapse: collapse; font-size: 12.5px; }
+  .tbl th, .tbl td { border: 1px solid rgba(127,127,127,.3); padding: 3px 6px; text-align: left; vertical-align: top; }
+  .tbl th { background: rgba(127,127,127,.12); white-space: nowrap; }
   .msg code { font-family: ui-monospace, monospace; font-size: 12px; background: rgba(127,127,127,.15); padding: 0 4px; border-radius: 4px; }
   .msg small { display: block; font-size: 10px; opacity: .7; margin-top: 2px; }
   /* 답장: 메시지마다 작은 "답장" 버튼(마우스가 있으면 올렸을 때만), 답장 메시지 위에는 원문 인용. */
@@ -421,6 +425,9 @@
   function mdLite(text) {
     const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     return esc
+      // 마크다운 표(머리줄 + |---| 줄)는 표로 그린다(#1812). 폭이 좁으면 표만 옆으로 밀어 본다.
+      .replace(/^\|.*\|[ \t]*\n\|[ \t:|-]+\|[ \t]*(?:\n\|.*\|[ \t]*)*\n?/gm, (b) => '<div class="tbl"><table>' + b.trim().split('\n').filter((l, i) => i !== 1)
+        .map((l, i) => '<tr>' + l.trim().replace(/^\||\|$/g, '').split('|').map((c) => (i ? `<td>${c.trim()}</td>` : `<th>${c.trim()}</th>`)).join('') + '</tr>').join('') + '</table></div>')
       .replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
       .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>')
