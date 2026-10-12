@@ -112,6 +112,11 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
     for (const k of ['flexDirection', 'alignItems', 'justifyContent', 'columnGap', 'rowGap']) assert.ok(await w.eval((r, k) => !!r.querySelector(`#adjFields [data-k="${k}"]`), k), k);
     await w.eval((r) => { const s = r.querySelector('#adjFields [data-k="justifyContent"]'); s.value = 'space-between'; s.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).justifyContent), 'space-between');
+    const out = await w.eval((r) => r.getElementById('adj').getBoundingClientRect().bottom + 10);
+    await page.mouse.click(5, out);
+    await w.idle(200);
+    assert.equal(await w.eval((r) => r.getElementById('adj').hidden), true, '화면의 다른 곳을 누르면 창이 닫힌다(#1804)');
+    assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false);
     await ctx.close();
   } finally { srv.stop(); }
 });

@@ -1666,7 +1666,10 @@
     const r = el.getBoundingClientRect();
     if (r.top < 0 || r.bottom > innerHeight) el.scrollIntoView({ block: 'nearest' });
     placeAdjust();
+    document.addEventListener('pointerdown', outsideAdjust, true);
   }
+  // 앱 화면의 다른 곳을 누르면 값 바꾸기 창을 닫는다(완료와 같음, #1804).
+  function outsideAdjust(e) { if (!e.composedPath().includes(host)) closeAdjust(); }
   // 값 바꾸기 창을 찍은 요소 바로 아래(자리가 모자라면 위)에 붙인다(#1792). 요소가 화면을 거의 채우면 원래처럼 아래 가운데.
   function placeAdjust() {
     if (!adj || $('adj').hidden) return;
@@ -1694,6 +1697,7 @@
     $('box').hidden = false;
   }
   function closeAdjust() {
+    document.removeEventListener('pointerdown', outsideAdjust, true);
     $('adj').hidden = true;
     $('slots').textContent = '';
     $('box').hidden = true;
