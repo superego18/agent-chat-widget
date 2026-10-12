@@ -1230,7 +1230,8 @@
         acts.append(Object.assign(document.createElement('i'), { className: 'brk' })); // 고치기 단추와 나머지 단추를 두 줄로 나눈다
       } else mk('수정', '', () => { holdEdit = { id: d.id, text: d.text }; editStartAt = Date.now(); window.__uifbDiag?.(); render(); editEl?.focus(); });
       mk('지우기', '', async () => { if (ed) holdEdit = null; await draftsApi({ action: 'delete', ids: [d.id] }); toast('지움', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); render(); }); render(); });
-      mk('보관함', 'tostash', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
+      // 어느 분류로 가는지 단추에 적는다(보류할 때 고른 분류, #1867).
+      mk(`보관함 · ${d.label || '미분류'}`, 'tostash', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'update', id: d.id, hold: false }); toast('✓ 보관함으로 옮김', { label: `${d.label || '미분류'} 열기`, fn: () => openSheet(d.label || '') }); render(); });
       // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
       const tgt = sessionById(d.to);
       if (tgt && tgt.tool !== 'codex' && ['working', 'permission'].includes(tgt.status?.state)) {

@@ -194,6 +194,19 @@ test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남�
   } finally { srv.stop(); }
 });
 
+test('보류 글의 보관함 단추에 옮겨 갈 분류가 적힌다 (#1867)', async () => {
+  const drafts = [
+    { id: 1, to: A, text: '분류 있음', label: '디자인', hold: true, at: iso(9000) },
+    { id: 2, to: A, text: '분류 없음', label: null, hold: true, at: iso(8000) },
+  ];
+  const srv = await startServer(makeDir({ drafts }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg.hold .tostash')].map((b) => b.textContent)), ['보관함 · 디자인', '보관함 · 미분류']);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [
