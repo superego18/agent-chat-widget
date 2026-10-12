@@ -7,7 +7,7 @@ const ADJUST_LABELS = {
   backgroundColor: '배경색', opacity: '불투명도', borderRadius: '모서리 반경', borderColor: '테두리 색상', borderWidth: '테두리 두께',
   width: '너비', height: '높이', padding: '안쪽 여백',
   ...Object.fromEntries(Object.entries(SIDE).flatMap(([k, v]) => [[`padding${k}`, `안쪽 여백 ${v}`], [`margin${k}`, `바깥 여백 ${v}`]])),
-  flexDirection: '레이아웃 방향', alignItems: '정렬', justifyContent: '분배', columnGap: '가로 간격', rowGap: '세로 간격',
+  flexDirection: '레이아웃 방향', alignItems: '정렬', justifyContent: '분배', columnGap: '가로 간격', rowGap: '세로 간격', order: '같은 상자 안 순서',
 };
 export const ADJUST_KEYS = Object.keys(ADJUST_LABELS);
 export function adjustText(w) {

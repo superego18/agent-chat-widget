@@ -328,6 +328,9 @@
   .box .btag { position: absolute; left: -2px; bottom: calc(100% + 2px); max-width: min(320px, 80vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #4f46e5; color: #fff; font: 600 11px/18px system-ui, sans-serif; padding: 0 6px; border-radius: 4px; }
   .box.low .btag { bottom: auto; top: 2px; left: 2px; } /* 화면 맨 위 요소는 이름표를 안쪽에 */
   .box .btag:empty { display: none; }
+  .slot { position: fixed; pointer-events: none; outline: 1px dashed #4f46e5; border-radius: 3px; }
+  .slot b { position: absolute; right: 0; top: 0; background: #eef0ff; color: #3730a3; font: 600 10px/14px system-ui, sans-serif; padding: 0 4px; border-radius: 3px; }
+  .adj .apos { align-self: center; font-size: 12px; color: #5a5852; white-space: nowrap; }
 </style>
 <div class="pins" id="pins" hidden></div>
 <div class="peek" id="peek" hidden role="status"></div>
@@ -350,7 +353,7 @@
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aup" id="adjDown" title="안쪽 요소로">↓ 안쪽</button><button type="button" class="aup" id="adjUp" title="감싼 요소로">↑ 감싼 요소</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
-<div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div>`;
+<div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div><div id="slots"></div>`;
 
   const $ = (s) => root.getElementById(s);
   $('heading').textContent = `대화/피드백 · ${CFG.label}`;
@@ -1526,6 +1529,11 @@
   // 바꾼 모습은 미리보기라 코드에는 남지 않는다. 보내거나 담거나 위치를 지우면 원래대로 돌린다.
   const SIDES = (p) => [[p + 'Top', 'px', '위'], [p + 'Bottom', 'px', '아래'], [p + 'Left', 'px', '왼쪽'], [p + 'Right', 'px', '오른쪽']];
   const ADJ_ROWS = [
+    ['배치 · 안에 든 것들', null, 'layout'], // 감싼 상자를 찍었을 때 바로 보이게 맨 위에(#1801)
+    ['레이아웃 방향', [['flexDirection', 'select']], 'flex'],
+    ['정렬', [['alignItems', 'select']], 'layout'],
+    ['분배', [['justifyContent', 'select']], 'layout'],
+    ['간격', [['columnGap', 'px', '가로'], ['rowGap', 'px', '세로']], 'layout'],
     ['텍스트'],
     ['내용', [['text', 'text']]],
     ['글꼴', [['fontFamily', 'text']]],
@@ -1540,11 +1548,6 @@
     ['여백'],
     ['안쪽 여백', SIDES('padding')],
     ['바깥 여백', SIDES('margin')],
-    ['배치', null, 'layout'],
-    ['레이아웃 방향', [['flexDirection', 'select']], 'flex'],
-    ['정렬', [['alignItems', 'select']], 'layout'],
-    ['분배', [['justifyContent', 'select']], 'layout'],
-    ['간격', [['columnGap', 'px', '가로'], ['rowGap', 'px', '세로']], 'layout'],
   ];
   const ADJ_OPTS = {
     fontWeight: ['100', '200', '300', '400', '500', '600', '700', '800', '900'].map((w) => [w, w]),
@@ -1556,6 +1559,7 @@
   let adj = null; // { el, style: 원래 style 속성, text: 원래 글자(자식 요소가 있으면 null), from: 원래 값, layout: flex·grid 여부, flex }
   function whereEl() {
     if (!where?.selector || where.selector.startsWith(WIDGET_PREFIX) || where.url !== here()) return null;
+    if (adj?.el.isConnected) return adj.el; // 순서를 옮겨 보면 선택자가 다른 요소를 가리킬 수 있다
     try { return document.querySelector(where.selector); } catch { return null; }
   }
   const hexOf = (c) => { const n = String(c).match(/[\d.]+/g); return !n || (n.length > 3 && +n[3] === 0) ? '투명' : '#' + n.slice(0, 3).map((x) => Math.round(+x).toString(16).padStart(2, '0')).join(''); };
@@ -1563,7 +1567,9 @@
     const { el } = adj;
     if (adj.style === null) el.removeAttribute('style'); else el.setAttribute('style', adj.style);
     if (adj.text !== null) el.textContent = ch.text ? ch.text.to : adj.text;
-    for (const [k, v] of Object.entries(ch)) if (k !== 'text') el.style[k] = v.to;
+    adj.parent.insertBefore(el, adj.next?.parentNode === adj.parent ? adj.next : null);
+    if (ch.order) { const others = sibsOf(el).filter((x) => x !== el), i = parseInt(ch.order.to) - 1; el.parentElement.insertBefore(el, others[i] || others[others.length - 1].nextSibling); }
+    for (const [k, v] of Object.entries(ch)) if (k !== 'text' && k !== 'order') el.style[k] = v.to;
     // 테두리가 없던 요소는 색·두께만 바꾸면 보이지 않으므로 미리보기에서만 실선을 켠다(보내는 값에는 넣지 않는다).
     if ((ch.borderColor || ch.borderWidth) && getComputedStyle(el).borderTopStyle === 'none') el.style.borderStyle = 'solid';
   }
@@ -1580,7 +1586,9 @@
       const prev = where.adjust || {};
       const now = Object.fromEntries(ADJ_KEYS.map((k) => [k, cs[k]]));
       Object.assign(now, { text: el.textContent.trim(), color: hexOf(cs.color), backgroundColor: hexOf(cs.backgroundColor), borderColor: hexOf(cs.borderTopColor), borderWidth: cs.borderTopWidth, borderRadius: cs.borderTopLeftRadius });
-      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries(ADJ_KEYS.map((k) => [k, prev[k]?.from ?? now[k]])), layout: /flex|grid/.test(cs.display), flex: /flex/.test(cs.display) };
+      const sibs = sibsOf(el);
+      now.order = `${sibs.indexOf(el) + 1}/${sibs.length}`;
+      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries([...ADJ_KEYS, 'order'].map((k) => [k, prev[k]?.from ?? now[k]])), layout: /flex|grid/.test(cs.display), flex: /flex/.test(cs.display), parent: el.parentElement, next: el.nextSibling };
       applyAdjust(prev);
     }
     $('adjWhat').textContent = [where.component, where.text].filter(Boolean).join(' · ') || where.selector;
@@ -1588,6 +1596,23 @@
     $('adjDown').hidden = !adjTrail.length;
     const box = $('adjFields');
     box.textContent = '';
+    const sibs = sibsOf(el);
+    if (sibs.length > 1) {
+      const i = sibs.indexOf(el), h = document.createElement('div'), l = document.createElement('span'), row = document.createElement('div'), pos = document.createElement('span');
+      h.className = 'agroup'; h.textContent = '옮기기 · 같은 상자 안 (점선이 옮길 수 있는 자리)';
+      l.className = 'alabel'; l.textContent = '순서';
+      row.className = 'arow';
+      pos.className = 'apos'; pos.textContent = `${i + 1} / ${sibs.length}`;
+      for (const [id, d, t] of [['adjPrev', -1, '◀ 앞으로'], ['adjNext', 1, '뒤로 ▶']]) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'aup'; b.id = id; b.textContent = t;
+        b.disabled = !sibs[i + d];
+        b.onclick = () => moveOrder(i + d);
+        row.append(b);
+      }
+      row.append(pos);
+      box.append(h, l, row);
+    }
     for (const [label, fields, only] of ADJ_ROWS) {
       if ((only === 'layout' && !adj.layout) || (only === 'flex' && !adj.flex)) continue;
       if (!fields) { const h = document.createElement('div'); h.className = 'agroup'; h.textContent = label; box.append(h); continue; }
@@ -1646,6 +1671,15 @@
   function placeAdjust() {
     if (!adj || $('adj').hidden) return;
     outline(adj.el);
+    const sl = $('slots'), sibs = sibsOf(adj.el);
+    sl.textContent = '';
+    sibs.forEach((x, n) => {
+      if (x === adj.el || sibs.length < 2) return;
+      const r = x.getBoundingClientRect(), d = document.createElement('div'), b = document.createElement('b');
+      d.className = 'slot'; b.textContent = n + 1; d.append(b);
+      Object.assign(d.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+      sl.append(d);
+    });
     const r = adj.el.getBoundingClientRect(), s = $('adj').style, w = Math.min(440, innerWidth - 24);
     const below = innerHeight - r.bottom - 22, above = r.top - 38; // 위쪽은 이름표 자리만큼 더 띄운다
     if (Math.max(below, above) < 180) { s.cssText = ''; return; }
@@ -1661,6 +1695,7 @@
   }
   function closeAdjust() {
     $('adj').hidden = true;
+    $('slots').textContent = '';
     $('box').hidden = true;
     $('panel').hidden = false;
     setWhereLabel();
@@ -1672,6 +1707,19 @@
   $('adjDone').onclick = closeAdjust;
   // 안쪽 요소가 먼저 잡혀 감싼 상자를 찍기 어려우므로, 창에서 한 단계씩 바깥·안쪽으로 옮긴다(#1798). 옮기면 바꿔 보던 값은 원래대로.
   let adjTrail = []; // 바깥으로 옮기기 전 요소들(안쪽으로 되돌아갈 때)
+  // 옮기기: 같은 상자 안에서 순서만 바꿔 본다(#1801). 다른 상자로 옮기면 앱 화면이 깨질 수 있어 하지 않는다.
+  const sibsOf = (el) => (el.parentElement && el.parentElement !== document.documentElement ? [...el.parentElement.children].filter((x) => x !== host && !/^(SCRIPT|STYLE|TEMPLATE|LINK|META)$/.test(x.tagName)) : []);
+  const shortOf = (x) => (x.innerText || x.getAttribute('aria-label') || componentOf(x)).trim().replace(/\s+/g, ' ').slice(0, 20);
+  function moveOrder(j) {
+    const others = sibsOf(adj.el).filter((x) => x !== adj.el), n = others.length + 1;
+    const ch = { ...(where.adjust || {}) };
+    if (`${j + 1}/${n}` === adj.from.order) delete ch.order;
+    else ch.order = { from: adj.from.order, to: `${j + 1}/${n} (${j ? `"${shortOf(others[j - 1])}" 뒤` : `"${shortOf(others[0])}" 앞`})` };
+    if (Object.keys(ch).length) where.adjust = ch; else delete where.adjust;
+    applyAdjust(ch);
+    saveWhere();
+    openAdjust();
+  }
   function moveAdjust(el) {
     revertAdjust();
     where = whereOf(el);

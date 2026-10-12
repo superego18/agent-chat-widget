@@ -95,6 +95,14 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
     await w.idle(300);
     const tag = () => w.eval((r) => r.getElementById('boxTag').textContent);
     assert.equal(await tag(), 'b', '안쪽 요소가 먼저 잡힌다');
+    const order = () => page.evaluate(() => document.getElementById('row').innerText.replace(/\s/g, ''));
+    assert.equal(await w.eval((r) => r.querySelectorAll('#slots .slot').length), 1, '같은 상자 안 옮길 자리가 점선으로');
+    await w.click('#adjNext');
+    assert.equal(await order(), '나가', '같은 상자 안에서 뒤로 옮겨 보인다(#1801)');
+    assert.match(await w.eval((r) => r.getElementById('adjFields').textContent), /2 \/ 2/);
+    assert.equal(await w.eval((r) => r.getElementById('adjNext').disabled), true);
+    await w.click('#adjUp');
+    assert.equal(await order(), '가나', '다른 요소로 옮기면 원래 순서로');
     await w.click('#adjUp');
     assert.equal(await tag(), 'div#row', '감싼 요소로 옮긴다(#1798). React가 아니면 태그 이름');
     assert.equal(await w.eval((r) => r.getElementById('adjUp').disabled), true, 'body 바로 안이면 더 못 올라간다');
