@@ -304,6 +304,9 @@
   .adj { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(440px, calc(100vw - 24px)); max-height: 50vh; overflow: auto; background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 10px 28px rgba(0,0,0,.25); padding: 10px 12px; font-size: 13px; display: grid; gap: 8px; }
   .adj[hidden] { display: none; }
   .adj .ahead { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .adj .aup { flex: 0 0 auto; border: 1px solid rgba(0,0,0,.15); background: #fff; color: #3730a3; border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .adj .aup[hidden] { display: none; }
+  .adj .aup:disabled { color: #b5b3ad; cursor: default; }
   .adj .ahead span { flex: 1; min-width: 0; color: #5a5852; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .adj .afields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: end; }
   .adj .agroup { grid-column: 1 / -1; margin-top: 4px; font-size: 11px; font-weight: 700; color: #3730a3; border-top: 1px solid rgba(0,0,0,.08); padding-top: 6px; }
@@ -346,7 +349,7 @@
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
-<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
+<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aup" id="adjDown" title="안쪽 요소로">↓ 안쪽</button><button type="button" class="aup" id="adjUp" title="감싼 요소로">↑ 감싼 요소</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
 <div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div>`;
 
   const $ = (s) => root.getElementById(s);
@@ -1466,16 +1469,8 @@
     e.stopPropagation();
     const el = pickedEl(e);
     if (el) {
-      if (!pickFor) revertAdjust(); // 새로 찍으면 전에 바꿔 보던 요소는 원래대로
-      const r = el.getBoundingClientRect();
-      where = {
-        url: here(),
-        selector: (pickTarget === 'widget' ? WIDGET_PREFIX : '') + selectorOf(el),
-        text: (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80),
-        rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
-        viewport: { w: innerWidth, h: innerHeight },
-        ...(pickTarget === 'app' ? { component: componentOf(el) } : {}),
-      };
+      if (!pickFor) { revertAdjust(); adjTrail = []; } // 새로 찍으면 전에 바꿔 보던 요소는 원래대로
+      where = whereOf(el);
       if (pickFor) {
         draftsApi({ action: 'update', id: pickFor, where });
         where = null;
@@ -1491,6 +1486,17 @@
     // 앱 요소를 찍으면 값 바꾸기 창을 그 요소 옆에 바로 연다(#1792). 위치만 붙이려면 완료를 누르면 된다.
     if (!repicked && whereEl()) openAdjust();
     else if (!repicked && !touchScreen()) $('input').focus();
+  }
+  function whereOf(el) {
+    const r = el.getBoundingClientRect();
+    return {
+      url: here(),
+      selector: (pickTarget === 'widget' ? WIDGET_PREFIX : '') + selectorOf(el),
+      text: (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80),
+      rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+      viewport: { w: innerWidth, h: innerHeight },
+      ...(pickTarget === 'app' ? { component: componentOf(el) } : {}),
+    };
   }
   function onKey(e) { if (e.key === 'Escape') { pickFor = null; stopPick(); } }
   $('pickCancel').onclick = () => { pickFor = null; stopPick(); };
@@ -1578,6 +1584,8 @@
       applyAdjust(prev);
     }
     $('adjWhat').textContent = [where.component, where.text].filter(Boolean).join(' · ') || where.selector;
+    $('adjUp').disabled = !el.parentElement || el.parentElement === document.body;
+    $('adjDown').hidden = !adjTrail.length;
     const box = $('adjFields');
     box.textContent = '';
     for (const [label, fields, only] of ADJ_ROWS) {
@@ -1662,6 +1670,17 @@
   }
   $('adjBtn').onclick = openAdjust;
   $('adjDone').onclick = closeAdjust;
+  // 안쪽 요소가 먼저 잡혀 감싼 상자를 찍기 어려우므로, 창에서 한 단계씩 바깥·안쪽으로 옮긴다(#1798). 옮기면 바꿔 보던 값은 원래대로.
+  let adjTrail = []; // 바깥으로 옮기기 전 요소들(안쪽으로 되돌아갈 때)
+  function moveAdjust(el) {
+    revertAdjust();
+    where = whereOf(el);
+    setWhereLabel();
+    saveWhere();
+    openAdjust();
+  }
+  $('adjUp').onclick = () => { const el = whereEl(); if (el?.parentElement && el.parentElement !== document.body) { adjTrail.push(el); moveAdjust(el.parentElement); } };
+  $('adjDown').onclick = () => { const el = adjTrail.pop(); if (el?.isConnected) moveAdjust(el); else { adjTrail = []; $('adjDown').hidden = true; } };
   $('adjReset').onclick = () => { delete where.adjust; if (adj) applyAdjust({}); saveWhere(); openAdjust(); };
 
   try {

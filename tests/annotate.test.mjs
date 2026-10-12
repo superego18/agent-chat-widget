@@ -90,9 +90,17 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
   try {
     const { w, page, ctx } = await openWidget(srv);
     await w.click('#pick');
-    await page.mouse.click(375, 30); // 가운데 위는 안내줄이 가린다
+    const g = await page.evaluate(() => { const b = document.querySelector('#row b').getBoundingClientRect(); return { x: b.left + 2, y: b.top + 4 }; });
+    await page.mouse.click(g.x, g.y);
     await w.idle(300);
-    assert.equal(await w.eval((r) => r.getElementById('boxTag').textContent), 'div#row', 'React가 아니면 태그 이름');
+    const tag = () => w.eval((r) => r.getElementById('boxTag').textContent);
+    assert.equal(await tag(), 'b', '안쪽 요소가 먼저 잡힌다');
+    await w.click('#adjUp');
+    assert.equal(await tag(), 'div#row', '감싼 요소로 옮긴다(#1798). React가 아니면 태그 이름');
+    assert.equal(await w.eval((r) => r.getElementById('adjUp').disabled), true, 'body 바로 안이면 더 못 올라간다');
+    await w.click('#adjDown');
+    assert.equal(await tag(), 'b', '안쪽으로 되돌아온다');
+    await w.click('#adjUp');
     for (const k of ['flexDirection', 'alignItems', 'justifyContent', 'columnGap', 'rowGap']) assert.ok(await w.eval((r, k) => !!r.querySelector(`#adjFields [data-k="${k}"]`), k), k);
     await w.eval((r) => { const s = r.querySelector('#adjFields [data-k="justifyContent"]'); s.value = 'space-between'; s.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).justifyContent), 'space-between');
