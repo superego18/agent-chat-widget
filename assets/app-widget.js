@@ -301,16 +301,24 @@
   .pin { position: fixed; transform: translate(-40%, -40%); min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; border: 2px solid #fff; background: #4f46e5; color: #fff; font-size: 12px; font-weight: 700; line-height: 18px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
   .where .adjbtn { color: #4f46e5; font-weight: 600; white-space: nowrap; }
   .dhead .dbtns { display: flex; gap: 4px; }
-  .adj { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(420px, calc(100vw - 24px)); max-height: 45vh; overflow: auto; background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 10px 28px rgba(0,0,0,.25); padding: 10px 12px; font-size: 13px; display: grid; gap: 8px; }
+  .adj { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(440px, calc(100vw - 24px)); max-height: 50vh; overflow: auto; background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 10px 28px rgba(0,0,0,.25); padding: 10px 12px; font-size: 13px; display: grid; gap: 8px; }
   .adj[hidden] { display: none; }
   .adj .ahead { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
   .adj .ahead span { flex: 1; min-width: 0; color: #5a5852; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .adj .afields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center; }
-  .adj label { font-size: 12px; color: #5a5852; }
+  .adj .afields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: end; }
+  .adj .agroup { grid-column: 1 / -1; margin-top: 4px; font-size: 11px; font-weight: 700; color: #3730a3; border-top: 1px solid rgba(0,0,0,.08); padding-top: 6px; }
+  .adj .agroup:first-child { margin-top: 0; border-top: 0; padding-top: 0; }
+  .adj .alabel { font-size: 12px; color: #5a5852; padding-bottom: 7px; white-space: nowrap; }
+  .adj .arow { display: flex; gap: 6px; min-width: 0; }
+  .adj .afield { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .adj .afield.color { flex: 0 0 auto; }
+  .adj .afield small { font-size: 10.5px; color: #8a8780; }
+  .adj .afield input, .adj .afield select { width: 100%; }
+  .adj .afield input[type=color] { width: 48px; }
   .adj input, .adj select { font-size: 16px; padding: 4px 6px; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; min-width: 0; background: #fff; color: inherit; }
   .adj input[type=color] { padding: 0 2px; width: 48px; height: 30px; }
   .adj .changed { border-color: #4f46e5; background: #eef0ff; }
-  .adj .aacts { display: flex; justify-content: flex-end; gap: 8px; }
+  .adj .aacts { position: sticky; bottom: -10px; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -12px -10px; padding: 8px 12px 10px; background: #fff; border-top: 1px solid rgba(0,0,0,.08); } /* 항목이 많아 스크롤해도 완료 단추는 늘 보이게 */
   .adj .aacts button { border: 0; border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; background: #efeee9; color: #1c1b18; }
   .adj .aacts .primary { background: #1c1b18; color: #fff; }
   .box[hidden] { display: none; }
@@ -1493,10 +1501,39 @@
     $('adjBtn').hidden = !whereEl();
   }
 
-  // 값 바꾸기: 앱에서 찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값(where.adjust: {키: {from, to}})을 위치와 함께 보낸다.
+  // 값 바꾸기: 앱에서 찍은 요소의 글자·색·크기·여백·배치를 그 자리에서 바꿔 보고, 바꾼 값(where.adjust: {키: {from, to}})을 위치와 함께 보낸다.
+  // 항목은 Codex 데스크톱 앱 브라우저의 "조정"과 같게 묶었다(#1785, #1787). 배치는 flex·grid 요소에만 보인다.
   // 바꾼 모습은 미리보기라 코드에는 남지 않는다. 보내거나 담거나 위치를 지우면 원래대로 돌린다.
-  const ADJ = [['text', '글자', 'text'], ['fontSize', '글자 크기', 'px'], ['fontWeight', '굵기', 'weight'], ['color', '글자색', 'color'], ['backgroundColor', '배경색', 'color'], ['padding', '안쪽 여백', 'text'], ['opacity', '투명도', 'opacity']];
-  let adj = null; // { el, style: 원래 style 속성, text: 원래 글자(자식 요소가 있으면 null), from: 원래 값 }
+  const SIDES = (p) => [[p + 'Top', 'px', '위'], [p + 'Bottom', 'px', '아래'], [p + 'Left', 'px', '왼쪽'], [p + 'Right', 'px', '오른쪽']];
+  const ADJ_ROWS = [
+    ['텍스트'],
+    ['내용', [['text', 'text']]],
+    ['글꼴', [['fontFamily', 'text']]],
+    ['글꼴 크기 · 굵기', [['fontSize', 'px', '크기'], ['fontWeight', 'weight', '굵기']]],
+    ['글자 색상', [['color', 'color']]],
+    ['배경·테두리'],
+    ['배경색 · 불투명도', [['backgroundColor', 'color', '배경색'], ['opacity', 'opacity', '불투명도']]],
+    ['모서리 반경', [['borderRadius', 'px']]],
+    ['테두리 색상 · 두께', [['borderColor', 'color', '색상'], ['borderWidth', 'px', '두께']]],
+    ['크기'],
+    ['너비 · 높이', [['width', 'px', '너비'], ['height', 'px', '높이']]],
+    ['여백'],
+    ['안쪽 여백', SIDES('padding')],
+    ['바깥 여백', SIDES('margin')],
+    ['배치', null, 'layout'],
+    ['레이아웃 방향', [['flexDirection', 'select']], 'flex'],
+    ['정렬', [['alignItems', 'select']], 'layout'],
+    ['분배', [['justifyContent', 'select']], 'layout'],
+    ['간격', [['columnGap', 'px', '가로'], ['rowGap', 'px', '세로']], 'layout'],
+  ];
+  const ADJ_OPTS = {
+    fontWeight: ['100', '200', '300', '400', '500', '600', '700', '800', '900'].map((w) => [w, w]),
+    flexDirection: [['row', '가로'], ['row-reverse', '가로 역방향'], ['column', '세로'], ['column-reverse', '세로 역방향']],
+    alignItems: [['flex-start', '시작'], ['center', '가운데'], ['flex-end', '끝'], ['stretch', '늘리기'], ['baseline', '기준선']],
+    justifyContent: [['flex-start', '시작'], ['center', '가운데'], ['flex-end', '끝'], ['space-between', '사이 간격'], ['space-around', '주변 간격'], ['space-evenly', '균등 간격']],
+  };
+  const ADJ_KEYS = ADJ_ROWS.flatMap(([, f]) => (f || []).map(([k]) => k));
+  let adj = null; // { el, style: 원래 style 속성, text: 원래 글자(자식 요소가 있으면 null), from: 원래 값, layout: flex·grid 여부, flex }
   function whereEl() {
     if (!where?.selector || where.selector.startsWith(WIDGET_PREFIX) || where.url !== here()) return null;
     try { return document.querySelector(where.selector); } catch { return null; }
@@ -1507,6 +1544,8 @@
     if (adj.style === null) el.removeAttribute('style'); else el.setAttribute('style', adj.style);
     if (adj.text !== null) el.textContent = ch.text ? ch.text.to : adj.text;
     for (const [k, v] of Object.entries(ch)) if (k !== 'text') el.style[k] = v.to;
+    // 테두리가 없던 요소는 색·두께만 바꾸면 보이지 않으므로 미리보기에서만 실선을 켠다(보내는 값에는 넣지 않는다).
+    if ((ch.borderColor || ch.borderWidth) && getComputedStyle(el).borderTopStyle === 'none') el.style.borderStyle = 'solid';
   }
   function revertAdjust() {
     if (adj?.el.isConnected) applyAdjust({});
@@ -1519,45 +1558,60 @@
       revertAdjust();
       const cs = getComputedStyle(el);
       const prev = where.adjust || {};
-      const now = { text: el.textContent.trim(), fontSize: cs.fontSize, fontWeight: cs.fontWeight, color: hexOf(cs.color), backgroundColor: hexOf(cs.backgroundColor), padding: cs.padding, opacity: cs.opacity };
-      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries(ADJ.map(([k]) => [k, prev[k]?.from ?? now[k]])) };
+      const now = Object.fromEntries(ADJ_KEYS.map((k) => [k, cs[k]]));
+      Object.assign(now, { text: el.textContent.trim(), color: hexOf(cs.color), backgroundColor: hexOf(cs.backgroundColor), borderColor: hexOf(cs.borderTopColor), borderWidth: cs.borderTopWidth, borderRadius: cs.borderTopLeftRadius });
+      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries(ADJ_KEYS.map((k) => [k, prev[k]?.from ?? now[k]])), layout: /flex|grid/.test(cs.display), flex: /flex/.test(cs.display) };
       applyAdjust(prev);
     }
     $('adjWhat').textContent = where.text || where.selector;
     const box = $('adjFields');
     box.textContent = '';
-    for (const [k, label, type] of ADJ) {
-      if (k === 'text' && adj.text === null) continue;
-      const from = adj.from[k];
-      const cur = where.adjust?.[k]?.to ?? from;
-      let inp;
-      if (type === 'weight') {
-        inp = document.createElement('select');
-        for (const w of ['100', '200', '300', '400', '500', '600', '700', '800', '900']) { const o = document.createElement('option'); o.value = o.textContent = w; inp.append(o); }
-      } else {
-        inp = document.createElement('input');
-        inp.type = type === 'px' || type === 'opacity' ? 'number' : type === 'color' ? 'color' : 'text';
-        if (type === 'px') { inp.min = '1'; inp.step = '1'; }
-        if (type === 'opacity') { inp.min = '0'; inp.max = '1'; inp.step = '0.1'; }
+    for (const [label, fields, only] of ADJ_ROWS) {
+      if ((only === 'layout' && !adj.layout) || (only === 'flex' && !adj.flex)) continue;
+      if (!fields) { const h = document.createElement('div'); h.className = 'agroup'; h.textContent = label; box.append(h); continue; }
+      const list = fields.filter(([k]) => k !== 'text' || adj.text !== null);
+      if (!list.length) continue;
+      const row = document.createElement('div');
+      row.className = 'arow';
+      for (const [k, type, cap] of list) {
+        const from = adj.from[k];
+        const cur = where.adjust?.[k]?.to ?? from;
+        let inp;
+        if (ADJ_OPTS[k]) {
+          inp = document.createElement('select');
+          const opts = ADJ_OPTS[k].some(([v]) => v === from) ? ADJ_OPTS[k] : [[from, from], ...ADJ_OPTS[k]];
+          for (const [v, t] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = t; inp.append(o); }
+        } else {
+          inp = document.createElement('input');
+          inp.type = type === 'px' || type === 'opacity' ? 'number' : type === 'color' ? 'color' : 'text';
+          if (type === 'px') { inp.min = '0'; inp.step = '1'; }
+          if (type === 'opacity') { inp.min = '0'; inp.max = '1'; inp.step = '0.1'; }
+        }
+        inp.dataset.k = k;
+        inp.id = 'adj-' + k;
+        inp.value = type === 'px' ? (Number.isFinite(parseFloat(cur)) ? String(Math.round(parseFloat(cur) * 10) / 10) : '') : type === 'color' && cur === '투명' ? '#ffffff' : cur;
+        inp.setAttribute('aria-label', cap ? `${label.split(' · ')[0]} ${cap}` : label);
+        inp.classList.toggle('changed', cur !== from);
+        inp.addEventListener('input', () => {
+          const to = type === 'px' ? (inp.value ? inp.value + 'px' : from) : inp.value.trim() || from;
+          const ch = { ...(where.adjust || {}) };
+          if (to === from) delete ch[k]; else ch[k] = { from, to };
+          if (Object.keys(ch).length) where.adjust = ch; else delete where.adjust;
+          inp.classList.toggle('changed', to !== from);
+          applyAdjust(ch);
+          outline(el);
+          saveWhere();
+        });
+        const f = document.createElement('label');
+        f.className = 'afield' + (type === 'color' ? ' color' : '');
+        if (cap && list.length > 1) { const c = document.createElement('small'); c.textContent = cap; f.append(c); }
+        f.append(inp);
+        row.append(f);
       }
-      inp.dataset.k = k;
-      inp.id = 'adj-' + k;
-      inp.value = type === 'px' ? String(parseFloat(cur)) : type === 'color' && cur === '투명' ? '#ffffff' : cur;
-      inp.classList.toggle('changed', cur !== from);
-      inp.addEventListener('input', () => {
-        const to = type === 'px' ? (inp.value ? inp.value + 'px' : from) : inp.value.trim() || from;
-        const ch = { ...(where.adjust || {}) };
-        if (to === from) delete ch[k]; else ch[k] = { from, to };
-        if (Object.keys(ch).length) where.adjust = ch; else delete where.adjust;
-        inp.classList.toggle('changed', to !== from);
-        applyAdjust(ch);
-        outline(el);
-        saveWhere();
-      });
-      const l = document.createElement('label');
-      l.htmlFor = inp.id;
+      const l = document.createElement('span');
+      l.className = 'alabel';
       l.textContent = label;
-      box.append(l, inp);
+      box.append(l, row);
     }
     $('panel').hidden = true;
     $('adj').hidden = false;

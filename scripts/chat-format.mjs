@@ -1,7 +1,14 @@
 import fs from 'node:fs';
 
 // 값 바꾸기(대화창에서 찍은 요소의 값을 바꿔 본 것, where.adjust)를 세션이 읽을 한 줄로. 없으면 빈 글.
-const ADJUST_LABELS = { text: '글자', fontSize: '글자 크기', fontWeight: '굵기', color: '글자색', backgroundColor: '배경색', padding: '안쪽 여백', opacity: '투명도' };
+const SIDE = { Top: '위', Bottom: '아래', Left: '왼쪽', Right: '오른쪽' };
+const ADJUST_LABELS = {
+  text: '내용', fontFamily: '글꼴', fontSize: '글꼴 크기', fontWeight: '글꼴 굵기', color: '글자 색상',
+  backgroundColor: '배경색', opacity: '불투명도', borderRadius: '모서리 반경', borderColor: '테두리 색상', borderWidth: '테두리 두께',
+  width: '너비', height: '높이', padding: '안쪽 여백',
+  ...Object.fromEntries(Object.entries(SIDE).flatMap(([k, v]) => [[`padding${k}`, `안쪽 여백 ${v}`], [`margin${k}`, `바깥 여백 ${v}`]])),
+  flexDirection: '레이아웃 방향', alignItems: '정렬', justifyContent: '분배', columnGap: '가로 간격', rowGap: '세로 간격',
+};
 export const ADJUST_KEYS = Object.keys(ADJUST_LABELS);
 export function adjustText(w) {
   const e = Object.entries(w?.adjust || {}).filter(([k]) => ADJUST_LABELS[k]);

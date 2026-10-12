@@ -56,8 +56,12 @@ test('찍은 요소의 값을 바꿔 보면 화면에 바로 보이고, 보낼 �
     await w.click('#adjBtn');
     assert.equal(await w.eval((r) => r.getElementById('adj').hidden), false);
     assert.equal(await w.eval((r) => r.getElementById('panel').hidden), true, '바꾸는 동안 대화창은 비킨다');
+    assert.equal(await w.eval((r) => r.querySelectorAll('#adjFields [data-k]').length), 20, 'Codex 조정과 같은 20개(#1785)');
+    assert.equal(await w.eval((r) => !!r.querySelector('#adjFields [data-k="justifyContent"]')), false, '배치는 flex·grid 요소에만');
     await w.eval((r) => { const i = r.querySelector('#adjFields [data-k="fontSize"]'); i.value = '20'; i.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await h1Size(page), '20px', '바꾼 값이 화면에 바로 보인다');
+    await w.eval((r) => { const i = r.querySelector('#adjFields [data-k="marginTop"]'); i.value = '40'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+    await w.eval((r) => { const i = r.querySelector('#adjFields [data-k="marginTop"]'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); });
     await w.click('#adjDone');
     assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false);
     assert.match(await w.eval((r) => r.getElementById('whereText').textContent), /바꾼 값 1개/);
@@ -68,7 +72,24 @@ test('찍은 요소의 값을 바꿔 보면 화면에 바로 보이고, 보낼 �
     const m = readChat(srv).find((x) => x.text === '이 크기로');
     assert.deepEqual(m.where.adjust, { fontSize: { from: before, to: '20px' } });
     assert.equal(await h1Size(page), before, '보낸 뒤에는 원래 모습으로');
-    assert.ok(formatMessage(m, [m]).some((l) => l.includes(`글자 크기 ${before} → 20px`)), '세션이 읽는 글에도 바꾼 값이 적힌다');
+    assert.ok(formatMessage(m, [m]).some((l) => l.includes(`글꼴 크기 ${before} → 20px`)), '세션이 읽는 글에도 바꾼 값이 적힌다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 수 있다 (#1787)', async () => {
+  const dir = makeDir();
+  fs.writeFileSync(path.join(dir, 't.html'), '<!doctype html><meta name="viewport" content="width=device-width"><title>t</title><body><div id="row" style="display:flex;padding:10px"><b>가</b><b>나</b></div><script src="/__uifb/widget.js"></script></body>');
+  const srv = await startServer(dir);
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    await w.click('#pick');
+    await page.mouse.click(375, 30); // 가운데 위는 안내줄이 가린다
+    await w.idle(300);
+    await w.click('#adjBtn');
+    for (const k of ['flexDirection', 'alignItems', 'justifyContent', 'columnGap', 'rowGap']) assert.ok(await w.eval((r, k) => !!r.querySelector(`#adjFields [data-k="${k}"]`), k), k);
+    await w.eval((r) => { const s = r.querySelector('#adjFields [data-k="justifyContent"]'); s.value = 'space-between'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).justifyContent), 'space-between');
     await ctx.close();
   } finally { srv.stop(); }
 });
