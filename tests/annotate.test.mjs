@@ -47,15 +47,18 @@ test('찍은 요소의 값을 바꿔 보면 화면에 바로 보이고, 보낼 �
   try {
     const { w, page, ctx } = await openWidget(srv);
     const before = await h1Size(page);
+    await page.evaluate(() => { document.getElementById('x').__reactFiber$t = { type: 'h1', return: { type: function AppTitle() {} } }; }); // React 개발 모드가 요소에 남기는 것을 흉내
     await w.click('#pick');
     const r = await page.evaluate(() => { const b = document.getElementById('x').getBoundingClientRect(); return { x: b.left + 4, y: b.bottom - 4 }; });
     await page.mouse.click(r.x, r.y);
     await w.idle(300);
-    assert.equal(await w.eval((r) => r.getElementById('adjBtn').hidden), false, '앱 요소를 찍으면 값 바꾸기 단추가 보인다');
-
-    await w.click('#adjBtn');
-    assert.equal(await w.eval((r) => r.getElementById('adj').hidden), false);
+    assert.equal(await w.eval((r) => r.getElementById('adj').hidden), false, '앱 요소를 찍으면 값 바꾸기 창이 바로 열린다(#1792)');
     assert.equal(await w.eval((r) => r.getElementById('panel').hidden), true, '바꾸는 동안 대화창은 비킨다');
+    assert.equal(await w.eval((r) => r.getElementById('boxTag').textContent), 'AppTitle', '찍은 요소 테두리에 컴포넌트 이름');
+    assert.match(await w.eval((r) => r.getElementById('adjWhat').textContent), /^AppTitle · /);
+    const near = await page.evaluate(() => document.getElementById('x').getBoundingClientRect().bottom);
+    const top = await w.eval((r) => r.getElementById('adj').getBoundingClientRect().top);
+    assert.ok(top > near && top - near < 20, `창이 요소 바로 아래에 붙는다 (${near} → ${top})`);
     assert.equal(await w.eval((r) => r.querySelectorAll('#adjFields [data-k]').length), 20, 'Codex 조정과 같은 20개(#1785)');
     assert.equal(await w.eval((r) => !!r.querySelector('#adjFields [data-k="justifyContent"]')), false, '배치는 flex·grid 요소에만');
     await w.eval((r) => { const i = r.querySelector('#adjFields [data-k="fontSize"]'); i.value = '20'; i.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -65,14 +68,17 @@ test('찍은 요소의 값을 바꿔 보면 화면에 바로 보이고, 보낼 �
     await w.click('#adjDone');
     assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false);
     assert.match(await w.eval((r) => r.getElementById('whereText').textContent), /바꾼 값 1개/);
+    assert.equal(await w.eval((r) => r.getElementById('adjBtn').hidden), false, '닫은 뒤에도 위치 줄에서 다시 열 수 있다');
 
     await w.type('이 크기로');
     await w.click('#form button[type="submit"]');
     await w.idle(1200);
     const m = readChat(srv).find((x) => x.text === '이 크기로');
     assert.deepEqual(m.where.adjust, { fontSize: { from: before, to: '20px' } });
+    assert.equal(m.where.component, 'AppTitle');
     assert.equal(await h1Size(page), before, '보낸 뒤에는 원래 모습으로');
     assert.ok(formatMessage(m, [m]).some((l) => l.includes(`글꼴 크기 ${before} → 20px`)), '세션이 읽는 글에도 바꾼 값이 적힌다');
+    assert.ok(formatMessage(m, [m]).some((l) => l.includes('컴포넌트 AppTitle')), '컴포넌트 이름도 적힌다');
     await ctx.close();
   } finally { srv.stop(); }
 });
@@ -86,7 +92,7 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
     await w.click('#pick');
     await page.mouse.click(375, 30); // 가운데 위는 안내줄이 가린다
     await w.idle(300);
-    await w.click('#adjBtn');
+    assert.equal(await w.eval((r) => r.getElementById('boxTag').textContent), 'div#row', 'React가 아니면 태그 이름');
     for (const k of ['flexDirection', 'alignItems', 'justifyContent', 'columnGap', 'rowGap']) assert.ok(await w.eval((r, k) => !!r.querySelector(`#adjFields [data-k="${k}"]`), k), k);
     await w.eval((r) => { const s = r.querySelector('#adjFields [data-k="justifyContent"]'); s.value = 'space-between'; s.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('row')).justifyContent), 'space-between');

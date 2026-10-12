@@ -100,7 +100,7 @@ function cleanWhere(w) {
   const adj = w.adjust && typeof w.adjust === 'object'
     ? Object.fromEntries(ADJUST_KEYS.filter((k) => w.adjust[k]).map((k) => [k, { from: String(w.adjust[k].from ?? '').slice(0, 120), to: String(w.adjust[k].to ?? '').slice(0, 120) }]))
     : {};
-  return { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), rect: num(w.rect), viewport: num(w.viewport), ...(Object.keys(adj).length ? { adjust: adj } : {}) };
+  return { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), component: str(w.component, 80), rect: num(w.rect), viewport: num(w.viewport), ...(Object.keys(adj).length ? { adjust: adj } : {}) };
 }
 
 // ── 알림(웹 푸시) 구독 ──
@@ -432,7 +432,7 @@ const cleanLabel = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0,
 function draftText(d) {
   const lines = [d.text];
   if (d.where?.url || d.where?.selector) {
-    lines.push(`위치(${shortTime(d.at)} 저장${d.commit ? ` · 커밋 ${d.commit}` : ''} 기준): ${d.where.url || ''}${d.where.selector ? ' · ' + d.where.selector : ''}${d.where.text ? ` · 당시 문구 "${d.where.text}"` : ''}`);
+    lines.push(`위치(${shortTime(d.at)} 저장${d.commit ? ` · 커밋 ${d.commit}` : ''} 기준): ${d.where.url || ''}${d.where.selector ? ' · ' + d.where.selector : ''}${d.where.component ? ' · 컴포넌트 ' + d.where.component : ''}${d.where.text ? ` · 당시 문구 "${d.where.text}"` : ''}`);
     if (adjustText(d.where)) lines.push(adjustText(d.where));
   }
   if (d.round || d.device) lines.push(`(${[d.round ? `${d.round}차 비교 페이지를 보다가` : '', d.device === 'mobile' ? '모바일에서' : d.device === 'desktop' ? '데스크톱에서' : ''].filter(Boolean).join(' ')} 남김)`);
@@ -542,7 +542,7 @@ const QUEUE_PREFIX = '[대화/피드백 · ';
 // 메시지는 인자나 환경 변수로만 넘겨 셸이 해석하지 않게 한다(Windows는 codex.cmd 라서 PowerShell 로 부른다).
 function queueToCodex(session, entry) {
   const where = entry.where?.url || entry.where?.selector
-    ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}${adjustText(entry.where) ? '\n' + adjustText(entry.where) : ''}`
+    ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.component ? ' · 컴포넌트 ' + entry.where.component : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}${adjustText(entry.where) ? '\n' + adjustText(entry.where) : ''}`
     : '';
   const src = (entry.context === 'app' ? '앱 화면' : '비교 페이지') + (entry.device === 'mobile' ? ' · 모바일' : entry.device === 'desktop' ? ' · 데스크톱' : '');
   queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`);

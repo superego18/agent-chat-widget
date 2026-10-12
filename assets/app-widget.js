@@ -322,6 +322,9 @@
   .adj .aacts button { border: 0; border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; background: #efeee9; color: #1c1b18; }
   .adj .aacts .primary { background: #1c1b18; color: #fff; }
   .box[hidden] { display: none; }
+  .box .btag { position: absolute; left: -2px; bottom: calc(100% + 2px); max-width: min(320px, 80vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #4f46e5; color: #fff; font: 600 11px/18px system-ui, sans-serif; padding: 0 6px; border-radius: 4px; }
+  .box.low .btag { bottom: auto; top: 2px; left: 2px; } /* 화면 맨 위 요소는 이름표를 안쪽에 */
+  .box .btag:empty { display: none; }
 </style>
 <div class="pins" id="pins" hidden></div>
 <div class="peek" id="peek" hidden role="status"></div>
@@ -344,7 +347,7 @@
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
-<div class="box" id="box" hidden></div>`;
+<div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div>`;
 
   const $ = (s) => root.getElementById(s);
   $('heading').textContent = `대화/피드백 · ${CFG.label}`;
@@ -431,6 +434,16 @@
       parts.unshift(p);
     }
     return parts.join(' > ');
+  }
+  // 찍은 요소를 그린 React 컴포넌트 이름(개발 모드에서만 남아 있다). 없으면 태그 이름(#1792).
+  function componentOf(el) {
+    const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$'));
+    for (let f = key && el[key]; f; f = f.return) {
+      const t = f.type?.render || f.type?.type || f.type;
+      const n = typeof t === 'function' ? f.type.displayName || t.displayName || t.name : '';
+      if (n && /^[A-Z]/.test(n)) return n;
+    }
+    return el.tagName.toLowerCase() + (el.id ? '#' + el.id : el.classList[0] ? '.' + el.classList[0] : '');
   }
 
   const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
@@ -1444,9 +1457,7 @@
   function onMove(e) {
     const el = pickTarget === 'widget' ? root.elementFromPoint(e.clientX, e.clientY) : document.elementFromPoint(e.clientX, e.clientY);
     if (!el || el === host || (pickTarget === 'widget' && $('hint').contains(el))) { $('box').hidden = true; return; }
-    const r = el.getBoundingClientRect();
-    Object.assign($('box').style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
-    $('box').hidden = false;
+    outline(el);
   }
   function onPick(e) {
     if (e.composedPath().includes($('hint'))) return;
@@ -1463,6 +1474,7 @@
         text: (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80),
         rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
         viewport: { w: innerWidth, h: innerHeight },
+        ...(pickTarget === 'app' ? { component: componentOf(el) } : {}),
       };
       if (pickFor) {
         draftsApi({ action: 'update', id: pickFor, where });
@@ -1476,7 +1488,9 @@
     const repicked = pickFor;
     pickFor = null;
     stopPick();
-    if (!repicked && !touchScreen()) $('input').focus();
+    // 앱 요소를 찍으면 값 바꾸기 창을 그 요소 옆에 바로 연다(#1792). 위치만 붙이려면 완료를 누르면 된다.
+    if (!repicked && whereEl()) openAdjust();
+    else if (!repicked && !touchScreen()) $('input').focus();
   }
   function onKey(e) { if (e.key === 'Escape') { pickFor = null; stopPick(); } }
   $('pickCancel').onclick = () => { pickFor = null; stopPick(); };
@@ -1563,7 +1577,7 @@
       adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries(ADJ_KEYS.map((k) => [k, prev[k]?.from ?? now[k]])), layout: /flex|grid/.test(cs.display), flex: /flex/.test(cs.display) };
       applyAdjust(prev);
     }
-    $('adjWhat').textContent = where.text || where.selector;
+    $('adjWhat').textContent = [where.component, where.text].filter(Boolean).join(' · ') || where.selector;
     const box = $('adjFields');
     box.textContent = '';
     for (const [label, fields, only] of ADJ_ROWS) {
@@ -1616,12 +1630,25 @@
     $('panel').hidden = true;
     $('adj').hidden = false;
     renderPins();
-    if (el.getBoundingClientRect().bottom > innerHeight * 0.5) el.scrollIntoView({ block: 'start' });
-    setTimeout(() => outline(el), 50);
+    const r = el.getBoundingClientRect();
+    if (r.top < 0 || r.bottom > innerHeight) el.scrollIntoView({ block: 'nearest' });
+    placeAdjust();
+  }
+  // 값 바꾸기 창을 찍은 요소 바로 아래(자리가 모자라면 위)에 붙인다(#1792). 요소가 화면을 거의 채우면 원래처럼 아래 가운데.
+  function placeAdjust() {
+    if (!adj || $('adj').hidden) return;
+    outline(adj.el);
+    const r = adj.el.getBoundingClientRect(), s = $('adj').style, w = Math.min(440, innerWidth - 24);
+    const below = innerHeight - r.bottom - 22, above = r.top - 38; // 위쪽은 이름표 자리만큼 더 띄운다
+    if (Math.max(below, above) < 180) { s.cssText = ''; return; }
+    const down = below >= 320 || below >= above;
+    Object.assign(s, { left: Math.min(Math.max(12, r.left), innerWidth - w - 12) + 'px', transform: 'none', top: down ? r.bottom + 10 + 'px' : 'auto', bottom: down ? 'auto' : innerHeight - r.top + 26 + 'px', maxHeight: Math.min(down ? below : above, innerHeight * 0.6) + 'px' });
   }
   function outline(el) {
     const r = el.getBoundingClientRect();
     Object.assign($('box').style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    $('box').classList.toggle('low', r.top < 22);
+    $('boxTag').textContent = componentOf(el);
     $('box').hidden = false;
   }
   function closeAdjust() {
@@ -1631,6 +1658,7 @@
     setWhereLabel();
     saveWhere();
     renderPins();
+    if (!touchScreen()) $('input').focus();
   }
   $('adjBtn').onclick = openAdjust;
   $('adjDone').onclick = closeAdjust;
@@ -1840,7 +1868,7 @@
   }
   const pinEl = new WeakMap();
   let pinRaf = 0;
-  const queuePins = () => { if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; renderPins(); }); };
+  const queuePins = () => { if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; renderPins(); placeAdjust(); }); };
   addEventListener('scroll', queuePins, { capture: true, passive: true });
   addEventListener('resize', queuePins);
   setInterval(queuePins, 1000); // 앱 화면이 바뀌어 요소가 움직이거나 사라질 때

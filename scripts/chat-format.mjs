@@ -30,7 +30,7 @@ export function formatMessage(m, all) {
   else if (orig) lines.push(`    ${label} [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
   // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
   if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
-    lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
+    lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.component ? ' · 컴포넌트 ' + m.where.component : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
     if (adjustText(m.where)) lines.push(`    ${adjustText(m.where)}`);
   }
   return lines;
