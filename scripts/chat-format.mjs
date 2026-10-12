@@ -1,4 +1,12 @@
 import fs from 'node:fs';
+
+// 값 바꾸기(대화창에서 찍은 요소의 값을 바꿔 본 것, where.adjust)를 세션이 읽을 한 줄로. 없으면 빈 글.
+const ADJUST_LABELS = { text: '글자', fontSize: '글자 크기', fontWeight: '굵기', color: '글자색', backgroundColor: '배경색', padding: '안쪽 여백', opacity: '투명도' };
+export const ADJUST_KEYS = Object.keys(ADJUST_LABELS);
+export function adjustText(w) {
+  const e = Object.entries(w?.adjust || {}).filter(([k]) => ADJUST_LABELS[k]);
+  return e.length ? '바꿔 본 값: ' + e.map(([k, v]) => `${ADJUST_LABELS[k]} ${v.from} → ${v.to}`).join(', ') : '';
+}
 // 세션에 넘길 대화창 메시지를 사람이 읽을 줄로 만든다. 감시 명령(wait-review)과 중계 훅(hook-relay, 작업 중 끼워 넣기)이 함께 쓴다.
 // all: chat.json 의 전체 메시지(답장 원문을 찾을 때 쓴다).
 export function formatMessage(m, all) {
@@ -16,6 +24,7 @@ export function formatMessage(m, all) {
   // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
   if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
     lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
+    if (adjustText(m.where)) lines.push(`    ${adjustText(m.where)}`);
   }
   return lines;
 }

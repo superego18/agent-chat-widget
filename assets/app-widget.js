@@ -297,8 +297,25 @@
   .hint.bottom { top: auto; bottom: 16px; }
   @media (max-width: 767px) { .panel.picking { height: calc(100dvh - 64px) !important; } }
   .box { position: fixed; pointer-events: none; outline: 2px solid #4f46e5; background: rgba(79,70,229,.08); border-radius: 3px; }
+  .pins[hidden], .pin[hidden] { display: none; }
+  .pin { position: fixed; transform: translate(-40%, -40%); min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; border: 2px solid #fff; background: #4f46e5; color: #fff; font-size: 12px; font-weight: 700; line-height: 18px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  .where .adjbtn { color: #4f46e5; font-weight: 600; white-space: nowrap; }
+  .dhead .dbtns { display: flex; gap: 4px; }
+  .adj { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(420px, calc(100vw - 24px)); max-height: 45vh; overflow: auto; background: #fff; color: #1c1b18; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 10px 28px rgba(0,0,0,.25); padding: 10px 12px; font-size: 13px; display: grid; gap: 8px; }
+  .adj[hidden] { display: none; }
+  .adj .ahead { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .adj .ahead span { flex: 1; min-width: 0; color: #5a5852; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adj .afields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center; }
+  .adj label { font-size: 12px; color: #5a5852; }
+  .adj input, .adj select { font-size: 16px; padding: 4px 6px; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; min-width: 0; background: #fff; color: inherit; }
+  .adj input[type=color] { padding: 0 2px; width: 48px; height: 30px; }
+  .adj .changed { border-color: #4f46e5; background: #eef0ff; }
+  .adj .aacts { display: flex; justify-content: flex-end; gap: 8px; }
+  .adj .aacts button { border: 0; border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; background: #efeee9; color: #1c1b18; }
+  .adj .aacts .primary { background: #1c1b18; color: #fff; }
   .box[hidden] { display: none; }
 </style>
+<div class="pins" id="pins" hidden></div>
 <div class="peek" id="peek" hidden role="status"></div>
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침"><span class="ri">↻</span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
@@ -306,7 +323,7 @@
   <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></div><div class="drafts" id="drafts"></div>
+  <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
@@ -314,10 +331,11 @@
   <div class="toast" id="toast" hidden role="status"></div>
   <div class="reloadcover" id="reloadCover" hidden role="status"><b class="ri">↻</b><span></span></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
-  <div class="where" id="where" hidden><span id="whereText"></span><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
+  <div class="where" id="where" hidden><span id="whereText"></span><button type="button" class="adjbtn" id="adjBtn" hidden title="찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값을 함께 보내기">값 바꾸기</button><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
+<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
 <div class="box" id="box" hidden></div>`;
 
   const $ = (s) => root.getElementById(s);
@@ -1413,6 +1431,7 @@
     for (const t of ['pointerdown', 'mousedown']) document.removeEventListener(t, blockWidget, true);
     setPickTarget('app');
     $('panel').hidden = false;
+    renderPins();
   }
   function onMove(e) {
     const el = pickTarget === 'widget' ? root.elementFromPoint(e.clientX, e.clientY) : document.elementFromPoint(e.clientX, e.clientY);
@@ -1428,6 +1447,7 @@
     e.stopPropagation();
     const el = pickedEl(e);
     if (el) {
+      if (!pickFor) revertAdjust(); // 새로 찍으면 전에 바꿔 보던 요소는 원래대로
       const r = el.getBoundingClientRect();
       where = {
         url: here(),
@@ -1440,7 +1460,7 @@
         draftsApi({ action: 'update', id: pickFor, where });
         where = null;
       } else {
-        $('whereText').textContent = '위치: ' + (pickTarget === 'widget' ? '대화창 › ' : '') + (where.text || where.selector.replace(WIDGET_PREFIX, ''));
+        setWhereLabel();
         $('where').hidden = false;
         saveWhere();
       }
@@ -1455,20 +1475,116 @@
   function startPick() {
     setPickTarget('app');
     $('hint').hidden = false;
+    renderPins();
     for (const t of ['pointerdown', 'mousedown']) document.addEventListener(t, blockWidget, true);
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onPick, true);
     document.addEventListener('keydown', onKey, true);
   }
   $('pick').onclick = () => startPick();
-  $('whereClear').onclick = () => { where = null; $('where').hidden = true; saveWhere(); };
+  $('whereClear').onclick = () => { revertAdjust(); where = null; $('where').hidden = true; saveWhere(); };
   // 찍어 둔 위치도 이 기기에 기억해, 새로고침해도 다시 붙인다.
   function saveWhere() {
     try { if (where) localStorage.setItem('__uifb_where', JSON.stringify({ where, label: $('whereText').textContent })); else localStorage.removeItem('__uifb_where'); } catch {}
   }
+  function setWhereLabel() {
+    const n = Object.keys(where?.adjust || {}).length;
+    $('whereText').textContent = '위치: ' + (where.selector?.startsWith(WIDGET_PREFIX) ? '대화창 › ' : '') + (where.text || where.selector?.replace(WIDGET_PREFIX, '') || where.url || '') + (n ? ` · 바꾼 값 ${n}개` : '');
+    $('adjBtn').hidden = !whereEl();
+  }
+
+  // 값 바꾸기: 앱에서 찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값(where.adjust: {키: {from, to}})을 위치와 함께 보낸다.
+  // 바꾼 모습은 미리보기라 코드에는 남지 않는다. 보내거나 담거나 위치를 지우면 원래대로 돌린다.
+  const ADJ = [['text', '글자', 'text'], ['fontSize', '글자 크기', 'px'], ['fontWeight', '굵기', 'weight'], ['color', '글자색', 'color'], ['backgroundColor', '배경색', 'color'], ['padding', '안쪽 여백', 'text'], ['opacity', '투명도', 'opacity']];
+  let adj = null; // { el, style: 원래 style 속성, text: 원래 글자(자식 요소가 있으면 null), from: 원래 값 }
+  function whereEl() {
+    if (!where?.selector || where.selector.startsWith(WIDGET_PREFIX) || where.url !== here()) return null;
+    try { return document.querySelector(where.selector); } catch { return null; }
+  }
+  const hexOf = (c) => { const n = String(c).match(/[\d.]+/g); return !n || (n.length > 3 && +n[3] === 0) ? '투명' : '#' + n.slice(0, 3).map((x) => Math.round(+x).toString(16).padStart(2, '0')).join(''); };
+  function applyAdjust(ch) {
+    const { el } = adj;
+    if (adj.style === null) el.removeAttribute('style'); else el.setAttribute('style', adj.style);
+    if (adj.text !== null) el.textContent = ch.text ? ch.text.to : adj.text;
+    for (const [k, v] of Object.entries(ch)) if (k !== 'text') el.style[k] = v.to;
+  }
+  function revertAdjust() {
+    if (adj?.el.isConnected) applyAdjust({});
+    adj = null;
+  }
+  function openAdjust() {
+    const el = whereEl();
+    if (!el) return;
+    if (adj?.el !== el) {
+      revertAdjust();
+      const cs = getComputedStyle(el);
+      const prev = where.adjust || {};
+      const now = { text: el.textContent.trim(), fontSize: cs.fontSize, fontWeight: cs.fontWeight, color: hexOf(cs.color), backgroundColor: hexOf(cs.backgroundColor), padding: cs.padding, opacity: cs.opacity };
+      adj = { el, style: el.getAttribute('style'), text: el.children.length ? null : el.textContent, from: Object.fromEntries(ADJ.map(([k]) => [k, prev[k]?.from ?? now[k]])) };
+      applyAdjust(prev);
+    }
+    $('adjWhat').textContent = where.text || where.selector;
+    const box = $('adjFields');
+    box.textContent = '';
+    for (const [k, label, type] of ADJ) {
+      if (k === 'text' && adj.text === null) continue;
+      const from = adj.from[k];
+      const cur = where.adjust?.[k]?.to ?? from;
+      let inp;
+      if (type === 'weight') {
+        inp = document.createElement('select');
+        for (const w of ['100', '200', '300', '400', '500', '600', '700', '800', '900']) { const o = document.createElement('option'); o.value = o.textContent = w; inp.append(o); }
+      } else {
+        inp = document.createElement('input');
+        inp.type = type === 'px' || type === 'opacity' ? 'number' : type === 'color' ? 'color' : 'text';
+        if (type === 'px') { inp.min = '1'; inp.step = '1'; }
+        if (type === 'opacity') { inp.min = '0'; inp.max = '1'; inp.step = '0.1'; }
+      }
+      inp.dataset.k = k;
+      inp.id = 'adj-' + k;
+      inp.value = type === 'px' ? String(parseFloat(cur)) : type === 'color' && cur === '투명' ? '#ffffff' : cur;
+      inp.classList.toggle('changed', cur !== from);
+      inp.addEventListener('input', () => {
+        const to = type === 'px' ? (inp.value ? inp.value + 'px' : from) : inp.value.trim() || from;
+        const ch = { ...(where.adjust || {}) };
+        if (to === from) delete ch[k]; else ch[k] = { from, to };
+        if (Object.keys(ch).length) where.adjust = ch; else delete where.adjust;
+        inp.classList.toggle('changed', to !== from);
+        applyAdjust(ch);
+        outline(el);
+        saveWhere();
+      });
+      const l = document.createElement('label');
+      l.htmlFor = inp.id;
+      l.textContent = label;
+      box.append(l, inp);
+    }
+    $('panel').hidden = true;
+    $('adj').hidden = false;
+    renderPins();
+    if (el.getBoundingClientRect().bottom > innerHeight * 0.5) el.scrollIntoView({ block: 'start' });
+    setTimeout(() => outline(el), 50);
+  }
+  function outline(el) {
+    const r = el.getBoundingClientRect();
+    Object.assign($('box').style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    $('box').hidden = false;
+  }
+  function closeAdjust() {
+    $('adj').hidden = true;
+    $('box').hidden = true;
+    $('panel').hidden = false;
+    setWhereLabel();
+    saveWhere();
+    renderPins();
+  }
+  $('adjBtn').onclick = openAdjust;
+  $('adjDone').onclick = closeAdjust;
+  $('adjReset').onclick = () => { delete where.adjust; if (adj) applyAdjust({}); saveWhere(); openAdjust(); };
+
   try {
     const st = JSON.parse(localStorage.getItem('__uifb_where') || 'null');
-    if (st?.where) { where = st.where; $('whereText').textContent = st.label || '위치'; $('where').hidden = false; }
+    if (st?.where) { where = st.where; setWhereLabel(); $('where').hidden = false; }
   } catch {}
   $('replyClear').onclick = () => setReply(null);
 
@@ -1490,6 +1606,7 @@
         doneCid(kind, text);
         sentTexts.set(text, Date.now());
         if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
+        revertAdjust();
         where = null;
         $('where').hidden = true;
         saveWhere();
@@ -1623,7 +1740,61 @@
     const inLabel = sheetLabel === null ? n : mine().filter((d) => (d.label || '') === sheetLabel).length;
     $('dtitle').textContent = sheetLabel === null ? `보관함 · 전체 ${n}개` : `보관함 · ${sheetLabel || '미분류'} ${inLabel}개`;
     renderCats();
+    renderPins();
   }
+
+  // 화면 번호: 보관함 글 중 이 화면에 위치를 찍은 것을 앱 위에 1, 2, 3 으로 보인다(보관함 카드의 📍번호와 같음).
+  // 번호를 누르면 그 글이 있는 보관함을 연다. 보관함 머리의 "화면 번호 끄기"로 끄며, 끈 것은 이 기기에 남는다.
+  let pinsOn = true;
+  try { pinsOn = localStorage.getItem('__uifb_pins') !== 'off'; } catch {}
+  let pinNo = new Map(); // 보관함 글 id → 번호
+  function renderPins() {
+    const list = [];
+    for (const d of mine().filter((x) => x.where?.selector && !x.where.selector.startsWith(WIDGET_PREFIX) && x.where.url === here()).sort((a, b) => a.id - b.id)) {
+      let el = null;
+      try { el = document.querySelector(d.where.selector); } catch {}
+      if (el) list.push([d, el]);
+    }
+    pinNo = new Map(list.map(([d], i) => [d.id, i + 1]));
+    $('pinsToggle').hidden = !list.length;
+    $('pinsToggle').textContent = pinsOn ? '화면 번호 끄기' : '화면 번호 켜기';
+    if (where && !$('where').hidden) $('adjBtn').hidden = !whereEl();
+    const box = $('pins');
+    box.hidden = !pinsOn || !list.length || !$('hint').hidden || !$('adj').hidden; // 찍거나 값을 바꾸는 동안은 비킨다
+    if (box.hidden) return;
+    while (box.children.length > list.length) box.lastChild.remove();
+    list.forEach(([d, el], i) => {
+      let p = box.children[i];
+      if (!p) {
+        p = document.createElement('button');
+        p.type = 'button';
+        p.className = 'pin';
+        p.onclick = () => { const x = mine().find((y) => y.id === +p.dataset.id); if (!x) return; if ($('panel').hidden) $('btn').click(); openSheet(x.label || ''); };
+        p.onpointerenter = () => { const x = pinEl.get(p); if (x) outline(x); };
+        p.onpointerleave = () => { if ($('adj').hidden) $('box').hidden = true; };
+        box.append(p);
+      }
+      pinEl.set(p, el);
+      p.dataset.id = String(d.id);
+      p.textContent = String(i + 1);
+      p.title = d.text.replace(/\s+/g, ' ').slice(0, 80);
+      const r = el.getBoundingClientRect();
+      p.hidden = (!r.width && !r.height) || r.bottom < 0 || r.top > innerHeight;
+      p.style.left = Math.max(12, r.left) + 'px';
+      p.style.top = Math.max(12, r.top) + 'px';
+    });
+  }
+  const pinEl = new WeakMap();
+  let pinRaf = 0;
+  const queuePins = () => { if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; renderPins(); }); };
+  addEventListener('scroll', queuePins, { capture: true, passive: true });
+  addEventListener('resize', queuePins);
+  setInterval(queuePins, 1000); // 앱 화면이 바뀌어 요소가 움직이거나 사라질 때
+  $('pinsToggle').onclick = () => {
+    pinsOn = !pinsOn;
+    try { localStorage.setItem('__uifb_pins', pinsOn ? 'on' : 'off'); } catch {}
+    renderPins();
+  };
 
   // 분류 칩 한 줄(보관함 버튼 옆). 한 번에 한 가지 일만 하도록 누르는 길이로 나눈다.
   // 짧게 = "나중에"로 담을 분류 정하기(진한 색), 꾹(0.5초) = 그 분류 보관함 열기. 열린 칩은 짧게 눌러도 닫힌다.
@@ -1729,6 +1900,7 @@
     draftsRenderedKey = draftsKey + '|' + sessions.map((x) => x.id).join();
     box.textContent = '';
     const fits = [];
+    renderPins(); // 카드의 📍번호를 화면 번호와 맞춘다
     renderTrash(box); // 최근 보낸 것·지운 것은 맨 위(접혀 있음)
     const list = mine();
     for (const id of [...checked]) if (!list.some((d) => d.id === id)) checked.delete(id);
@@ -1822,7 +1994,7 @@
       if (loc) {
         const l = document.createElement('span');
         l.className = 'loc ' + loc.k;
-        l.textContent = loc.label;
+        l.textContent = (pinNo.has(d.id) ? `📍${pinNo.get(d.id)} ` : '') + loc.label;
         meta.append(l);
       }
       const acts = document.createElement('div');
@@ -2041,6 +2213,7 @@
       if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
       render();
       $('msgs').scrollTop = $('msgs').scrollHeight;
+      revertAdjust();
       where = null;
       $('where').hidden = true;
       saveWhere();
