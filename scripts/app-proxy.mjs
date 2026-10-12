@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 실제 앱 화면에 피드백 버튼을 끼워 보여 주는 프록시. 의존성 없음 (Node 18+).
-// 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799] [--lan --dir .ui-feedback]
+// 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799] [--lan --dir .ui-feedback] [--no-widget]
+//   --no-widget: 위젯을 넣지 않고 접속 키만 확인한다(비교 페이지 안에 실제 앱을 띄울 때. 안에 위젯이 또 뜨지 않게).
 //   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, 키는 대화창 서버와 같은 <dir>/lan-key, lan-auth.mjs).
 //   http://localhost:<port>/ 로 열면 앱을 그대로 보여 주고, HTML 응답에만 피드백 위젯 스크립트를 넣는다.
 //   위젯이 보낸 메시지는 대화창 서버(/api/chat)로 넘어가 리뷰 대화와 같은 기록(chat.json)에 쌓인다.
@@ -25,6 +26,7 @@ const port = Number(arg('port', '4798'));
 const auth = lanAuth({ dir: path.resolve(arg('dir', '.ui-feedback')), lan: process.argv.includes('--lan') });
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
 const TAG = '<script src="/__uifb/widget.js" defer></script>';
+const noWidget = process.argv.includes('--no-widget');
 function forward(req, res, target, rewrite) {
   const headers = { ...req.headers, host: target.host };
   // 폰 등 다른 주소로 열면 Origin·Referer 가 그 주소라서 dev 서버(Next 등)가 다른 출처 요청으로 막는다(403, 실시간 갱신이 끊겨 페이지가 계속 새로고침됨).
@@ -36,7 +38,7 @@ function forward(req, res, target, rewrite) {
     { hostname: target.hostname, port: target.port, path: rewrite ?? req.url, method: req.method, headers },
     (up) => {
       const type = up.headers['content-type'] || '';
-      if (!rewrite && type.includes('text/html')) {
+      if (!rewrite && !noWidget && type.includes('text/html')) {
         let body = '';
         up.setEncoding('utf8');
         up.on('data', (c) => (body += c));
