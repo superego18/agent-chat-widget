@@ -345,6 +345,9 @@
   .adj .seg button + button { border-left: 1px solid rgba(0,0,0,.1); }
   .adj .seg button[aria-pressed="true"] { background: #ea580c; color: #fff; }
   .adj .agroup.area-g { color: #c2410c; }
+  .adj .ahead { position: sticky; top: -10px; z-index: 1; background: #fff; margin: -10px -12px 0; padding: 10px 12px 6px; } /* 스크롤해도 ✕는 늘 보이게 */
+  .adj .aclose { flex: 0 0 auto; align-self: center; border: 0; background: none; color: #5a5852; font-size: 16px; line-height: 1; padding: 4px 6px; margin: -4px -6px -4px 0; border-radius: 6px; cursor: pointer; }
+  .adj .aclose:hover { background: #efeee9; color: #1c1b18; }
   .adj .apos { align-self: center; font-size: 12px; color: #5a5852; white-space: nowrap; }
 </style>
 <div class="pins" id="pins" hidden></div>
@@ -367,7 +370,7 @@
   <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
-<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
+<div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aclose" id="adjClose" aria-label="닫기" title="닫기">✕</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
 <div class="box" id="box" hidden><span class="btag" id="boxTag"></span></div><div id="slots"></div><div class="area" id="area" hidden><span class="atag" id="areaTag"></span></div><div id="gaps"></div>`;
 
   const $ = (s) => root.getElementById(s);
@@ -1777,6 +1780,7 @@
   }
   $('adjBtn').onclick = openAdjust;
   $('adjDone').onclick = closeAdjust;
+  $('adjClose').onclick = closeAdjust; // 닫기도 바꾼 값은 남긴다(완료·바깥 누르기와 같음, #1826)
   // 옮기기: 같은 상자 안에서 순서만 바꿔 본다(#1801). 다른 상자로 옮기면 앱 화면이 깨질 수 있어 하지 않는다.
   const sibsOf = (el) => (el.parentElement && el.parentElement !== document.documentElement ? [...el.parentElement.children].filter((x) => x !== host && !/^(SCRIPT|STYLE|TEMPLATE|LINK|META)$/.test(x.tagName)) : []);
   const shortOf = (x) => (x.innerText || x.getAttribute('aria-label') || componentOf(x)).trim().replace(/\s+/g, ' ').slice(0, 20);

@@ -134,6 +134,11 @@ test('flex 요소를 찍으면 배치(방향·정렬·분배·간격)도 바꿀 
     await w.idle(200);
     assert.equal(await w.eval((r) => r.getElementById('adj').hidden), true, '화면의 다른 곳을 누르면 창이 닫힌다(#1804)');
     assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false);
+    await w.click('#adjBtn');
+    assert.equal(await w.eval((r) => r.getElementById('adj').hidden), false);
+    await w.click('#adjClose');
+    assert.equal(await w.eval((r) => r.getElementById('adj').hidden), true, '오른쪽 위 ✕로 닫는다(#1826)');
+    assert.match(await w.eval((r) => r.getElementById('whereText').textContent), /바꾼 값 1개/, '닫아도 바꾼 값은 남는다');
     await ctx.close();
   } finally { srv.stop(); }
 });
