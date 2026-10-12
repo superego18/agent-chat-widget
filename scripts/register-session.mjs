@@ -97,6 +97,10 @@ const base = path.basename(found, '.jsonl');
 const thread = tool === 'codex' ? base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)?.[0] : null;
 const sessionId = (thread || base).replace(/[^\w.-]/g, '_');
 const sessionsDir = path.join(dir, 'sessions');
+// cmux 안에서 등록하면 그 터미널 창(surface)을 적어 둔다. 대화창의 "압축"이 이 창에 /compact 를 입력한다.
+function cmuxOf() {
+  return process.env.CMUX_SURFACE_ID ? { cmux: { surface: process.env.CMUX_SURFACE_ID, workspace: process.env.CMUX_WORKSPACE_ID || null } } : {};
+}
 fs.mkdirSync(sessionsDir, { recursive: true });
 // 같은 이름으로 등록된 다른(예전) 세션은 지운다. 한 이름 = 한 세션.
 for (const f of fs.readdirSync(sessionsDir)) {
@@ -108,6 +112,6 @@ for (const f of fs.readdirSync(sessionsDir)) {
 fs.rmSync(path.join(dir, 'session.json'), { force: true });
 fs.writeFileSync(
   path.join(sessionsDir, `${sessionId}.json`),
-  JSON.stringify({ name, tool, sessionId, path: found, agent, port, registeredAt: new Date().toISOString() }, null, 2) + '\n',
+  JSON.stringify({ name, tool, sessionId, path: found, agent, port, registeredAt: new Date().toISOString(), ...cmuxOf() }, null, 2) + '\n',
 );
 console.log(`등록함: ${name} · ${tool} · ${sessionId}`);

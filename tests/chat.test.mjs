@@ -141,6 +141,24 @@ test('이전 대화 더 보기: 120개씩 더 그리고 보던 메시지 자리�
   } finally { srv.stop(); }
 });
 
+test('압축: cmux 창이 적힌 세션 탭에만 단추가 있고, 작업 중이면 받지 않는다 (#1851)', async () => {
+  const dir = makeDir({ status: { [A]: { state: 'working', detail: '편집' } } });
+  const f = path.join(dir, 'sessions', `${A}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), cmux: { surface: '00000000-0000-4000-8000-00000000000f' } }));
+  const srv = await startServer(dir);
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    page.on('dialog', (d) => d.accept());
+    assert.equal(await w.eval((r) => r.getElementById('compact').hidden), false, 'cmux 창이 있는 세션');
+    await w.click('#compact');
+    await w.idle(500);
+    assert.match(await w.eval((r) => r.getElementById('toast').textContent), /작업 중/);
+    await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[1].click());
+    assert.equal(await w.eval((r) => r.getElementById('compact').hidden), true, 'cmux 창 정보가 없는 세션은 단추가 없다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

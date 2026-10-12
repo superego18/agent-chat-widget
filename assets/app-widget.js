@@ -356,7 +356,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침"><span class="ri">↻</span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
@@ -838,6 +838,7 @@
     box.textContent = '';
     const tabs = sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active }));
     if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || {}).id || null;
+    $('compact').hidden = !sessionById(activeTab)?.compact;
     for (const t of tabs) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -1992,6 +1993,16 @@
   // 보관함에서 보내거나 지운 직후 잠깐 띄우는 알림. 지운 것은 "되살리기"로 바로 되돌릴 수 있다.
   let toastT = null;
   // undo: 되살리기 함수, 또는 { label, fn } 으로 다른 동작 단추(예: "그 분류 열기").
+  // 압축: 이 세션이 떠 있는 cmux 터미널에 /compact 를 대신 입력한다(#1851). 입력칸에 쓰던 글이 있으면 그 뒤에 붙으므로 먼저 묻는다.
+  $('compact').onclick = async () => {
+    const x = sessionById(activeTab);
+    if (!x || !confirm(`「${x.name}」 터미널에 /compact 를 입력해 대화를 압축할까요?\n터미널 입력칸에 쓰던 글이 있으면 그 뒤에 붙습니다.`)) return;
+    try {
+      const r = await fetch('/__uifb/api/compact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: x.id }) });
+      const j = await r.json().catch(() => ({}));
+      toast(r.ok ? `「${x.name}」에 /compact 를 입력했습니다.` : j.error || '압축하지 못했습니다.');
+    } catch { toast('대화창 서버에 연결하지 못했습니다.'); }
+  };
   function toast(text, undo) {
     const t = $('toast');
     t.textContent = '';

@@ -67,7 +67,7 @@ function listSessions() {
     })
     .filter(Boolean)
     .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)))
-    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? { active: true, via: 'queue' } : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId) }));
+    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? { active: true, via: 'queue' } : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId), compact: !!s.cmux?.surface }));
 }
 
 // hook-relay.mjs 가 보낸 세션 상태(작업 중·승인 대기·쉬는 중). 오래된 "작업 중"은 믿지 않는다.
@@ -833,6 +833,33 @@ function inner(req, res, url) {
   }
 
   // 보내기 취소: 세션이 아직 받아 가지 않은 내 메시지만 취소된다(받아 간 뒤에는 되돌릴 수 없다).
+  // 압축: 세션이 떠 있는 cmux 터미널 창에 /compact 를 입력한다(#1849·#1851). 글자는 /compact 로 고정이고 다른 글은 넣지 않는다.
+  // 작업 중이면 입력이 다음 요청으로 끼어들 수 있어 받지 않는다(Codex는 상태를 알 수 없어 그대로 보낸다).
+  if (url.pathname === '/api/compact' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', () => {
+      let id;
+      try { id = String(JSON.parse(body).session || ''); } catch {}
+      const s = sid(id) && findSession(id);
+      if (!s?.cmux?.surface) return send(res, 400, { error: '이 세션은 cmux 창 정보가 없어 압축할 수 없습니다. 세션을 cmux 안에서 다시 등록해 주세요.' });
+      const st = readStatus(id).state;
+      if (st === 'working' || st === 'permission') return send(res, 409, { error: '세션이 작업 중이라 지금은 압축할 수 없습니다. 끝난 뒤 다시 눌러 주세요.' });
+      const cli = process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Applications/cmux.app/Contents/Resources/bin/cmux') ? '/Applications/cmux.app/Contents/Resources/bin/cmux' : 'cmux');
+      try {
+        execFileSync(cli, ['send', '--surface', s.cmux.surface, '/compact'], { timeout: 5000, stdio: 'pipe' });
+        execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'enter'], { timeout: 5000, stdio: 'pipe' });
+      } catch (e) {
+        return send(res, 502, { error: '터미널 창에 입력하지 못했습니다(cmux 창이 닫혔을 수 있음): ' + String(e.stderr || e.message).trim().slice(0, 200) });
+      }
+      send(res, 200, { ok: true });
+    });
+    return;
+  }
+
   if (url.pathname === '/api/chat-cancel' && req.method === 'POST') {
     let body = '';
     req.on('data', (chunk) => {
