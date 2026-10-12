@@ -1474,7 +1474,11 @@
   // 모바일 키보드가 올라오면 iOS는 화면 전체를 밀어 올려 대화창 아래로 앱이 비친다. 보이는 영역(visualViewport)에 창을 맞춘다.
   function fitPanel() {
     const vv = window.visualViewport, p = $('panel');
-    if (!vv || p.hidden || innerWidth > 767 || p.classList.contains('picking')) { p.style.removeProperty('top'); p.style.removeProperty('height'); return; }
+    if (!vv || p.hidden || innerWidth > 767 || p.classList.contains('picking')) {
+      // 여기서 넣은(!important) 값만 지운다. 데스크톱에서 끌어 정한 높이(applySize)는 남긴다(#1864).
+      for (const k of ['top', 'height']) if (p.style.getPropertyPriority(k) === 'important') p.style.removeProperty(k);
+      return;
+    }
     p.style.setProperty('top', vv.offsetTop + 'px', 'important');
     p.style.setProperty('height', vv.height + 'px', 'important');
   }

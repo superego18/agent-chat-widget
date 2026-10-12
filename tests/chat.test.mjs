@@ -176,6 +176,24 @@ test('세션 탭에 컨텍스트 사용률: Claude 는 상태 줄이 남긴 값,
   } finally { srv.stop(); }
 });
 
+test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남는다(높이 포함) (#1864)', async () => {
+  const dir = makeDir();
+  fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ desktop: { panel: { w: 500, h: 400 } } }));
+  const srv = await startServer(dir);
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await w.idle(1500);
+    const sz = () => w.eval((r) => { const p = r.getElementById('panel').getBoundingClientRect(); return [Math.round(p.width), Math.round(p.height)]; });
+    assert.deepEqual(await sz(), [500, 400]);
+    await w.click('#close');
+    await w.click('#btn');
+    await w.idle(500);
+    assert.deepEqual(await sz(), [500, 400], '닫았다 열어도 같은 크기');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [
