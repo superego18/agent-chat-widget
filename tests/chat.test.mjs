@@ -194,7 +194,7 @@ test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남�
   } finally { srv.stop(); }
 });
 
-test('보류 글의 보관함 단추에 옮겨 갈 분류가 적힌다 (#1867)', async () => {
+test('보류 글의 보관함 단추는 보류할 때가 아니라 누를 때 골라 둔 분류로 옮긴다 (#1869)', async () => {
   const drafts = [
     { id: 1, to: A, text: '분류 있음', label: '디자인', hold: true, at: iso(9000) },
     { id: 2, to: A, text: '분류 없음', label: null, hold: true, at: iso(8000) },
@@ -202,7 +202,11 @@ test('보류 글의 보관함 단추에 옮겨 갈 분류가 적힌다 (#1867)',
   const srv = await startServer(makeDir({ drafts }));
   try {
     const { w, ctx } = await openWidget(srv);
-    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg.hold .tostash')].map((b) => b.textContent)), ['보관함 · 디자인', '보관함 · 미분류']);
+    await w.eval((r) => r.querySelectorAll('.msg.hold .tostash')[0].click());
+    await w.idle(500);
+    const d = JSON.parse(fs.readFileSync(path.join(srv.dir, 'drafts.json'), 'utf8')).drafts.find((x) => x.id === 1);
+    assert.equal(d.hold, undefined);
+    assert.equal(d.label, null, '눌렀을 때 골라 둔 분류(미분류)로 옮겨진다');
     await ctx.close();
   } finally { srv.stop(); }
 });
