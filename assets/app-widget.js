@@ -123,6 +123,7 @@
   .typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
   .tbadge { display: inline-block; min-width: 15px; height: 15px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 10px; line-height: 15px; text-align: center; padding: 0 4px; margin-left: 4px; font-weight: 600; }
+  .more { align-self: center; border: 1px solid rgba(0,0,0,.12); background: #fff; color: #3730a3; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; margin: 2px 0 6px; }
   .newline { align-self: stretch; text-align: center; font-size: 11px; font-weight: 600; color: #4f46e5; margin: 4px 0; }
   /* 세션이 아직 안 읽은 메시지: 맨 아래에 붙잡혀 떠 있다가, 읽히면 대화 흐름으로 떨어진다. */
   .msg.user.held { background: #eef0ff; color: #3730a3; box-shadow: inset 0 0 0 1.5px rgba(79,70,229,.45); animation: hold 1.6s ease-in-out infinite; }
@@ -889,6 +890,9 @@
     if (ty && st && (st.state === 'working' || st.state === 'permission')) fillTyping(ty, st);
   }
 
+  // 이전 대화 더 보기: 기본은 최근 120개. 누를 때마다 120개씩 더 그린다. 세션 탭을 바꾸거나 대화창을 다시 열면 120개로 돌아가고, 새 메시지가 와도 늘린 만큼은 그대로 둔다.
+  const PAGE = 120;
+  let showCount = PAGE, showTab = null, moreClicked = false;
   function render() {
     renderTabs();
     const box = $('msgs');
@@ -916,7 +920,24 @@
         : '등록된 세션이 없습니다.\n작업 세션이 자기 세션을 등록하면 대화할 수 있습니다.';
       box.append(p);
     }
-    const shown = items.slice(-120);
+    if (showTab !== activeTab) { showCount = PAGE; showTab = activeTab; }
+    const shown = items.slice(-showCount);
+    if (items.length > shown.length) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'more';
+      more.id = 'more';
+      more.textContent = `이전 대화 더 보기 (${Math.min(PAGE, items.length - shown.length)}개 · 남은 ${items.length - shown.length}개)`;
+      more.onclick = () => {
+        const first = box.querySelector('.msg[data-id]'), id = first?.dataset.id, y = first?.getBoundingClientRect().top;
+        showCount += PAGE;
+        moreClicked = true;
+        render();
+        const el = id && box.querySelector(`.msg[data-id="${CSS.escape(id)}"]`);
+        if (el) box.scrollTop += el.getBoundingClientRect().top - y; // 누르기 전 맨 위 메시지를 같은 자리에
+      };
+      box.append(more);
+    }
     const links = activeTab === 'all' ? { ans: new Map(), by: new Map() } : answerLinks(items); // 여러 세션을 함께 보는 탭에서는 잇지 않는다
     const firstUnread = shown.findIndex(isUnread);
     let newLine = null;
@@ -1209,7 +1230,10 @@
       box.append(h);
     }
     drawLinks(links);
-    if (scrollToUnread && !$('panel').hidden) {
+    if (moreClicked) {
+      moreClicked = false;
+      keepPlace(); // 위에 붙은 만큼 내려 보던 메시지를 그 자리에 둔다
+    } else if (scrollToUnread && !$('panel').hidden) {
       // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
       const pos = prefs.pos?.[activeTab];
       const [posId, posOff] = (pos || '').split('@');
@@ -1418,7 +1442,7 @@
 
   $('btn').onclick = () => {
     const open = $('panel').hidden;
-    if (open) scrollToUnread = true;
+    if (open) { scrollToUnread = true; showCount = PAGE; }
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
     try { localStorage.setItem('__uifb_open', open ? '1' : '0'); } catch {}

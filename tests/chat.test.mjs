@@ -109,6 +109,38 @@ test('세션이 보낸 마크다운 표는 표로 보인다 (#1812)', async () =
   } finally { srv.stop(); }
 });
 
+test('이전 대화 더 보기: 120개씩 더 그리고 보던 메시지 자리를 지키며, 탭을 바꾸거나 다시 열면 120개로 돌아간다', async () => {
+  const messages = Array.from({ length: 300 }, (_, i) => ({ id: i + 1, from: i % 2 ? 'agent' : 'user', to: A, session: A, text: `글 ${i + 1}`, at: iso((300 - i) * 60_000) }));
+  const srv = await startServer(makeDir({ messages, delivered: Object.fromEntries(messages.map((m) => [m.id, m.at])) }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    const count = () => w.eval((r) => r.querySelectorAll('#msgs .msg').length);
+    assert.equal(await count(), 120);
+    assert.match(await w.eval((r) => r.getElementById('more').textContent), /남은 180개/);
+    await w.eval((r) => { r.getElementById('msgs').scrollTop = 0; });
+    await w.idle(200);
+    const before = await w.eval((r) => { const m = r.querySelector('#msgs .msg'); return { id: m.dataset.id, y: m.getBoundingClientRect().top }; });
+    await w.click('#more');
+    await w.idle(200);
+    assert.equal(await count(), 240);
+    const after = await w.eval((r, id) => r.querySelector(`#msgs .msg[data-id="${id}"]`).getBoundingClientRect().top, before.id);
+    assert.ok(Math.abs(after - before.y) < 2, `보던 메시지가 제자리에 (${before.y} → ${after})`);
+    await w.click('#more');
+    assert.equal(await count(), 300);
+    assert.equal(await w.eval((r) => !!r.getElementById('more')), false, '다 보이면 단추가 없다');
+    await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[1].click());
+    await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[0].click());
+    await w.idle(200);
+    assert.equal(await count(), 120, '탭을 바꾸면 120개로');
+    await w.click('#more');
+    await w.click('#btn');
+    await w.click('#btn');
+    await w.idle(200);
+    assert.equal(await count(), 120, '다시 열면 120개로');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [
