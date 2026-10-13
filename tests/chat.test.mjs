@@ -211,6 +211,20 @@ test('보류 글의 보관함 단추는 보류할 때가 아니라 누를 때 �
   } finally { srv.stop(); }
 });
 
+test('보관함 글을 보류로 꺼낸다 (#1878)', async () => {
+  const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '나중 글', label: null, at: iso(9000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.click('#draftsBtn');
+    await w.idle(300);
+    await w.click('.draft[data-id="1"] .tohold');
+    await w.idle(800);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(srv.dir, 'drafts.json'), 'utf8')).drafts[0].hold, true);
+    assert.equal(await w.eval((r) => r.querySelectorAll('.msg.hold').length), 1, '대화창 맨 아래 보류로 보인다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [
