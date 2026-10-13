@@ -225,6 +225,20 @@ test('보관함 글을 보류로 꺼낸다 (#1878)', async () => {
   } finally { srv.stop(); }
 });
 
+test('보관함에서 이것만 보내기를 누르면 보관함이 닫힌다 (#1881)', async () => {
+  const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '하나', label: null, at: iso(9000) }, { id: 2, to: A, text: '둘', label: null, at: iso(8000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.click('#draftsBtn');
+    await w.idle(300);
+    assert.equal(await w.eval((r) => r.getElementById('dsheet').hidden), false);
+    await w.click('.draft[data-id="1"] .send1');
+    await w.idle(800);
+    assert.equal(await w.eval((r) => r.getElementById('dsheet').hidden), true, '남은 글이 있어도 닫힌다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

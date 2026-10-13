@@ -2330,7 +2330,7 @@
       const acts = document.createElement('div');
       acts.className = 'acts';
       const btn = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = () => withBusy(b, fn); acts.append(b); };
-      btn('이것만 보내기', () => sendDrafts([d.id]), 'send1');
+      btn('이것만 보내기', async () => { await sendDrafts([d.id]); setDraftsView(false); }, 'send1'); // 보낸 뒤 보관함을 닫아 대화에서 보낸 글을 본다(#1881)
       // 보관함에서 대화창 맨 아래 보류로 꺼낸다(#1878). 되돌리기는 보류 글의 "보관함" 단추.
       btn('보류로', async () => { await draftsApi({ action: 'update', id: d.id, hold: true }); toast('✓ 보류로 옮김'); }, 'tohold');
       if (loc?.el) btn('위치 보기', () => flash(loc.el));
