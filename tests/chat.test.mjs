@@ -212,14 +212,15 @@ test('보류 글의 보관함 단추는 보류할 때가 아니라 누를 때 �
 });
 
 test('보관함 글을 보류로 꺼낸다 (#1878)', async () => {
-  const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '나중 글', label: null, at: iso(9000) }] }));
+  const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '나중 글', label: null, at: iso(9000) }, { id: 2, to: A, text: '다른 글', label: null, at: iso(8000) }] }));
   try {
     const { w, ctx } = await openWidget(srv);
     await w.click('#draftsBtn');
     await w.idle(300);
-    await w.click('.draft[data-id="1"] .tohold');
+    await w.eval((r) => { const b = r.querySelector('.draft[data-id="1"] .tohold'); b.focus(); b.click(); }); // 마우스로 누르면 단추에 초점이 남는다
     await w.idle(800);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(srv.dir, 'drafts.json'), 'utf8')).drafts[0].hold, true);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(srv.dir, 'drafts.json'), 'utf8')).drafts.find((d) => d.id === 1).hold, true);
+    assert.equal(await w.eval((r) => !!r.querySelector('#drafts .draft[data-id="1"]')), false, '보관함에서 바로 빠진다(#1903)');
     assert.equal(await w.eval((r) => r.querySelectorAll('.msg.hold').length), 1, '대화창 맨 아래 보류로 보인다');
     await ctx.close();
   } finally { srv.stop(); }

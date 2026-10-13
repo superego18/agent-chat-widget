@@ -2346,7 +2346,7 @@
       const btn = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = () => withBusy(b, fn); acts.append(b); };
       btn('이것만 보내기', () => sendDrafts([d.id]), 'send1');
       // 보관함에서 대화창 맨 아래 보류로 꺼낸다(#1878). 되돌리기는 보류 글의 "보관함" 단추.
-      btn('보류로', async () => { await draftsApi({ action: 'update', id: d.id, hold: true }); toast('✓ 보류로 옮김'); }, 'tohold');
+      btn('보류로', async () => { await draftsApi({ action: 'update', id: d.id, hold: true }); renderDrafts(); render(); toast('✓ 보류로 옮김'); }, 'tohold'); // 바로 빼고 대화창 맨 아래에 보이게(#1903)
       if (loc?.el) btn('위치 보기', () => flash(loc.el));
       if (d.where?.selector) btn('다시 찍기', () => { pickFor = d.id; startPick(); });
       if (sessions.length > 1) {
