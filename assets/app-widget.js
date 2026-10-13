@@ -2495,46 +2495,52 @@
   }
   $('dclose').onclick = () => setDraftsView(false);
 
-  // 비교 페이지 목록(#1886): 이 프로젝트에 띄워 둔 비교 페이지와 평가 상태를 보고, 다 쓴 것은 숨긴다(파일은 남는다).
-  let pagesOpen = false, showHiddenPages = false, pagesData = { pages: [] };
-  function pageHref(file) {
-    const f = file === 'review.html' ? '' : file;
-    if (CFG.context === 'review') return '/' + f;
-    // 앱 화면에서는 비교 페이지 서버 주소로 연다. tailnet(https, 포트 없음)으로 들어왔으면 비교 페이지는 8443(tailscale serve 약속).
+  // 목록 창(#1886·#1899): 서버가 준 공통 틀 { title, empty, items: [{ title, href, status: { text, tone }, meta: [], hidden, actions: [{ label, url, body, toast }] }], port } 을 그대로 그린다.
+  // 무엇의 목록인지(지금은 비교 페이지)와 문구·단추는 서버가 정한다. 대화창은 틀만 안다.
+  let pagesOpen = false, showHiddenPages = false, pagesData = { items: [] };
+  function listHref(href) {
+    if (CFG.context === 'review') return href;
+    // 앱 화면에서는 목록을 준 서버(비교 페이지 서버) 주소로 연다. tailnet(https, 포트 없음)으로 들어왔으면 그 서버는 8443(tailscale serve 약속).
     const port = location.protocol === 'https:' && !location.port ? 8443 : pagesData.port || 4799;
-    return `${location.protocol}//${location.hostname}:${port}/${f}`;
+    return `${location.protocol}//${location.hostname}:${port}${href}`;
   }
   function renderPages() {
     const box = $('plist');
     box.textContent = '';
-    const all = pagesData.pages || [];
+    const all = pagesData.items || [];
     const list = all.filter((x) => showHiddenPages || !x.hidden);
     const nh = all.filter((x) => x.hidden).length;
-    $('ptitle').textContent = `비교 페이지 ${all.length - nh}개`;
+    $('ptitle').textContent = `${pagesData.title || '목록'} ${all.length - nh}개`;
     $('phid').textContent = showHiddenPages ? '숨긴 것 감추기' : `숨긴 것 보기${nh ? ` (${nh})` : ''}`;
     $('phid').hidden = !nh && !showHiddenPages;
-    if (!list.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = '띄워 둔 비교 페이지가 없습니다.'; box.append(p); return; }
+    if (!list.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = pagesData.empty || '비어 있습니다.'; box.append(p); return; }
     for (const x of list) {
       const d = document.createElement('div');
       d.className = 'page' + (x.hidden ? ' hid' : '');
-      d.dataset.file = x.file;
       const a = document.createElement('a');
-      a.href = pageHref(x.file); a.target = '_blank'; a.rel = 'noopener'; a.textContent = x.name;
+      a.textContent = x.title;
+      if (x.href) { a.href = listHref(x.href); a.target = '_blank'; a.rel = 'noopener'; }
       const sm = document.createElement('small');
-      const st = document.createElement('span');
-      st.className = 'pst ' + (x.done ? 'done' : x.rated ? 'part' : 'todo');
-      st.textContent = x.done ? '평가 완료' : x.rated ? `평가 중 ${x.rated}/${x.total}` : `평가 전 · 항목 ${x.total}개`;
-      sm.append(st, ` · ${/^\d+$/.test(x.round || '') ? x.round + '차' : x.round || ''}${x.session ? ' · ' + x.session : ''} · ${shortAt(x.at)}`);
+      if (x.status?.text) {
+        const st = document.createElement('span');
+        st.className = 'pst ' + (/^(done|part|todo)$/.test(x.status.tone) ? x.status.tone : '');
+        st.textContent = x.status.text;
+        sm.append(st, ' · ');
+      }
+      sm.append([...(x.meta || []), x.at ? shortAt(x.at) : ''].filter(Boolean).join(' · '));
       const acts = document.createElement('span');
       acts.className = 'pacts';
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = x.hidden ? '다시 보이기' : '숨기기';
-      b.onclick = () => withBusy(b, async () => {
-        const r = await fetch('/__uifb/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: x.file, hidden: !x.hidden }) }).then((r) => r.json()).catch(() => null);
-        if (r?.pages) { pagesData = { ...pagesData, pages: r.pages }; renderPages(); toast(x.hidden ? '✓ 다시 보임' : '✓ 숨김(파일은 남아 있음)'); }
-      });
-      acts.append(b);
+      for (const act of x.actions || []) {
+        if (!/^\/api\/[\w-]+$/.test(act.url || '')) continue; // 같은 서버의 API 로만 보낸다
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = act.label;
+        b.onclick = () => withBusy(b, async () => {
+          const r = await fetch('/__uifb' + act.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.body || {}) }).then((r) => r.json()).catch(() => null);
+          if (r?.items) { pagesData = { ...pagesData, ...r }; renderPages(); if (act.toast) toast(act.toast); }
+        });
+        acts.append(b);
+      }
       d.append(a, sm, acts);
       box.append(d);
     }
@@ -2545,7 +2551,7 @@
     $('psheet').hidden = !on;
     if (!on) return;
     $('psheet').style.bottom = Math.round($('panel').getBoundingClientRect().bottom - $('composeRow').getBoundingClientRect().top) + 'px';
-    pagesData = await fetch('/__uifb/api/pages').then((r) => r.json()).catch(() => ({ pages: [] }));
+    pagesData = await fetch('/__uifb/api/pages').then((r) => r.json()).catch(() => ({ items: [] }));
     renderPages();
   }
   $('pagesBtn').onclick = () => setPagesView(!pagesOpen);

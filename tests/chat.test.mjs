@@ -254,12 +254,13 @@ test('보관함이 열려 있을 때 알림은 보관함 머리줄에 떠서 분
   } finally { srv.stop(); }
 });
 
-test('비교 페이지 목록: 이름·평가 상태를 보이고 숨긴 것은 따로 본다 (#1886)', async () => {
+test('목록 창: 서버가 준 공통 틀(제목·주소·상태·설명·단추)대로 그리고 숨긴 것은 따로 본다 (#1886, #1899)', async () => {
   const dir = makeDir();
-  fs.writeFileSync(path.join(dir, 'pages-fixture.json'), JSON.stringify({ port: 4799, pages: [
-    { file: 'review.html', name: '44차 비교', round: '44', session: '작업 세션', total: 3, rated: 3, done: true, at: iso(1000), hidden: false },
-    { file: 'review-x.html', name: '칩 비교', round: 'x', session: '스킬 세션', total: 2, rated: 1, done: false, at: iso(2000), hidden: false },
-    { file: 'review-old.html', name: '옛 비교', round: 'old', session: null, total: 1, rated: 0, done: false, at: iso(3000), hidden: true },
+  const row = (title, href, status, hidden) => ({ title, href, status, meta: ['44차', '작업 세션'], at: iso(1000), hidden, actions: [{ label: hidden ? '다시 보이기' : '숨기기', url: '/api/pages', body: { file: 'x', hidden: !hidden } }] });
+  fs.writeFileSync(path.join(dir, 'pages-fixture.json'), JSON.stringify({ title: '비교 페이지', port: 4799, items: [
+    row('44차 비교', '/', { text: '평가 완료', tone: 'done' }, false),
+    row('칩 비교', '/review-x.html', { text: '평가 중 1/2', tone: 'part' }, false),
+    row('옛 비교', '/review-old.html', { text: '평가 전', tone: 'todo' }, true),
   ] }));
   const srv = await startServer(dir);
   try {
