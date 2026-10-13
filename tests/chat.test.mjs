@@ -254,6 +254,29 @@ test('보관함이 열려 있을 때 알림은 보관함 머리줄에 떠서 분
   } finally { srv.stop(); }
 });
 
+test('비교 페이지 목록: 이름·평가 상태를 보이고 숨긴 것은 따로 본다 (#1886)', async () => {
+  const dir = makeDir();
+  fs.writeFileSync(path.join(dir, 'pages-fixture.json'), JSON.stringify({ port: 4799, pages: [
+    { file: 'review.html', name: '44차 비교', round: '44', session: '작업 세션', total: 3, rated: 3, done: true, at: iso(1000), hidden: false },
+    { file: 'review-x.html', name: '칩 비교', round: 'x', session: '스킬 세션', total: 2, rated: 1, done: false, at: iso(2000), hidden: false },
+    { file: 'review-old.html', name: '옛 비교', round: 'old', session: null, total: 1, rated: 0, done: false, at: iso(3000), hidden: true },
+  ] }));
+  const srv = await startServer(dir);
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.click('#pagesBtn');
+    await w.idle(500);
+    const rows = () => w.eval((r) => [...r.querySelectorAll('#plist .page')].map((d) => [d.querySelector('a').textContent, d.querySelector('.pst').textContent]));
+    assert.deepEqual(await rows(), [['44차 비교', '평가 완료'], ['칩 비교', '평가 중 1/2']]);
+    assert.match(await w.eval((r) => r.querySelector('#plist .page a').getAttribute('href')), /:4799\/$/, '앱 화면에서는 비교 페이지 서버 주소로');
+    await w.click('#phid');
+    assert.equal((await rows()).length, 3, '숨긴 것 보기');
+    await w.click('#pclose');
+    assert.equal(await w.eval((r) => r.getElementById('psheet').hidden), true);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

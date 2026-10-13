@@ -215,6 +215,17 @@
   .dsheet .dhead button { border: 0; background: none; font-size: 12px; color: #5a5852; cursor: pointer; padding: 2px 4px; }
   @keyframes sheetup { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .dsheet { animation: none; } }
+  .page { background: #fff; border-radius: 10px; padding: 8px 10px; display: grid; gap: 3px; box-shadow: 0 0 0 1px rgba(0,0,0,.06); }
+  .page a { font-size: 13px; font-weight: 600; color: #1c1b18; text-decoration: none; }
+  .page a:hover { text-decoration: underline; }
+  .page small { font-size: 11px; color: #8a8780; }
+  .page .pst { font-weight: 600; }
+  .page .pst.done { color: #15803d; }
+  .page .pst.part { color: #c2410c; }
+  .page .pst.todo { color: #4f46e5; }
+  .page .pacts { display: flex; gap: 6px; }
+  .page .pacts button { border: 1px solid rgba(0,0,0,.12); background: #fff; border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; color: #5a5852; }
+  .page.hid { opacity: .6; }
   .drafts { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
   .drafts[hidden], .msgs[hidden], form[hidden], .chipbtn[hidden] { display: none; }
   .draft { background: #fff; border-radius: 9px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); padding: 8px 9px; display: grid; gap: 6px; }
@@ -358,10 +369,10 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침"><span class="ri">↻</span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="pagesBtn" type="button" title="이 프로젝트의 비교 페이지 목록">비교 페이지</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
+  <div class="dsheet" id="psheet" hidden role="dialog" aria-label="비교 페이지 목록"><div class="dhead"><span id="ptitle">비교 페이지</span><span class="dbtns"><button type="button" id="phid">숨긴 것 보기</button><button type="button" id="pclose" aria-label="비교 페이지 목록 닫기">닫기 ▾</button></span></div><div class="drafts" id="plist"></div></div><div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden><span id="replyText"></span><button type="button" id="replyClear" aria-label="답장 취소">×</button></div>
@@ -2483,6 +2494,63 @@
     if (on) { placeSheet(); renderDrafts(); }
   }
   $('dclose').onclick = () => setDraftsView(false);
+
+  // 비교 페이지 목록(#1886): 이 프로젝트에 띄워 둔 비교 페이지와 평가 상태를 보고, 다 쓴 것은 숨긴다(파일은 남는다).
+  let pagesOpen = false, showHiddenPages = false, pagesData = { pages: [] };
+  function pageHref(file) {
+    const f = file === 'review.html' ? '' : file;
+    if (CFG.context === 'review') return '/' + f;
+    // 앱 화면에서는 비교 페이지 서버 주소로 연다. tailnet(https, 포트 없음)으로 들어왔으면 비교 페이지는 8443(tailscale serve 약속).
+    const port = location.protocol === 'https:' && !location.port ? 8443 : pagesData.port || 4799;
+    return `${location.protocol}//${location.hostname}:${port}/${f}`;
+  }
+  function renderPages() {
+    const box = $('plist');
+    box.textContent = '';
+    const all = pagesData.pages || [];
+    const list = all.filter((x) => showHiddenPages || !x.hidden);
+    const nh = all.filter((x) => x.hidden).length;
+    $('ptitle').textContent = `비교 페이지 ${all.length - nh}개`;
+    $('phid').textContent = showHiddenPages ? '숨긴 것 감추기' : `숨긴 것 보기${nh ? ` (${nh})` : ''}`;
+    $('phid').hidden = !nh && !showHiddenPages;
+    if (!list.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = '띄워 둔 비교 페이지가 없습니다.'; box.append(p); return; }
+    for (const x of list) {
+      const d = document.createElement('div');
+      d.className = 'page' + (x.hidden ? ' hid' : '');
+      d.dataset.file = x.file;
+      const a = document.createElement('a');
+      a.href = pageHref(x.file); a.target = '_blank'; a.rel = 'noopener'; a.textContent = x.name;
+      const sm = document.createElement('small');
+      const st = document.createElement('span');
+      st.className = 'pst ' + (x.done ? 'done' : x.rated ? 'part' : 'todo');
+      st.textContent = x.done ? '평가 완료' : x.rated ? `평가 중 ${x.rated}/${x.total}` : `평가 전 · 항목 ${x.total}개`;
+      sm.append(st, ` · ${/^\d+$/.test(x.round || '') ? x.round + '차' : x.round || ''}${x.session ? ' · ' + x.session : ''} · ${shortAt(x.at)}`);
+      const acts = document.createElement('span');
+      acts.className = 'pacts';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = x.hidden ? '다시 보이기' : '숨기기';
+      b.onclick = () => withBusy(b, async () => {
+        const r = await fetch('/__uifb/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: x.file, hidden: !x.hidden }) }).then((r) => r.json()).catch(() => null);
+        if (r?.pages) { pagesData = { ...pagesData, pages: r.pages }; renderPages(); toast(x.hidden ? '✓ 다시 보임' : '✓ 숨김(파일은 남아 있음)'); }
+      });
+      acts.append(b);
+      d.append(a, sm, acts);
+      box.append(d);
+    }
+  }
+  async function setPagesView(on) {
+    pagesOpen = on;
+    if (on && showDrafts) setDraftsView(false);
+    $('psheet').hidden = !on;
+    if (!on) return;
+    $('psheet').style.bottom = Math.round($('panel').getBoundingClientRect().bottom - $('composeRow').getBoundingClientRect().top) + 'px';
+    pagesData = await fetch('/__uifb/api/pages').then((r) => r.json()).catch(() => ({ pages: [] }));
+    renderPages();
+  }
+  $('pagesBtn').onclick = () => setPagesView(!pagesOpen);
+  $('pclose').onclick = () => setPagesView(false);
+  $('phid').onclick = () => { showHiddenPages = !showHiddenPages; renderPages(); };
   // 보관함이 열려 있을 때 대화 목록(시트 바깥)을 누르면 닫는다.
   $('msgs').addEventListener('pointerdown', () => { if (showDrafts) setDraftsView(false); });
   $('draftsBtn').onclick = () => (showDrafts && sheetLabel === null ? setDraftsView(false) : openSheet(null));

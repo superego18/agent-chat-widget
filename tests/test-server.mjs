@@ -13,6 +13,8 @@ http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/__uifb/api/')) url.pathname = url.pathname.slice('/__uifb'.length);
   if (chat.handle(req, res, url)) return;
+  // 비교 페이지 목록은 비교 페이지 서버(ui-review-page)가 맡는다. 시험에서는 폴더의 pages-fixture.json 을 그대로 돌려준다.
+  if (url.pathname === '/api/pages' && fs.existsSync(path.join(root, 'pages-fixture.json'))) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(fs.readFileSync(path.join(root, 'pages-fixture.json'))); }
   const file = path.join(root, path.basename(url.pathname));
   if (file.endsWith('.html') && fs.existsSync(file)) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(fs.readFileSync(file)); }
   res.writeHead(404);
