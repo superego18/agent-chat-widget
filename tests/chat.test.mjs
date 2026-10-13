@@ -305,6 +305,20 @@ test('읽힌 뒤 중지했으면 답하는 중이 아니라 멈췄다고 보인�
   } finally { srv.stop(); }
 });
 
+test('세션끼리: 이 세션이 보낸 글에 상대 세션이 보낸 답을 선으로 잇는다 (#1936)', async () => {
+  const messages = [
+    { id: 1, from: 'peer', session: A, to: B, text: '이것 확인해 줘', at: iso(60000), readAt: iso(59000) },
+    { id: 2, from: 'peer', session: B, to: A, text: '확인했어', at: iso(30000), readAt: iso(29000) },
+  ];
+  const srv = await startServer(makeDir({ messages }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.idle(500);
+    assert.ok(await w.eval((r) => r.querySelectorAll('#msgs svg.links path').length) > 0, '연결선이 그려진다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

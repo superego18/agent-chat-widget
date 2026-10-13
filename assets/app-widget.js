@@ -690,7 +690,15 @@
       else if (shown.has(m.id)) { flush(); pending.push(m.id); }
     }
     flush();
-    return { ans, by };
+    // 세션끼리(#1936): 이 세션이 다른 세션에 보낸 글 뒤에 그 세션이 이 세션에 보낸 글은 그 글에 대한 답으로 잇는다(보낸 쪽 → 받은 답).
+    const peer = [];
+    const waiting = new Map(); // 상대 세션 → 아직 답을 못 받은 보낸 글들
+    for (const m of items) {
+      if (m.from !== 'peer') continue;
+      if (m.session === activeTab && m.to) waiting.set(m.to, [...(waiting.get(m.to) || []), m.id]);
+      else if (m.to === activeTab && m.session && waiting.get(m.session)?.length) { for (const q of waiting.get(m.session)) peer.push({ from: q, tos: [m.id] }); waiting.delete(m.session); }
+    }
+    return { ans, by, peer };
   }
   // 질문과 답을 오른쪽 가장자리의 꺾쇠 선으로 잇는다. 묶음이 겹치면 선을 한 칸씩 안쪽으로 옮긴다.
   let lastLinks = null;
@@ -766,6 +774,7 @@
     const sideOf = (id) => { const m = messages.find((x) => x.id === id); return m?.from === 'user' || (m?.from === 'peer' && m.to === activeTab) ? 'left' : 'right'; };
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
     for (const m of messages) if (m.replyTo && !m.refer && m.from === 'user' && (m.to === activeTab || m.session === activeTab)) pairs.push({ from: m.replyTo, tos: [m.id], kind: 'reply' });
+    for (const p of links.peer || []) pairs.push({ ...p, kind: 'peer' }); // 세션끼리 주고받은 것은 따로 묶는다(같은 답 줄기와 섞이지 않게)
     // 같은 답(또는 같은 원문)으로 모이는 연결은 한 줄기로 합친다: 같은 종류끼리 보내는 쪽이나 받는 쪽 메시지를 하나라도 함께 쓰면 한 묶음.
     const groups = [];
     for (const p of pairs) {
