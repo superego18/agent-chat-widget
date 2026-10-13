@@ -330,8 +330,27 @@ function addChat(msg) {
   // keepUnread: 사용자가 직접 쓴 글이 아니라 서버가 대신 남기는 글(평가 완료 요약)은 읽음으로 치지 않는다(#1874).
   const talkedTo = entry.from === 'user' && !msg.keepUnread ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
+  if (entry.from === 'user' && entry.to && !msg.keepUnread) setTimeout(() => nudge(entry.to), 2000);
   return entry;
 }
+
+// 깨우기(#1923·#1925): 감시가 꺼진 Claude 세션(Esc 로 멈춰 감시를 다시 못 켠 때 등)에 대화창 글이 오면,
+// 그 세션의 cmux 터미널에 고정 문구를 입력해 깨운다. 쉬는 중일 때만, 세션마다 1분에 한 번만. 보낸 글 자체는 치지 않는다.
+const NUDGE_TEXT = '[대화창] 새 메시지 확인해';
+const nudgedAt = new Map();
+function nudge(id) {
+  const s = findSession(id);
+  if (!s || s.tool === 'codex' || !s.cmux?.surface) return;
+  if (readWatchFile(`watch-${s.sessionId}.json`).active) return;
+  if (['working', 'permission'].includes(readStatus(s.sessionId).state)) return;
+  if (Date.now() - (nudgedAt.get(id) || 0) < 60_000) return;
+  nudgedAt.set(id, Date.now());
+  try {
+    execFileSync(cmuxCli(), ['send', '--surface', s.cmux.surface, NUDGE_TEXT], { timeout: 5000, stdio: 'pipe' });
+    execFileSync(cmuxCli(), ['send-key', '--surface', s.cmux.surface, 'enter'], { timeout: 5000, stdio: 'pipe' });
+  } catch {}
+}
+const cmuxCli = () => process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Applications/cmux.app/Contents/Resources/bin/cmux') ? '/Applications/cmux.app/Contents/Resources/bin/cmux' : 'cmux');
 
 // ── 읽음 상태 ──
 // 세션마다 사용자가 마지막으로 읽은 답의 시각. 앱 화면(4798)과 리뷰 페이지(4799)는 주소가 달라 브라우저 저장소를 함께 못 쓰므로 서버에 둔다.
@@ -881,12 +900,14 @@ function inner(req, res, url) {
       const stop = url.pathname === '/api/stop';
       const st = readStatus(id).state;
       if (!stop && (st === 'working' || st === 'permission')) return send(res, 409, { error: '세션이 작업 중이라 지금은 압축할 수 없습니다. 끝난 뒤 다시 눌러 주세요.' });
-      const cli = process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Applications/cmux.app/Contents/Resources/bin/cmux') ? '/Applications/cmux.app/Contents/Resources/bin/cmux' : 'cmux');
+      const cli = cmuxCli();
       try {
         if (stop) {
           execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'escape'], { timeout: 5000, stdio: 'pipe' });
           // Esc 로 멈추면 Claude 는 응답 끝 훅(Stop)을 부르지 않아 "작업 중"이 남는다(#1920). 쉬는 중으로 적어 둔다(다시 일하면 훅이 바로 고친다).
           fs.writeFileSync(path.join(root, `status-${id}.json`), JSON.stringify({ state: 'idle', detail: '중지함', at: new Date().toISOString() }) + '\n');
+          // 받은 글을 처리하던 중(handling)이면 그 표시도 지운다. 그래야 다음 대화창 글이 깨우기로 전달된다.
+          try { if (JSON.parse(fs.readFileSync(path.join(root, `watch-${id}.json`), 'utf8')).state === 'handling') fs.rmSync(path.join(root, `watch-${id}.json`)); } catch {}
         }
         else {
           execFileSync(cli, ['send', '--surface', s.cmux.surface, '/compact'], { timeout: 5000, stdio: 'pipe' });
