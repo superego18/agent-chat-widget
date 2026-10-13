@@ -883,7 +883,11 @@ function inner(req, res, url) {
       if (!stop && (st === 'working' || st === 'permission')) return send(res, 409, { error: '세션이 작업 중이라 지금은 압축할 수 없습니다. 끝난 뒤 다시 눌러 주세요.' });
       const cli = process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Applications/cmux.app/Contents/Resources/bin/cmux') ? '/Applications/cmux.app/Contents/Resources/bin/cmux' : 'cmux');
       try {
-        if (stop) execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'escape'], { timeout: 5000, stdio: 'pipe' });
+        if (stop) {
+          execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'escape'], { timeout: 5000, stdio: 'pipe' });
+          // Esc 로 멈추면 Claude 는 응답 끝 훅(Stop)을 부르지 않아 "작업 중"이 남는다(#1920). 쉬는 중으로 적어 둔다(다시 일하면 훅이 바로 고친다).
+          fs.writeFileSync(path.join(root, `status-${id}.json`), JSON.stringify({ state: 'idle', detail: '중지함', at: new Date().toISOString() }) + '\n');
+        }
         else {
           execFileSync(cli, ['send', '--surface', s.cmux.surface, '/compact'], { timeout: 5000, stdio: 'pipe' });
           execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'enter'], { timeout: 5000, stdio: 'pipe' });
