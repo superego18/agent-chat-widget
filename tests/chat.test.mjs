@@ -225,7 +225,7 @@ test('보관함 글을 보류로 꺼낸다 (#1878)', async () => {
   } finally { srv.stop(); }
 });
 
-test('보관함에서 이것만 보내기를 누르면 보관함이 닫힌다 (#1881)', async () => {
+test('보관함에서 보내면(이것만 보내기·분류 보내기) 보관함이 닫힌다 (#1881, #1883)', async () => {
   const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '하나', label: null, at: iso(9000) }, { id: 2, to: A, text: '둘', label: null, at: iso(8000) }] }));
   try {
     const { w, ctx } = await openWidget(srv);
