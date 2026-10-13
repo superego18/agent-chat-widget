@@ -239,6 +239,21 @@ test('보관함에서 보내면(이것만 보내기·분류 보내기) 보관함
   } finally { srv.stop(); }
 });
 
+test('보관함이 열려 있을 때 알림은 보관함 머리줄에 떠서 분류 칩을 가리지 않는다 (#1885)', async () => {
+  const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '하나', label: '기능', at: iso(9000) }, { id: 2, to: A, text: '둘', label: '디자인', at: iso(8000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.click('#draftsBtn');
+    await w.idle(300);
+    await w.eval((r) => { const s = r.querySelector('.draft[data-id="1"] select[aria-label="분류 바꾸기"]'); s.value = '디자인'; s.dispatchEvent(new Event('change')); });
+    await w.idle(500);
+    const [t, h, c] = await w.eval((r) => ['toast', 'dsheet', 'composeRow'].map((id) => { const b = (id === 'dsheet' ? r.getElementById(id).querySelector('.dhead') : r.getElementById(id)).getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; }));
+    assert.ok(t.top >= h.top - 2 && t.bottom <= h.bottom + 2, `머리줄 안에 (${JSON.stringify([t, h])})`);
+    assert.ok(t.bottom < c.top, '분류 칩 줄보다 위');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

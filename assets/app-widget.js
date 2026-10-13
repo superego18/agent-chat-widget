@@ -2036,8 +2036,11 @@
     const c = $('composeRow').getBoundingClientRect();
     const p = $('panel').getBoundingClientRect();
     t.style.left = p.left + p.width / 2 + 'px';
-    t.style.top = c.top - 36 + 'px';
+    // 보관함이 열려 있으면 분류 칩·보내기 줄을 가리지 않게 보관함 머리줄(제목과 닫기 사이 빈자리)에 띄운다(#1885).
+    const dh = showDrafts && !$('dsheet').hidden ? $('dsheet').querySelector('.dhead').getBoundingClientRect() : null;
     t.hidden = false;
+    t.style.top = (dh ? dh.top + (dh.height - t.offsetHeight) / 2 : c.top - 36) + 'px';
+    if (dh) t.style.left = Math.max(p.left + 8 + t.offsetWidth / 2, $('dclose').getBoundingClientRect().left - 8 - t.offsetWidth / 2) + 'px'; // 닫기 단추 바로 왼쪽
     clearTimeout(toastT);
     toastT = setTimeout(() => { t.hidden = true; }, undo ? 6000 : 3500);
   }
