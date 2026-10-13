@@ -279,6 +279,21 @@ test('목록 창: 서버가 준 공통 틀(제목·주소·상태·설명·단�
   } finally { srv.stop(); }
 });
 
+test('페이지에서 대화창 바깥을 누르면 대화창이 닫히고, 안쪽을 누르면 그대로다 (#1906)', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await w.idle(500);
+    const r = await w.eval((r) => { const b = r.getElementById('input').getBoundingClientRect(); return { x: b.left + 10, y: b.top + 10 }; });
+    await page.mouse.click(r.x, r.y);
+    assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false, '안쪽은 그대로');
+    await page.mouse.click(1100, 100);
+    assert.equal(await w.eval((r) => r.getElementById('panel').hidden), true, '바깥을 누르면 닫힘');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [

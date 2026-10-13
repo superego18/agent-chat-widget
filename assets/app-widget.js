@@ -2772,6 +2772,11 @@
   }, 1000);
 
   $('close').onclick = () => $('btn').click();
+  // 이 페이지의 대화창 바깥을 누르면 닫는다(#1906). 다른 창으로 옮겨 가는 것으로는 닫지 않는다. 위치를 찍거나 값을 바꾸는 중에는 그대로 둔다.
+  document.addEventListener('pointerdown', (e) => {
+    if ($('panel').hidden || e.composedPath().includes(host) || !$('hint').hidden || !$('adj').hidden) return;
+    $('btn').click();
+  }, true);
 
   // ── 알림(웹 푸시) ──
   // 홈 화면에 앱처럼 설치할 수 있게 설치 정보를 붙인다(아이폰은 설치한 앱에서만 웹 알림을 받는다).
