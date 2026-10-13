@@ -296,6 +296,15 @@ test('페이지에서 대화창 바깥을 누르면 대화창이 닫히고, 안�
   } finally { srv.stop(); }
 });
 
+test('읽힌 뒤 중지했으면 답하는 중이 아니라 멈췄다고 보인다 (#1928)', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'user', to: A, text: '해 줘', context: 'app', at: iso(60000) }], delivered: { [A]: 1, _at: { 1: iso(50000) } }, status: { [A]: { state: 'idle', detail: '중지함' } } }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    assert.match(await w.eval((r) => r.getElementById('msgs').textContent), /중지해서 멈췄습니다/);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('대화 순서: 읽힌 시각 순서로 놓되, 한참 뒤 다시 넘긴 옛 메시지는 보낸 자리에 둔다', async () => {
   const srv = await startServer(makeDir({
     messages: [
