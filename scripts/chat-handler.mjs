@@ -336,7 +336,7 @@ function addChat(msg) {
 
 // 깨우기(#1923·#1925): 감시가 꺼진 Claude 세션(Esc 로 멈춰 감시를 다시 못 켠 때 등)에 대화창 글이 오면,
 // 그 세션의 cmux 터미널에 고정 문구를 입력해 깨운다. 쉬는 중일 때만, 세션마다 1분에 한 번만. 보낸 글 자체는 치지 않는다.
-const NUDGE_TEXT = '[대화창] 새 메시지 확인해';
+const NUDGE_TEXT = '[자동생성] 감시를 깨우고 대화창의 새 메시지를 확인합니다.';
 const nudgedAt = new Map();
 function nudge(id) {
   const s = findSession(id);
