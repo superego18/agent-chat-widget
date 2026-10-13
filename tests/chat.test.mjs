@@ -153,8 +153,10 @@ test('압축: cmux 창이 적힌 세션 탭에만 단추가 있고, 작업 중�
     await w.click('#compact');
     await w.idle(500);
     assert.match(await w.eval((r) => r.getElementById('toast').textContent), /작업 중/);
+    assert.equal(await w.eval((r) => r.getElementById('stopBtn').hidden), false, '작업 중이면 중지 단추(#1910)');
     await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[1].click());
     assert.equal(await w.eval((r) => r.getElementById('compact').hidden), true, 'cmux 창 정보가 없는 세션은 단추가 없다');
+    assert.equal(await w.eval((r) => r.getElementById('stopBtn').hidden), true);
     await ctx.close();
   } finally { srv.stop(); }
 });

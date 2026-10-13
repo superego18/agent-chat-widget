@@ -866,7 +866,8 @@ function inner(req, res, url) {
   // 보내기 취소: 세션이 아직 받아 가지 않은 내 메시지만 취소된다(받아 간 뒤에는 되돌릴 수 없다).
   // 압축: 세션이 떠 있는 cmux 터미널 창에 /compact 를 입력한다(#1849·#1851). 글자는 /compact 로 고정이고 다른 글은 넣지 않는다.
   // 작업 중이면 입력이 다음 요청으로 끼어들 수 있어 받지 않는다(Codex는 상태를 알 수 없어 그대로 보낸다).
-  if (url.pathname === '/api/compact' && req.method === 'POST') {
+  // 중지(#1910): 세션의 cmux 터미널에 Esc 를 보내 하던 작업을 멈춘다(Claude·Codex 모두 Esc 로 멈춤). 압축과 같은 창 정보를 쓴다.
+  if ((url.pathname === '/api/compact' || url.pathname === '/api/stop') && req.method === 'POST') {
     let body = '';
     req.on('data', (chunk) => {
       body += chunk;
@@ -876,13 +877,17 @@ function inner(req, res, url) {
       let id;
       try { id = String(JSON.parse(body).session || ''); } catch {}
       const s = sid(id) && findSession(id);
-      if (!s?.cmux?.surface) return send(res, 400, { error: '이 세션은 cmux 창 정보가 없어 압축할 수 없습니다. 세션을 cmux 안에서 다시 등록해 주세요.' });
+      if (!s?.cmux?.surface) return send(res, 400, { error: '이 세션은 cmux 창 정보가 없습니다. 세션을 cmux 안에서 다시 등록해 주세요.' });
+      const stop = url.pathname === '/api/stop';
       const st = readStatus(id).state;
-      if (st === 'working' || st === 'permission') return send(res, 409, { error: '세션이 작업 중이라 지금은 압축할 수 없습니다. 끝난 뒤 다시 눌러 주세요.' });
+      if (!stop && (st === 'working' || st === 'permission')) return send(res, 409, { error: '세션이 작업 중이라 지금은 압축할 수 없습니다. 끝난 뒤 다시 눌러 주세요.' });
       const cli = process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Applications/cmux.app/Contents/Resources/bin/cmux') ? '/Applications/cmux.app/Contents/Resources/bin/cmux' : 'cmux');
       try {
-        execFileSync(cli, ['send', '--surface', s.cmux.surface, '/compact'], { timeout: 5000, stdio: 'pipe' });
-        execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'enter'], { timeout: 5000, stdio: 'pipe' });
+        if (stop) execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'escape'], { timeout: 5000, stdio: 'pipe' });
+        else {
+          execFileSync(cli, ['send', '--surface', s.cmux.surface, '/compact'], { timeout: 5000, stdio: 'pipe' });
+          execFileSync(cli, ['send-key', '--surface', s.cmux.surface, 'enter'], { timeout: 5000, stdio: 'pipe' });
+        }
       } catch (e) {
         return send(res, 502, { error: '터미널 창에 입력하지 못했습니다(cmux 창이 닫혔을 수 있음): ' + String(e.stderr || e.message).trim().slice(0, 200) });
       }
