@@ -327,7 +327,8 @@ function addChat(msg) {
     answerPushed.add(entry.id);
     pushAll({ title: `${name} 답장`, body: plainBody(entry.text), tag: `uifb-${entry.session}`, session: entry.session }, 'answer');
   }
-  const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
+  // keepUnread: 사용자가 직접 쓴 글이 아니라 서버가 대신 남기는 글(평가 완료 요약)은 읽음으로 치지 않는다(#1874).
+  const talkedTo = entry.from === 'user' && !msg.keepUnread ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
   return entry;
 }
