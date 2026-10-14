@@ -190,10 +190,12 @@
   #reply .rref > button.go { font-size: 11px; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   .msg .mbody .quote { margin: 4px 0; }
   /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
-  #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: transparent; pointer-events: none; background: #f6f5f1; margin: 0; }
-  #inback mark { color: transparent; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 2px #e0e7ff; }
-  #inback mark.f { background: #ecebe7; box-shadow: 0 0 0 2px #ecebe7; }
-  form textarea#input { position: relative; background: transparent; }
+  /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 입력칸 글과 같은 폭을 차지하되 글자를 작게 그린다(#1994). */
+  #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
+  #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: 0.78em; color: #3730a3; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 1px #c7c9f5; }
+  #inback mark.f { color: #57534e; background: #ecebe7; box-shadow: 0 0 0 1px #d6d3d1; }
+  form textarea#input { position: relative; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: #1c1b18; }
+  form textarea#input::placeholder { color: #8f8c84; -webkit-text-fill-color: #8f8c84; }
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
   .selreply { position: fixed; z-index: 2147483647; transform: translateX(-50%); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer; }
   .selreply[hidden] { display: none; }
@@ -604,8 +606,8 @@
   // 누를 때마다 커서 자리에 표시를 넣고, 입력칸 아래에 무엇을 붙였는지 한 줄씩 보인다. 표시를 지우면 그 답장·참고도 빠진다.
   const openRefs = new Set(); // 입력칸 아래 목록에서 펼친 줄
   let refs = []; // 붙인 것들 {id, ref, quote}. 글 속 표시와 번호·종류로 짝짓는다
-  // 입력칸 속 표시는 짧게 ↩1940 · 📎1940 으로 두고 칩처럼 칠한다(#1973). 보낼 때는 [↩#1940] 으로 바꿔 적는다.
-  const MARK = /\[?(↩|📎)#?(\d+)\]?/g;
+  // 입력칸 속 표시는 짧게 ↩1940「자동으…」 처럼 번호와 붙인 글 앞 3글자로 두고 칩처럼 칠한다(#1973, #1993). 보낼 때는 [↩#1940] 으로 바꿔 적는다.
+  const MARK = /\[?(↩|📎)#?(\d+)(?:「[^」\n]*」)?\]?/g;
   const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${id}]`);
   function pairRefs(t) {
     const left = [...refs];
@@ -700,7 +702,8 @@
     lastSel = null;
     const inp = $('input'), v = inp.value;
     const s0 = inp.selectionStart ?? v.length, e0 = inp.selectionEnd ?? s0;
-    const mark = `${ref ? '📎' : '↩'}${m.id}`;
+    const head = [...(quote || body).replace(/[「」\n]/g, '').trim()];
+    const mark = `${ref ? '📎' : '↩'}${m.id}「${head.slice(0, 3).join('').trim().replace(/\s/g, '\u00a0')}${head.length > 3 ? '…' : ''}」`; // 칩 안 빈칸은 줄바꿈 안 되는 빈칸
     // 줄을 바꾸지 않고 커서 자리에 그대로 넣는다(#1964). 앞 글자에 붙으면 띄어 쓰고, 뒤에는 이어 쓸 빈칸을 둔다.
     const pre = s0 && !/\s/.test(v[s0 - 1]) ? ' ' : '';
     const post = /\s/.test(v[e0] || '') ? '' : ' ';
@@ -2111,16 +2114,28 @@
     back.id = 'inback';
     back.setAttribute('aria-hidden', 'true');
     el.before(back);
+    const measure = document.createElement('span');
+    measure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;left:0;top:0;';
     const escH = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
     const paint = () => {
       const cs = getComputedStyle(el);
       for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRadius']) back.style[k] = cs[k];
       back.style.width = el.offsetWidth + 'px';
       back.style.height = el.offsetHeight + 'px';
+      // 입력칸에 세로 스크롤 막대가 생기면 글 폭이 그만큼 줄어드니 뒤 배경도 오른쪽 여백을 늘려 줄바꿈을 맞춘다.
+      const bar = el.offsetWidth - el.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+      back.style.paddingRight = parseFloat(cs.paddingRight) + Math.max(0, bar) + 'px';
+      const lh = cs.lineHeight === 'normal' ? '' : `line-height:${cs.lineHeight};height:${cs.lineHeight};`;
       const v = el.value;
       let html = '', i = 0;
-      for (const x of v.matchAll(MARK)) { html += escH(v.slice(i, x.index)) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}">${escH(x[0])}</mark>`; i = x.index + x[0].length; }
+      for (const x of v.matchAll(MARK)) {
+        // 칩 폭은 입력칸이 그 글을 그리는 폭과 같게(커서 자리가 어긋나지 않게) 재고, 그 안에 작은 글자로 그린다.
+        measure.textContent = x[0];
+        html += escH(v.slice(i, x.index)) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}">${escH(x[0])}</mark>`;
+        i = x.index + x[0].length;
+      }
       back.innerHTML = html + escH(v.slice(i)) + '\n';
+      back.append(measure);
       back.scrollTop = el.scrollTop;
     };
     const d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
