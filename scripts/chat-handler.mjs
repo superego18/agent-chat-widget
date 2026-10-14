@@ -327,6 +327,8 @@ function addChat(msg) {
   if (msg.interject === true && entry.from === 'user') entry.interject = true;
   if (entry.from === 'user' && cleanQuotes(msg.quotes, entry.id)) entry.quotes = cleanQuotes(msg.quotes, entry.id);
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
+  // 곁질문 묶음(#2083): 묶음 번호는 그 묶음 첫 질문의 번호다.
+  if (entry.context === 'side') entry.sideGroup = Number.isInteger(msg.sideGroup) && msg.sideGroup > 0 && msg.sideGroup <= entry.id ? msg.sideGroup : entry.id;
   chat.messages.push(entry);
   writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
@@ -628,33 +630,49 @@ function queueText(session, message) {
   child.on('exit', (code) => { if (code) console.error(`codex queue 실패(${session.name}): 종료 코드 ${code}`); });
 }
 
-// 곁질문(#2055): 세션을 복제한 사본에게 한 번 묻고 버린다. 원래 세션에는 전달되지 않고 대화 기록도 바뀌지 않는다.
+// 곁질문(#2055): 세션을 복제한 사본에게 묻는다. 원래 세션에는 전달되지 않고 대화 기록도 바뀌지 않는다.
 // 사본은 원래 대화를 다 알고, 앞부분은 캐시로 읽는다(실측: Claude 87%, Codex 1회째 뒤 거의 전부). 읽기 도구만 쓴다.
+// 묶음(#2083): 묶음의 첫 질문이 사본을 만들고(side-groups.json 에 사본 id), 같은 묶음의 다음 질문은 그 사본에 이어 묻는다.
+// 그래서 사본은 묶음 안의 앞 질문·답을 기억하지만, 사본을 만든 뒤 원래 세션에서 오간 대화는 모른다.
 // 사본의 훅은 끈다(원래 세션 이름으로 대화창·알림에 새지 않게). 프로젝트 폴더(.ui-feedback 의 상위)에서 실행해야 세션을 찾는다.
 const SIDE_HEAD = '[곁질문] 사용자가 원래 작업을 끊지 않고 따로 묻는 질문입니다. 파일은 읽기만 하고 아무것도 고치지 말고, 지금까지의 대화를 바탕으로 짧게 답하세요.';
+const sideFile = path.join(root, 'side-groups.json');
+const sideQueue = new Map(); // 묶음별로 한 번에 하나씩(앞 질문이 사본을 만든 뒤에 다음 질문이 이어 묻게)
 function askSide(s, q) {
+  const prev = sideQueue.get(q.sideGroup) || Promise.resolve();
+  const run = prev.then(() => new Promise((done) => runSide(s, q, done)));
+  sideQueue.set(q.sideGroup, run);
+}
+function runSide(s, q, done) {
   const prompt = [SIDE_HEAD, ...formatMessage(q, readChat().messages)].join('\n');
   const settings = path.join(root, 'side-settings.json');
   fs.writeFileSync(settings, '{"disableAllHooks":true}');
+  const fork = (readJsonSafe(sideFile) || {})[q.sideGroup]?.fork;
   const codex = s.tool === 'codex';
   const args = codex
-    ? ['exec', '--skip-git-repo-check', '--ephemeral', '--json', '--disable', 'hooks', '-s', 'read-only', 'fork', s.sessionId, '-']
-    : ['-p', '--resume', s.sessionId, '--fork-session', '--no-session-persistence', '--settings', settings, '--tools', 'Read,Grep,Glob', '--output-format', 'json'];
+    ? (fork
+      ? ['exec', 'resume', '--skip-git-repo-check', '--json', '--disable', 'hooks', '-c', 'sandbox_mode=read-only', fork, '-']
+      : ['exec', '--skip-git-repo-check', '--json', '--disable', 'hooks', '-s', 'read-only', 'fork', s.sessionId, '-'])
+    : ['-p', '--resume', fork || s.sessionId, ...(fork ? [] : ['--fork-session']), '--settings', settings, '--tools', 'Read,Grep,Glob', '--output-format', 'json'];
   // Windows 는 claude·codex 가 .cmd 라 셸로 부른다. 인자에 따옴표·공백이 없게 두고 질문은 표준 입력으로 넘긴다.
   const child = spawn(codex ? 'codex' : 'claude', args, { cwd: path.dirname(root), shell: process.platform === 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '', err = '';
   child.stdout.on('data', (b) => { out += b; });
   child.stderr.on('data', (b) => { err += b; });
   const timer = setTimeout(() => child.kill(), 5 * 60_000);
-  const reply = (text) => addChat({ from: 'agent', session: s.sessionId, context: 'side', agent: s.agent || s.name, text: `<re ${q.id}> ${text}` });
+  const reply = (text) => { addChat({ from: 'agent', session: s.sessionId, context: 'side', sideGroup: q.sideGroup, agent: s.agent || s.name, text: `<re ${q.id}> ${text}` }); done(); };
   child.on('error', (e) => { clearTimeout(timer); reply(`곁질문을 실행하지 못했습니다: ${e.message}`); });
   child.on('close', (code) => {
     clearTimeout(timer);
-    let text = '';
+    let text = '', id = '';
     try {
-      if (codex) text = out.trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((o) => o?.type === 'item.completed' && o.item?.type === 'agent_message').at(-1)?.item.text || '';
-      else text = JSON.parse(out).result || '';
+      if (codex) {
+        const ev = out.trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        id = ev.find((o) => o.type === 'thread.started')?.thread_id || '';
+        text = ev.filter((o) => o.type === 'item.completed' && o.item?.type === 'agent_message').at(-1)?.item.text || '';
+      } else ({ result: text = '', session_id: id = '' } = JSON.parse(out));
     } catch {}
+    if (!fork && sid(id)) { const g = readJsonSafe(sideFile) || {}; g[q.sideGroup] = { session: s.sessionId, fork: id }; writeJsonAtomic(sideFile, g); }
     reply(text.trim() || `곁질문 답을 받지 못했습니다(종료 코드 ${code}). ${(err || out).trim().slice(-300)}`);
   });
   child.stdin.end(prompt);
@@ -986,8 +1004,11 @@ function inner(req, res, url) {
       const s = sid(msg.session) && findSession(msg.session);
       if (!s) return send(res, 400, { error: '곁질문할 세션이 없습니다.' });
       // 질문은 세션에 전달되지 않게 받는 쪽(to) 없이 그 세션 칸(session)에만 남긴다.
-      const before = readChat().messages.length;
-      const q = addChat({ ...msg, from: 'user', to: undefined, session: s.sessionId, context: 'side', interject: false });
+      // 이어 물을 묶음(sideGroup)은 이 세션의 곁질문 묶음일 때만 받는다. 아니면 새 묶음을 연다.
+      const chat = readChat();
+      const before = chat.messages.length;
+      const g = chat.messages.find((x) => x.id === msg.sideGroup && x.context === 'side' && x.session === s.sessionId);
+      const q = addChat({ ...msg, from: 'user', to: undefined, session: s.sessionId, context: 'side', interject: false, sideGroup: g ? g.id : undefined });
       if (!q) return send(res, 400, { error: '질문이 비어 있습니다.' });
       if (q.id > before) askSide(s, q); // 같은 질문을 다시 눌렀으면(cid 같음) 다시 묻지 않는다
       send(res, 200, q);

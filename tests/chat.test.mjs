@@ -611,7 +611,7 @@ test('글머리 항목: 입력칸에서 이어 쓰고 들이고, 보낸 메시�
 test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인다 (#2055)', async () => {
   // 가짜 claude: 받은 인자와 질문을 그대로 답으로 돌려준다.
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
-  fs.writeFileSync(path.join(bin, 'claude'), `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({result:'사본 답 '+process.argv.slice(2).join(' ')+' | '+s})));\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({session_id:'fork-1',result:'사본 답 '+process.argv.slice(2).join(' ')+' | '+s})));\n`, { mode: 0o755 });
   const oldPath = process.env.PATH;
   process.env.PATH = bin + path.delimiter + oldPath;
   const srv = await startServer(makeDir());
@@ -628,12 +628,24 @@ test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인�
     assert.equal(q.session, A);
     assert.equal(a.from, 'agent');
     assert.deepEqual(a.re, [q.id]);
-    assert.match(a.text, /--resume aaaaaaaa-0000-4000-8000-000000000001 --fork-session --no-session-persistence/);
+    assert.match(a.text, /--resume aaaaaaaa-0000-4000-8000-000000000001 --fork-session/);
     assert.match(a.text, /--tools Read,Grep,Glob/);
     assert.match(a.text, /\[곁질문\][\s\S]*곁으로 묻기/);
     await w.eval((r) => new Promise((ok) => { const t = setInterval(() => { if (r.querySelectorAll('.msg.side').length === 2) { clearInterval(t); ok(); } }, 100); }));
     assert.equal(await w.eval((r) => r.querySelector('.msg.side .tag').textContent), '곁질문 · 모바일');
     assert.equal(await w.inputValue(), '');
+    // 끊으면 숨고, 목록에서 다시 펼쳐 이어 물으면 같은 사본에 이어 묻는다 (#2083·#2090)
+    await w.eval((r) => r.getElementById('sideCut').click());
+    assert.equal(await w.eval((r) => r.querySelectorAll('.msg.side').length), 0, '평소에는 곁질문이 숨는다');
+    await w.eval((r) => r.getElementById('sideList').click());
+    assert.equal(await w.eval((r) => r.querySelectorAll('#sidepop button').length), 1);
+    await w.eval((r) => r.querySelector('#sidepop button').click());
+    assert.equal(await w.eval((r) => r.querySelectorAll('.msg.side').length), 2);
+    await w.type('이어서 묻기');
+    await w.eval((r) => r.getElementById('side').click());
+    for (let i = 0; i < 40 && msgs.length < 4; i++) { await new Promise((r) => setTimeout(r, 100)); msgs = (await srv.api('/api/chat')).messages; }
+    assert.deepEqual(msgs.map((m) => m.sideGroup), [q.id, q.id, q.id, q.id]);
+    assert.match(msgs[3].text, /--resume fork-1 --settings/, '같은 묶음은 만들어 둔 사본에 이어 묻는다');
     await ctx.close();
   } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
 });
