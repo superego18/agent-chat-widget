@@ -338,7 +338,10 @@
   form .bcol button[type="submit"] { flex: none; height: 38px; }
   form .bcol button[type="submit"]:has(+ .now[hidden]) { height: 80px; }
   form .bcol:has(#side) button { height: 25px; }
-  .msg.side { outline: 1.5px dashed #a8a29e; outline-offset: -1.5px; }
+  /* 곁질문(#2081): 본 대화(보라·흰색)와 한눈에 갈리게 청록색으로, 테두리는 점선 */
+  .msg.user.side { background: #0e7490; outline: 1.5px dashed #67e8f9; outline-offset: -3px; }
+  .msg.agent.side { background: #ecfeff; color: #164e63; box-shadow: none; outline: 1.5px dashed #22d3ee; outline-offset: -1.5px; }
+  .msg.side .tag { background: #cffafe; color: #155e75; font-weight: 600; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   /* 보류 = 대화창 맨 아래 점선 말풍선과 같은 남색 점선, 보관함 = 보관함 창과 같은 베이지 상자 */
   form #later, .msg.user.hold .hacts .tohold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #818cf8; }
