@@ -755,7 +755,7 @@
     meta.append(x);
     return meta;
   }
-  function renderDraftBody(body, draft) {
+  function renderDraftBody(body, draft, key = '') {
     body.textContent = '';
     if (draft.items.length > 1) {
       const h = document.createElement('span');
@@ -767,7 +767,8 @@
       const item = document.createElement('span');
       item.className = 'ditem';
       const t = document.createElement('span');
-      t.innerHTML = (draft.items.length > 1 ? `${i + 1}. ` : '') + mdLite(it.text);
+      if (it.quotes?.length) { fillWithQuotes(t, it.text, it.quotes, `${key}:d${i}`); if (draft.items.length > 1) t.prepend(`${i + 1}. `); } // 항목마다 붙인 답장·참고를 그 자리에(#1965)
+      else t.innerHTML = (draft.items.length > 1 ? `${i + 1}. ` : '') + mdLite(it.text);
       item.append(t, metaEl(it));
       body.append(item);
     });
@@ -1111,7 +1112,7 @@
         (m.where?.url && !m.draft ? ' · ' + m.where.url : '') + readMark(m);
       const body = document.createElement('span');
       body.className = 'mbody';
-      if (m.draft) renderDraftBody(body, m.draft);
+      if (m.draft) renderDraftBody(body, m.draft, m.id);
       else if (m.quotes?.length) fillWithQuotes(body, m.text, m.quotes, m.id);
       else body.innerHTML = mdLite(m.text);
       if (m.from === 'peer') {

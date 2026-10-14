@@ -411,3 +411,25 @@ test('한 글 안 여러 곳에 답장·참고: 커서 자리에 줄을 바꾸�
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('보관함에서 분류째 묶어 보내도 항목마다 붙인 답장·참고가 그 자리에 남는다 (#1965)', async () => {
+  const messages = [
+    { id: 1, from: 'agent', session: A, text: '첫 번째 답', at: iso(9000) },
+    { id: 2, from: 'agent', session: A, text: '두 번째 답', at: iso(8000) },
+  ];
+  const drafts = [
+    { id: 1, to: A, label: '묶음', text: '[↩#1] 이건 좋아', quotes: [{ id: 1, quote: '첫 번째' }], at: iso(5000) },
+    { id: 2, to: A, label: '묶음', text: '예전 방식 참고', replyTo: 2, refer: true, at: iso(4000) },
+  ];
+  const srv = await startServer(makeDir({ messages, drafts }));
+  try {
+    await srv.api('/api/drafts', { action: 'send', ids: [1, 2] });
+    const m = readChat(srv).at(-1);
+    assert.deepEqual(m.quotes, [{ id: 1, quote: '첫 번째' }, { id: 2, refer: true }]);
+    assert.match(m.text, /\[↩#1\] 이건 좋아[\s\S]*\[📎#2\] 예전 방식 참고/);
+    const { w, ctx } = await openWidget(srv);
+    await w.idle(300);
+    assert.deepEqual(await w.eval((r, id) => [...r.querySelectorAll(`.msg[data-id="${id}"] .mbody .quote`)].map((e) => e.className), m.id), ['quote part', 'quote ref']);
+    await ctx.close();
+  } finally { srv.stop(); }
+});

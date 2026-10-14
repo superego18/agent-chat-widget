@@ -272,6 +272,7 @@ function cleanDraft(v) {
     commit: typeof d?.commit === 'string' && /^[0-9a-f]{4,40}$/.test(d.commit) ? d.commit : null,
     round: Number(d?.round) || null,
     device: d?.device === 'mobile' || d?.device === 'desktop' ? d.device : null,
+    ...(cleanQuotes(d?.quotes) ? { quotes: cleanQuotes(d.quotes) } : {}), // 이 항목 글 속 표시와 짝인 답장·참고
   })).filter((d) => d.text);
   return items.length ? { label: cleanLabel(v.label) || '미분류', items } : undefined;
 }
@@ -281,15 +282,15 @@ function draftMessageText(draft) {
   return `[${label}] ` + draftText(items[0]);
 }
 
-// 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
 // 한 글 안 여러 곳에 붙인 답장·참고(글 속 [↩#번호]·[📎#번호] 표시와 순서대로 짝, #1955). 앞 번호만, 10개까지.
 function cleanQuotes(q, below = Infinity) {
   if (!Array.isArray(q)) return undefined;
-  const out = q.filter((x) => Number.isInteger(x?.id) && x.id > 0 && x.id < below).slice(0, 10)
+  const out = q.filter((x) => Number.isInteger(x?.id) && x.id > 0 && x.id < below).slice(0, 30)
     .map((x) => ({ id: x.id, ...(typeof x.quote === 'string' && x.quote.trim() ? { quote: x.quote.trim().slice(0, 500) } : {}), ...(x.refer === true ? { refer: true } : {}) }));
   return out.length ? out : undefined;
 }
 
+// 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
 function addChat(msg) {
   const draft = msg.from === 'user' ? cleanDraft(msg.draft) : undefined;
   const text = draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
@@ -521,14 +522,22 @@ function sendDrafts(ids, combine, device) {
     const k = d.to + '\u0000' + (d.label || '');
     groups.set(k, [...(groups.get(k) || []), d]);
   }
+  // 항목마다 붙인 답장·참고(#1965): 예전 한 개 답장(replyTo)은 글 앞에 표시를 붙여 같은 방식으로 맞춘다.
+  // 묶어 보낸 메시지의 quotes 는 항목 순서대로 이어 붙여, 합친 글 속 표시 순서와 짝이 맞게 한다.
+  const withQ = (d) => {
+    if (d.quotes?.length || !d.replyTo) return d;
+    return { ...d, text: `[${d.refer ? '📎' : '↩'}#${d.replyTo}] ${d.text}`, quotes: [{ id: d.replyTo, ...(d.replyQuote ? { quote: d.replyQuote } : {}), ...(d.refer ? { refer: true } : {}) }] };
+  };
+  const quotesOf = (items) => items.flatMap((d) => d.quotes || []);
   const sent = [];
-  for (const list of groups.values()) {
+  for (const raw of groups.values()) {
+    const list = raw.map(withQ);
     const to = list[0].to;
     const label = list[0].label || '미분류'; // 분류 없이 담은 것도 [미분류]로 붙여 받는 세션이 묶음을 알게 한다
     if (combine && list.length > 1) {
-      sent.push(addChat({ from: 'user', to, draft: { label, items: list }, device, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
+      sent.push(addChat({ from: 'user', to, draft: { label, items: list }, quotes: quotesOf(list), device, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
     } else {
-      for (const d of list) sent.push(addChat({ from: 'user', to, draft: { label, items: [d] }, context: d.context, round: d.round, where: d.where, device: device || d.device }));
+      for (const d of list) sent.push(addChat({ from: 'user', to, draft: { label, items: [d] }, quotes: quotesOf([d]), context: d.context, round: d.round, where: d.where, device: device || d.device }));
     }
   }
   // 보낸 항목은 어느 메시지로 갔는지(msgId)와 함께 7일 동안 남긴다.

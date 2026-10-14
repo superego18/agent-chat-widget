@@ -25,7 +25,7 @@ export function formatMessage(m, all) {
   // 이전 메시지에 단 답장이면 원문을 붙인다. 글 속 여러 곳에 붙였으면(quotes) 글 속 표시([↩#번호]·[📎#번호]) 순서대로 하나씩 적는다.
   // 참고(refer)는 그 메시지에 답하라는 뜻이 아니라 함께 보라고 붙인 것이다.
   const qs = m.quotes?.length ? m.quotes : m.replyTo ? [{ id: m.replyTo, quote: m.replyQuote, refer: m.refer }] : [];
-  if (m.quotes?.length) lines.push('    글 속 [↩#번호]는 그 자리 아래 말이 그 메시지에 대한 답장, [📎#번호]는 참고로 붙인 메시지라는 표시:');
+  if (m.quotes?.length) lines.push('    글 속 [↩#번호]는 그 표시 뒤의 말이 그 메시지에 대한 답장, [📎#번호]는 참고로 붙인 메시지라는 표시:');
   for (const q of qs) {
     const orig = all.find((x) => x.id === q.id);
     if (!orig) continue;
