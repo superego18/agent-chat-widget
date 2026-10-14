@@ -481,3 +481,29 @@ test('좁은 창이어도 터치 화면이 아니면 데스크톱에서 보낸 �
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('메시지를 고정하면 대화창 위에 남고, 거기서 답장·참고·고정 해제를 원래 말풍선과 똑같이 한다 (#1999)', async () => {
+  const messages = [
+    { id: 1, from: 'agent', session: A, text: '고정할 답', at: iso(9000) },
+    ...Array.from({ length: 130 }, (_, i) => ({ id: i + 2, from: 'agent', session: A, text: `다른 답 ${i}`, at: iso(8000 - i * 10) })),
+  ];
+  const srv = await startServer(makeDir({ messages }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.idle(300);
+    await w.clickText('고정', '.msg[data-id="131"]');
+    await w.idle(200);
+    assert.equal(await w.eval((r) => r.querySelector('#pinbar .msg').dataset.id), '131');
+    await w.clickText('고정 해제', '#pinbar');
+    await w.idle(200);
+    assert.equal(await w.eval((r) => r.getElementById('pinbar').hidden), true);
+    // 120개 밖의 옛 메시지도 고정해 두면 다시 열었을 때 보인다(두 화면 공용 설정)
+    await srv.api('/api/prefs', { pins: { session: A, ids: [1] } });
+    const { w: w2 } = await openWidget(srv, { ctx });
+    await w2.idle(500);
+    assert.match(await w2.eval((r) => r.querySelector('#pinbar .msg .mbody').textContent), /고정할 답/);
+    await w2.clickText('참고', '#pinbar');
+    assert.match(await w2.inputValue(), /^📎1「고정할…」 $/);
+    await ctx.close();
+  } finally { srv.stop(); }
+});

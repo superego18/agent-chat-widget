@@ -420,6 +420,8 @@ function savePrefs(req) {
   // 세션마다 따로 둔다(분류는 세션마다 다르다).
   if ('draftLabel' in req && sid(req.session)) prefs.draftLabels = { ...(prefs.draftLabels || {}), [req.session]: typeof req.draftLabel === 'string' && req.draftLabel.trim() ? req.draftLabel.trim().slice(0, 30) : null };
   // 세션마다 보고 있던 메시지(맨 위에 보이던 메시지 id, 맨 아래면 'bottom'). 화면 폭과 상관없이 같은 메시지로 돌아간다.
+  // 세션마다 대화창 위에 고정해 둔 메시지 번호들(#1999, 두 화면 공용)
+  if (req.pins && sid(req.pins.session) && Array.isArray(req.pins.ids)) prefs.pins = { ...(prefs.pins || {}), [req.pins.session]: [...new Set(req.pins.ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, 10) };
   if (req.pos && sid(req.pos.session) && typeof req.pos.id === 'string' && req.pos.id.length < 80) prefs.pos = { ...(prefs.pos || {}), [req.pos.session]: req.pos.id };
   // 보관함에서 접어 둔 분류와 "최근 보낸 것·지운 것"을 펼쳤는지(세션마다, 두 화면 공용)
   if (req.fold && sid(req.fold.session)) {

@@ -189,6 +189,11 @@
   #reply .rref.open > span { display: block; -webkit-line-clamp: unset; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
   #reply .rref > button.go { font-size: 11px; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   .msg .mbody .quote { margin: 4px 0; }
+  /* 고정한 메시지: 대화 목록 위에 붙여 두고, 단추는 대화 속 원래 말풍선의 단추를 대신 누른다(#1999) */
+  .pinbar { flex: none; max-height: 34vh; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; background: #fffbeb; border-bottom: 1px solid #fde68a; }
+  .pinbar[hidden] { display: none; }
+  .pinbar > .msg { align-self: stretch; max-width: none; margin: 0; }
+  .pinbar > .pinhead { font-size: 11px; font-weight: 600; color: #92400e; }
   /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
   /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 입력칸 글과 같은 폭을 차지하되 글자를 작게 그린다(#1994). */
   #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
@@ -391,6 +396,7 @@
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
   <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="pagesBtn" type="button" title="이 프로젝트의 비교 페이지 목록">비교 페이지</button><button class="notif" id="stopBtn" type="button" title="이 세션이 하던 작업 멈추기(터미널에 Esc)" hidden>중지</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
+  <div class="pinbar" id="pinbar" hidden></div>
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="psheet" hidden role="dialog" aria-label="비교 페이지 목록"><div class="dhead"><span id="ptitle">비교 페이지</span><span class="dbtns"><button type="button" id="phid">숨긴 것 보기</button><button type="button" id="pclose" aria-label="비교 페이지 목록 닫기">닫기 ▾</button></span></div><div class="drafts" id="plist"></div></div><div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
@@ -1083,6 +1089,42 @@
   // 이전 대화 더 보기: 기본은 최근 120개. 누를 때마다 120개씩 더 그린다. 세션 탭을 바꾸거나 대화창을 다시 열면 120개로 돌아가고, 새 메시지가 와도 늘린 만큼은 그대로 둔다.
   const PAGE = 120;
   let showCount = PAGE, showTab = null, moreClicked = false;
+  // 고정(#1999): 세션 탭마다 고정한 메시지 번호. 두 화면이 함께 쓴다(설정 prefs.pins).
+  const pinsNow = () => (activeTab !== 'all' && prefs?.pins?.[activeTab]) || [];
+  function togglePin(id) {
+    const cur = pinsNow();
+    const ids = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    prefs = { ...prefs, pins: { ...(prefs?.pins || {}), [activeTab]: ids } };
+    savePrefs({ pins: { session: activeTab, ids } });
+    render();
+  }
+  // 고정 칸: 대화 속 원래 말풍선을 그대로 본떠 그리고, 단추는 원래 말풍선의 같은 단추를 대신 누른다(답장·참고·다시 보내기 등 모두 같게).
+  // 말풍선 안에서 고치는 단추(고치기 등)는 원래 말풍선이 보이게 대화를 그쪽으로 옮긴다.
+  function renderPinned() {
+    const bar = $('pinbar'), box = $('msgs');
+    const els = pinsNow().map((id) => box.querySelector(`.msg[data-id="${id}"]`)).filter(Boolean);
+    bar.hidden = !els.length;
+    if (!els.length) { bar.replaceChildren(); return; }
+    const head = document.createElement('span');
+    head.className = 'pinhead';
+    head.textContent = `📌 고정한 메시지 ${els.length}개`;
+    bar.replaceChildren(head, ...els.map((orig) => {
+      const c = orig.cloneNode(true);
+      c.classList.remove('unread', 'flashing');
+      c.classList.add('pinned');
+      const from = [...orig.querySelectorAll('button')];
+      [...c.querySelectorAll('button')].forEach((b, i) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const o = from[i];
+          if (!o) return;
+          o.click();
+          if (!/^(답장|참고|고정|고정 해제|원문으로|펼치기|접기)$/.test(o.textContent.trim())) orig.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        };
+      });
+      return c;
+    }));
+  }
   function render() {
     renderTabs();
     const box = $('msgs');
@@ -1111,6 +1153,8 @@
       box.append(p);
     }
     if (showTab !== activeTab) { showCount = PAGE; showTab = activeTab; }
+    const oldestPin = Math.min(...pinsNow().map((id) => items.findIndex((m) => m.id === id)).filter((i) => i >= 0));
+    if (Number.isFinite(oldestPin) && items.length - oldestPin > showCount) showCount = items.length - oldestPin; // 고정한 메시지는 대화 속에도 그려져 있어야 단추를 대신 누를 수 있다
     const shown = items.slice(-showCount);
     if (items.length > shown.length) {
       const more = document.createElement('button');
@@ -1191,6 +1235,15 @@
         rf.title = '답장이 아니라 참고하라고 이 메시지를 붙이기';
         rf.onclick = () => setReply(m, true);
         small.append(rf);
+        if (activeTab !== 'all') {
+          const pn = document.createElement('button');
+          pn.type = 'button';
+          pn.className = 'rp';
+          pn.textContent = pinsNow().includes(m.id) ? '고정 해제' : '고정';
+          pn.title = '대화창 위에 고정해 두고 계속 참고·답장하기';
+          pn.onclick = () => togglePin(m.id);
+          small.append(pn);
+        }
       }
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
@@ -1422,6 +1475,7 @@
       keepPlace(); // 다시 그려도 읽던 메시지가 같은 자리에 있게
     }
     markQuote(replyTo, replyQuote); // 다시 그리면 범위가 사라지므로 음영을 다시 칠한다
+    requestAnimationFrame(renderPinned); // 말풍선의 펼치기 단추 등이 자리 잡은 뒤 본뜬다
     placeToBottom();
     const target = sessionById(activeTab);
     // 세션이 일하는 중이고 Claude 세션(중계 훅이 끼워 넣음)일 때만 "끼워넣기"를 보인다.
