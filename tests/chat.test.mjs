@@ -591,6 +591,7 @@ test('글머리 항목: 입력칸에서 이어 쓰고 들이고, 보낸 메시�
     await page.keyboard.press('Tab');
     await page.keyboard.type('하위');
     assert.equal(await w.inputValue(), '- 첫째\n  - 하위');
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('#inback i.bul')].map((e) => e.textContent)), ['-', '-'], '입력칸에서도 줄 머리 -는 •로 보인다 (#2046)');
     await page.keyboard.press('Shift+Enter');
     await page.keyboard.press('Shift+Enter'); // 빈 항목에서 한 번 더 바꾸면 목록이 끝난다
     assert.equal(await w.inputValue(), '- 첫째\n  - 하위\n');

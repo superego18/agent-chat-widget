@@ -210,6 +210,8 @@
   /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 입력칸 글과 같은 폭을 차지하되 글자를 작게 그린다(#1994). */
   #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
   #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: 0.78em; color: #3730a3; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 1px #c7c9f5; }
+  #inback i.bul { font-style: normal; position: relative; color: transparent; }
+  #inback i.bul::before { content: '•'; position: absolute; left: 50%; transform: translateX(-50%); color: #1c1b18; }
   #inback mark.f { color: #57534e; background: #ecebe7; box-shadow: 0 0 0 1px #d6d3d1; }
   form textarea#input { position: relative; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: #1c1b18; }
   form textarea#input::placeholder { color: #8f8c84; -webkit-text-fill-color: #8f8c84; }
@@ -2265,14 +2267,16 @@
       back.style.paddingRight = parseFloat(cs.paddingRight) + Math.max(0, bar) + 'px';
       const lh = cs.lineHeight === 'normal' ? '' : `line-height:${cs.lineHeight};height:${cs.lineHeight};`;
       const v = el.value;
+      // 줄 머리 `- `의 -는 같은 폭 그대로 •로 그린다(글은 그대로, 보이는 것만 #2046).
+      const bullets = (t, at) => escH(t).replace(/(^|\n)( *)- /g, (m, nl, sp, off) => (off === 0 && v[at - 1] && v[at - 1] !== '\n' ? m : `${nl}${sp}<i class="bul">-</i> `));
       let html = '', i = 0;
       for (const x of v.matchAll(MARK)) {
         // 칩 폭은 입력칸이 그 글을 그리는 폭과 같게(커서 자리가 어긋나지 않게) 재고, 그 안에 작은 글자로 그린다.
         measure.textContent = x[0];
-        html += escH(v.slice(i, x.index)) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}">${escH(x[0])}</mark>`;
+        html += bullets(v.slice(i, x.index), i) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}">${escH(x[0])}</mark>`;
         i = x.index + x[0].length;
       }
-      back.innerHTML = html + escH(v.slice(i)) + '\n';
+      back.innerHTML = html + bullets(v.slice(i), i) + '\n';
       back.append(measure);
       back.scrollTop = el.scrollTop;
     };
