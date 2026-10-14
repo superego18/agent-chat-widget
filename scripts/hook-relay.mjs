@@ -57,6 +57,7 @@ function isAutomatic(text) {
     t.startsWith('<command-') ||
     t.startsWith('Another Claude session sent a message') ||
     t.startsWith('<cross-session-message') ||
+    t.startsWith('<agent-message') || // 서브에이전트가 끝나며 돌려준 보고(#1945)
     t.startsWith('[Cross-session delivery notice]') || // 다른 세션에 보낸 메시지가 보류·전달됐다는 알림(#1939)
     t.startsWith('<system-reminder') ||
     t.startsWith('[자동생성]') // 대화창 서버가 깨우려고 넣은 문구(chat-handler.mjs NUDGE_TEXT)
