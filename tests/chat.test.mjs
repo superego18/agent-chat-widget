@@ -92,7 +92,7 @@ test('새로고침해도 입력칸 글과 붙여 둔 참고가 남는다 (하던
     await page.close();
     ({ w } = await openWidget(srv, { ctx }));
     await w.idle(800);
-    assert.equal(await w.inputValue(), '[📎#1 "세션 답…"] 쓰던 글');
+    assert.equal(await w.inputValue(), '📎1 쓰던 글');
     assert.equal(await w.eval((r) => !r.getElementById('reply').hidden && r.getElementById('reply').classList.contains('ref')), true);
     await ctx.close();
   } finally { srv.stop(); }
@@ -396,10 +396,10 @@ test('한 글 안 여러 곳에 답장·참고: 커서 자리에 줄을 바꾸�
     await w.clickText('참고', '.msg[data-id="2"]');
     await w.type((await w.inputValue()) + '이것도 같이 봐');
     await w.clickText('답장', '.msg[data-id="3"]');
-    assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"] 이건 좋아 [📎#2 "두 번째 답…"] 이것도 같이 봐 [↩#3 "세 번째 답…"] ');
+    assert.equal(await w.inputValue(), '↩1 이건 좋아 📎2 이것도 같이 봐 ↩3 ');
     assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('#reply .rref span')].map((e) => e.textContent.split(' · ')[0])), ['↩#1 답장', '📎#2 참고', '↩#3 답장']);
     await w.eval((r) => r.querySelectorAll('#reply .rref')[2].lastElementChild.click()); // 마지막 것을 빼면 글 속 표시도 지워진다
-    assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"] 이건 좋아 [📎#2 "두 번째 답…"] 이것도 같이 봐 ');
+    assert.equal(await w.inputValue(), '↩1 이건 좋아 📎2 이것도 같이 봐 ');
     await w.eval((r) => r.getElementById('form').requestSubmit());
     await w.idle(800);
     const m = readChat(srv).at(-1);
@@ -446,6 +446,21 @@ test('입력칸 아래 붙인 답장·참고 줄을 누르면 원문이 다 펼�
     await w.clickText('원문으로', '#reply');
     await w.idle(100);
     assert.equal(await w.eval((r) => r.querySelector('.msg[data-id="1"]').classList.contains('flashing')), true);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('입력칸 속 답장·참고 표시는 칩처럼 칠해지고, 지우면 한 글자씩이 아니라 통째로 지워진다 (#1973, #1977)', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 12, from: 'agent', session: A, text: '세션 답', at: iso(9000) }] }));
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    await w.clickText('답장', '.msg[data-id="12"]');
+    await w.type((await w.inputValue()) + '좋아');
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('#inback mark')].map((e) => e.textContent)), ['↩12']);
+    await w.eval((r) => { const i = r.getElementById('input'); i.focus(); i.setSelectionRange(3, 3); }); // 칩 바로 뒤(빈칸 앞)
+    await page.keyboard.press('Backspace');
+    assert.equal(await w.inputValue(), ' 좋아');
+    assert.equal(await w.eval((r) => r.getElementById('reply').hidden), true, '칩을 지우면 붙인 것도 빠진다');
     await ctx.close();
   } finally { srv.stop(); }
 });

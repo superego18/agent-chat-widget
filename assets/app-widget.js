@@ -189,6 +189,11 @@
   #reply .rref.open > span { display: block; -webkit-line-clamp: unset; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
   #reply .rref > button.go { font-size: 11px; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   .msg .mbody .quote { margin: 4px 0; }
+  /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
+  #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: transparent; pointer-events: none; background: #f6f5f1; margin: 0; }
+  #inback mark { color: transparent; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 2px #e0e7ff; }
+  #inback mark.f { background: #ecebe7; box-shadow: 0 0 0 2px #ecebe7; }
+  form textarea#input { position: relative; background: transparent; }
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
   .selreply { position: fixed; z-index: 2147483647; transform: translateX(-50%); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer; }
   .selreply[hidden] { display: none; }
@@ -599,7 +604,8 @@
   // 누를 때마다 커서 자리에 표시를 넣고, 입력칸 아래에 무엇을 붙였는지 한 줄씩 보인다. 표시를 지우면 그 답장·참고도 빠진다.
   const openRefs = new Set(); // 입력칸 아래 목록에서 펼친 줄
   let refs = []; // 붙인 것들 {id, ref, quote}. 글 속 표시와 번호·종류로 짝짓는다
-  const MARK = /\[(↩|📎)#(\d+)(?: "[^"\]\n]*")?\]/g;
+  // 입력칸 속 표시는 짧게 ↩1940 · 📎1940 으로 두고 칩처럼 칠한다(#1973). 보낼 때는 [↩#1940] 으로 바꿔 적는다.
+  const MARK = /\[?(↩|📎)#?(\d+)\]?/g;
   const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${id}]`);
   function pairRefs(t) {
     const left = [...refs];
@@ -683,7 +689,7 @@
     lastSel = null;
     const inp = $('input'), v = inp.value;
     const s0 = inp.selectionStart ?? v.length, e0 = inp.selectionEnd ?? s0;
-    const mark = `[${ref ? '📎' : '↩'}#${m.id} "${(quote || body).slice(0, 14).replace(/["\]\n]/g, '')}…"]`;
+    const mark = `${ref ? '📎' : '↩'}${m.id}`;
     // 줄을 바꾸지 않고 커서 자리에 그대로 넣는다(#1964). 앞 글자에 붙으면 띄어 쓰고, 뒤에는 이어 쓸 빈칸을 둔다.
     const pre = s0 && !/\s/.test(v[s0 - 1]) ? ' ' : '';
     const post = /\s/.test(v[e0] || '') ? '' : ' ';
@@ -2090,6 +2096,66 @@
     if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
   }
   $('input').addEventListener('input', () => { autoGrow($('input')); showReplyText(); });
+  // 표시 칩: 입력칸 뒤 배경(#inback)에 표시 자리만 칠한다. 입력칸 글을 코드로 바꿔도(임시 저장 불러오기·비우기) 다시 칠하도록 value 를 가로챈다.
+  {
+    const el = $('input');
+    const back = document.createElement('div');
+    back.id = 'inback';
+    back.setAttribute('aria-hidden', 'true');
+    el.before(back);
+    const escH = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+    const paint = () => {
+      const cs = getComputedStyle(el);
+      for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRadius']) back.style[k] = cs[k];
+      back.style.width = el.offsetWidth + 'px';
+      back.style.height = el.offsetHeight + 'px';
+      const v = el.value;
+      let html = '', i = 0;
+      for (const x of v.matchAll(MARK)) { html += escH(v.slice(i, x.index)) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}">${escH(x[0])}</mark>`; i = x.index + x[0].length; }
+      back.innerHTML = html + escH(v.slice(i)) + '\n';
+      back.scrollTop = el.scrollTop;
+    };
+    const d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    Object.defineProperty(el, 'value', { get() { return d.get.call(this); }, set(v) { d.set.call(this, v); paint(); }, configurable: true });
+    el.addEventListener('input', paint);
+    el.addEventListener('scroll', () => { back.scrollTop = el.scrollTop; });
+    new ResizeObserver(paint).observe(el);
+    const marks = () => [...el.value.matchAll(MARK)].map((x) => [x.index, x.index + x[0].length]);
+    // 칩은 한 덩어리: 지우면 통째로 지워지고(#1977), 칩 가운데에 커서가 서면 칩 뒤로 옮긴다.
+    el.addEventListener('beforeinput', (e) => {
+      if (e.isComposing) return;
+      const a = el.selectionStart, b = el.selectionEnd, ms = marks();
+      if (/^delete/.test(e.inputType)) {
+        let s0 = a, e0 = b;
+        if (a === b) {
+          const fwd = /Forward/.test(e.inputType);
+          const hit = ms.find(([p, q]) => (fwd ? p <= a && a < q : p < a && a <= q));
+          if (!hit) return;
+          [s0, e0] = hit;
+        } else {
+          for (const [p, q] of ms) if (p < e0 && q > s0) { s0 = Math.min(s0, p); e0 = Math.max(e0, q); }
+          if (s0 === a && e0 === b) return;
+        }
+        e.preventDefault();
+        el.setRangeText('', s0, e0, 'end');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      } else if (e.inputType === 'insertText' && e.data && a === b) {
+        const hit = ms.find(([p, q]) => p < a && a < q);
+        if (!hit) return;
+        e.preventDefault();
+        el.setRangeText(e.data, hit[1], hit[1], 'end');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    const snap = () => {
+      const a = el.selectionStart;
+      if (a !== el.selectionEnd) return;
+      const hit = marks().find(([p, q]) => p < a && a < q);
+      if (hit) el.setSelectionRange(hit[1], hit[1]);
+    };
+    el.addEventListener('click', snap);
+    el.addEventListener('keyup', snap);
+  }
   // 진단(임시): 고치기를 시작한 뒤 3초 동안의 터치·클릭·초점 순서를 모아 서버(.ui-feedback/diag.jsonl)에 남긴다.
   // 폰에서 "다시 보내기"를 누르면 아래 입력칸으로 초점이 가는 원인을 보려는 것이다. 원인을 찾으면 지운다.
   {
