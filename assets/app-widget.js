@@ -2695,7 +2695,8 @@
       }
       btn('지우기', async () => {
         await draftsApi({ action: 'delete', ids: [d.id] });
-        toast('지웠어요', () => draftsApi({ action: 'restore', ids: [d.id] }));
+        renderDrafts(); // 초점이 보관함 안에 있으면 확인 주기가 다시 그리지 않으므로 바로 뺀다(#2019)
+        toast('지웠어요', async () => { await draftsApi({ action: 'restore', ids: [d.id] }); renderDrafts(); });
       });
       card.append(top, more, meta, acts);
       g.append(card);

@@ -533,3 +533,16 @@ test('고정 칸: 처음엔 한 줄씩, 3줄씩으로 바꿀 수 있고, 찾은 
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('보관함에서 지우면 그 자리에서 바로 빠진다 (#2019)', async () => {
+  const srv = await startServer(makeDir({ drafts: [{ id: 1, to: A, text: '지울 글', label: null, at: iso(9000) }, { id: 2, to: A, text: '다른 글', label: null, at: iso(8000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.click('#draftsBtn');
+    await w.idle(300);
+    await w.eval((r) => { const b = [...r.querySelectorAll('.draft[data-id="1"] button')].find((x) => x.textContent.trim() === '지우기'); b.focus(); b.click(); });
+    await w.idle(500);
+    assert.equal(await w.eval((r) => !!r.querySelector('#drafts .draft[data-id="1"]')), false);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
