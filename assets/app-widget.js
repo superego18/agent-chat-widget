@@ -11,6 +11,8 @@
   // 메시지를 보낸 기기 구분. 창 폭이 아니라 터치 화면인지로 본다(데스크톱에서 창을 좁혀 써도 데스크톱, #1982).
   const deviceNow = () => (touchScreen() ? 'mobile' : 'desktop');
   const CFG = { context: 'app', label: '앱 화면', pick: true, round: null, ...(window.__uifbConfig || {}) };
+  // 대화창을 열어 둔 것은 화면 종류(앱 화면·비교 페이지)마다 따로 기억한다. 앱에서 열어 둬도 비교 페이지로 가면 닫혀 있게(#2028).
+  const OPEN_KEY = '__uifb_open:' + CFG.context;
 
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;inset:auto;z-index:2147483647;';
@@ -1697,7 +1699,7 @@
     if (open) { scrollToUnread = true; showCount = PAGE; }
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
-    try { localStorage.setItem('__uifb_open', open ? '1' : '0'); } catch {}
+    try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch {}
     // 대화창이 열려 있는 동안 앱의 개발 도구 단추(Next.js 의 nextjs-portal)가 모바일에서 대화창을 가리므로 숨긴다. 닫으면 다시 보인다.
     document.documentElement.toggleAttribute('data-uifb-open', open);
     if (!document.getElementById('__uifb_hide_devtools')) {
@@ -3235,7 +3237,7 @@
 
   // 창이 열려 있던 채로 새로고침했으면 다시 연다(이 브라우저에만 기억한다. 폰에서 연다고 PC 창이 열리지 않게).
   let wasOpen = false;
-  try { wasOpen = localStorage.getItem('__uifb_open') === '1'; } catch {}
+  try { wasOpen = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
   // 하던 것은 원치 않는 새로고침(폰이 앱을 다시 띄움 등)에도 남긴다: 말풍선·보류에서 고치던 글을 1초마다 이 기기에 적어 두고, 다시 열 때 되살린다.
   // (입력칸 글은 서버, 답장·참고·위치는 따로 이 기기에 남긴다)
   let editSaved = '';

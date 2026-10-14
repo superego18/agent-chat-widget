@@ -546,3 +546,21 @@ test('보관함에서 지우면 그 자리에서 바로 빠진다 (#2019)', asyn
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('앱 화면에서 대화창을 열어 둬도, 같은 기기의 비교 페이지로 가면 닫혀 있다 (#2028)', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    fs.writeFileSync(path.join(srv.dir, 'r.html'), '<!doctype html><meta name="viewport" content="width=device-width"><title>r</title><body><script>window.__uifbConfig = { context: "review", label: "비교 페이지" };</script><script src="/__uifb/widget.js"></script></body>');
+    const { w, page, ctx } = await openWidget(srv); // 앱 화면에서 연다
+    assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false);
+    await page.goto(srv.base + '/r.html');
+    await page.waitForFunction(() => [...document.querySelectorAll('*')].some((e) => e.shadowRoot?.getElementById('panel')));
+    await sleep(800);
+    assert.equal(await w.eval((r) => r.getElementById('panel').hidden), true, '비교 페이지에서는 닫혀 있다');
+    await page.goto(srv.base + '/t.html');
+    await page.waitForFunction(() => [...document.querySelectorAll('*')].some((e) => e.shadowRoot?.getElementById('panel')));
+    await sleep(800);
+    assert.equal(await w.eval((r) => r.getElementById('panel').hidden), false, '앱 화면으로 돌아오면 다시 열려 있다');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
