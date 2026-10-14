@@ -673,6 +673,17 @@
     }));
     saveReplyState();
   }
+  // 입력칸 글을 s0~e0 자리에서 t 로 바꾼다. 브라우저 편집 명령으로 바꿔야 iPhone 한글 키보드가 바뀐 글을 알아,
+  // 바로 다음에 친 글자가 앞 글자(칩 뒤 빈칸)를 덮어쓰지 않는다(#1986). 명령이 안 되면 직접 바꾼다.
+  function editText(el, s0, e0, t) {
+    el.focus();
+    el.setSelectionRange(s0, e0);
+    let ok = false;
+    try { ok = t ? document.execCommand('insertText', false, t) : document.execCommand('delete'); } catch {}
+    if (ok && el.value.slice(s0, s0 + t.length) === t) return;
+    el.setRangeText(t, s0, e0, 'end');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
   function setReply(m, ref = false, picked = null) {
     if (!m) {
       refs = [];
@@ -693,12 +704,9 @@
     // 줄을 바꾸지 않고 커서 자리에 그대로 넣는다(#1964). 앞 글자에 붙으면 띄어 쓰고, 뒤에는 이어 쓸 빈칸을 둔다.
     const pre = s0 && !/\s/.test(v[s0 - 1]) ? ' ' : '';
     const post = /\s/.test(v[e0] || '') ? '' : ' ';
-    inp.value = v.slice(0, s0) + pre + mark + post + v.slice(e0);
-    refs.push({ id: m.id, ref, quote });
-    inp.focus();
-    const c = s0 + pre.length + mark.length + post.length;
-    inp.setSelectionRange(c, c);
-    inp.dispatchEvent(new Event('input', { bubbles: true })); // 입력칸 저장·높이·아래 목록을 함께 맞춘다
+    refs.push({ id: m.id, ref, quote }); // 먼저 넣어 둬야 바뀐 글을 보고 목록을 다시 짤 때 고른 부분이 남는다
+    editText(inp, s0, e0, pre + mark + post); // 입력칸 저장·높이·아래 목록은 input 이벤트로 함께 맞춰진다
+    if (!post && v[e0] === ' ') { const c = s0 + pre.length + mark.length + 1; inp.setSelectionRange(c, c); } // 뒤에 빈칸이 이미 있으면 커서를 그 뒤로
     markQuote(m.id, quote);
   }
   // 붙여 둔 답장·참고는 이 기기에 기억해, 새로고침해도 다시 붙인다(입력칸 글처럼 이어 쓸 수 있게).
@@ -2121,6 +2129,8 @@
     el.addEventListener('scroll', () => { back.scrollTop = el.scrollTop; });
     new ResizeObserver(paint).observe(el);
     const marks = () => [...el.value.matchAll(MARK)].map((x) => [x.index, x.index + x[0].length]);
+    // 칩을 지우거나 칩 뒤로 글을 옮겨 쓸 때도 브라우저 편집(editText)으로 바꾼다. value 를 직접 바꾸면 iPhone 키보드가 앞 글을 잘못 알아 다음 글자가 지워진다(#1986).
+    const edit = (s0, e0, t) => editText(el, s0, e0, t);
     // 칩은 한 덩어리: 지우면 통째로 지워지고(#1977), 칩 가운데에 커서가 서면 칩 뒤로 옮긴다.
     el.addEventListener('beforeinput', (e) => {
       if (e.isComposing) return;
@@ -2129,24 +2139,20 @@
         let s0 = a, e0 = b;
         if (a === b) {
           const fwd = /Forward/.test(e.inputType);
-          // 칩 뒤에 붙여 넣은 빈칸 하나는 칩의 일부로 본다: 칩을 붙인 직후(커서가 그 빈칸 뒤) 한 번 지우면 칩이 빈칸과 함께 지워진다(#1983).
-          const v = el.value;
-          const hit = ms.find(([p, q]) => (fwd ? p <= a && a < q : p < a && (a <= q || (a === q + 1 && v[q] === ' '))));
+          const hit = ms.find(([p, q]) => (fwd ? p <= a && a < q : p < a && a <= q));
           if (!hit) return;
-          [s0, e0] = [hit[0], fwd ? hit[1] : Math.max(hit[1], a)];
+          [s0, e0] = hit;
         } else {
           for (const [p, q] of ms) if (p < e0 && q > s0) { s0 = Math.min(s0, p); e0 = Math.max(e0, q); }
           if (s0 === a && e0 === b) return;
         }
         e.preventDefault();
-        el.setRangeText('', s0, e0, 'end');
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        edit(s0, e0, '');
       } else if (e.inputType === 'insertText' && e.data && a === b) {
         const hit = ms.find(([p, q]) => p < a && a < q);
         if (!hit) return;
         e.preventDefault();
-        el.setRangeText(e.data, hit[1], hit[1], 'end');
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        edit(hit[1], hit[1], e.data);
       }
     });
     const snap = () => {
