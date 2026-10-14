@@ -464,3 +464,17 @@ test('입력칸 속 답장·참고 표시는 칩처럼 칠해지고, 지우면 �
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('좁은 창이어도 터치 화면이 아니면 데스크톱에서 보낸 것으로 적는다 (#1982)', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    const b = await (await import('./helpers.mjs')).getBrowser();
+    const ctx = await b.newContext({ viewport: { width: 500, height: 800 } });
+    const { w } = await openWidget(srv, { ctx });
+    await w.type('좁은 데스크톱 창');
+    await w.eval((r) => r.getElementById('form').requestSubmit());
+    await w.idle(600);
+    assert.equal(readChat(srv).at(-1).device, 'desktop');
+    await ctx.close();
+  } finally { srv.stop(); }
+});

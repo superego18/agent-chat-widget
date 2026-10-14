@@ -8,8 +8,8 @@
   const here = () => { const u = new URL(location.href); u.searchParams.delete('k'); return u.pathname + u.search; };
   // 터치 화면(폰·태블릿)에서는 창을 열 때 입력칸에 자동으로 들어가지 않는다(키보드가 바로 올라와 대화를 가린다).
   const touchScreen = () => matchMedia('(pointer: coarse)').matches;
-  // 메시지를 보낸 화면 구분. 창 크기·입력칸과 같은 기준(폭 768px)이다.
-  const deviceNow = () => (innerWidth < 768 ? 'mobile' : 'desktop');
+  // 메시지를 보낸 기기 구분. 창 폭이 아니라 터치 화면인지로 본다(데스크톱에서 창을 좁혀 써도 데스크톱, #1982).
+  const deviceNow = () => (touchScreen() ? 'mobile' : 'desktop');
   const CFG = { context: 'app', label: '앱 화면', pick: true, round: null, ...(window.__uifbConfig || {}) };
 
   const host = document.createElement('div');
