@@ -595,6 +595,14 @@ test('글머리 항목: 입력칸에서 이어 쓰고 들이고, 보낸 메시�
     await page.keyboard.press('Shift+Enter');
     await page.keyboard.press('Shift+Enter'); // 빈 항목에서 한 번 더 바꾸면 목록이 끝난다
     assert.equal(await w.inputValue(), '- 첫째\n  - 하위\n');
+    await page.keyboard.type('- 둘째');
+    for (let k = 0; k < 3; k++) await page.keyboard.press('Tab'); // 윗줄보다 한 단계까지만 들어간다 (#2051)
+    assert.equal(await w.inputValue(), '- 첫째\n  - 하위\n    - 둘째');
+    await w.eval((r) => { const i = r.getElementById('input'); i.value = '1. 가\n2. 나'; i.setSelectionRange(i.value.length, i.value.length); });
+    await page.keyboard.press('Tab'); // 하위 번호는 1부터
+    assert.equal(await w.inputValue(), '1. 가\n  1. 나');
+    await page.keyboard.press('Shift+Tab'); // 내어 쓰면 그 단계 앞 번호 다음
+    assert.equal(await w.inputValue(), '1. 가\n2. 나');
     await ctx.close();
   } finally { srv.stop(); }
 });

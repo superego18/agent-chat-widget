@@ -2379,8 +2379,21 @@
       else editText(el, a, a, '\n' + m[1] + (m[3] ? Number(m[3]) + 1 + m[4] : m[2]) + ' ');
     } else if (e.key === 'Tab') {
       e.preventDefault();
-      if (e.shiftKey) { const cut = Math.min(2, m[1].length); if (cut) { editText(el, ls, ls + cut, ''); el.setSelectionRange(a - cut, a - cut); } }
-      else { editText(el, ls, ls, '  '); el.setSelectionRange(a + 2, a + 2); }
+      // 들이기는 윗줄 목록보다 한 단계까지만(중간 단계를 건너뛰지 않게 #2051). 번호는 새 단계에서 다시 센다: 들이면 1, 내어 쓰면 그 단계 앞 번호 다음.
+      const above = v.slice(0, Math.max(0, ls - 1)).split('\n');
+      const item = (t) => /^([ \t]*)(?:[-*]|(\d+)[.)])[ \t]/.exec(t);
+      const up = ls ? item(above.at(-1)) : null;
+      const ind = e.shiftKey ? Math.max(0, m[1].length - 2) : Math.min(m[1].length + 2, up ? up[1].length + 2 : 0);
+      if (ind === m[1].length) return;
+      let mk = m[2];
+      if (m[3]) {
+        const prev = e.shiftKey ? [...above].reverse().map(item).find((x) => x && x[1].length <= ind) : null;
+        mk = (prev && prev[1].length === ind && prev[2] ? Number(prev[2]) + 1 : 1) + m[4];
+      }
+      const end = ls + m[1].length + m[2].length;
+      editText(el, ls, end, ' '.repeat(ind) + mk);
+      const at = a + ind + mk.length - (end - ls);
+      el.setSelectionRange(at, at);
     }
   });
 
