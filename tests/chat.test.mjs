@@ -3,6 +3,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -605,4 +606,34 @@ test('글머리 항목: 입력칸에서 이어 쓰고 들이고, 보낸 메시�
     assert.equal(await w.inputValue(), '1. 가\n2. 나');
     await ctx.close();
   } finally { srv.stop(); }
+});
+
+test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인다 (#2055)', async () => {
+  // 가짜 claude: 받은 인자와 질문을 그대로 답으로 돌려준다.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({result:'사본 답 '+process.argv.slice(2).join(' ')+' | '+s})));\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin + path.delimiter + oldPath;
+  const srv = await startServer(makeDir());
+  process.env.PATH = oldPath;
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.type('곁으로 묻기');
+    await w.eval((r) => r.getElementById('side').click());
+    let msgs = [];
+    for (let i = 0; i < 40 && msgs.length < 2; i++) { await new Promise((r) => setTimeout(r, 100)); msgs = (await srv.api('/api/chat')).messages; }
+    const [q, a] = msgs;
+    assert.equal(q.context, 'side');
+    assert.equal(q.to, undefined, '질문은 세션에 전달되지 않는다');
+    assert.equal(q.session, A);
+    assert.equal(a.from, 'agent');
+    assert.deepEqual(a.re, [q.id]);
+    assert.match(a.text, /--resume aaaaaaaa-0000-4000-8000-000000000001 --fork-session --no-session-persistence/);
+    assert.match(a.text, /--tools Read,Grep,Glob/);
+    assert.match(a.text, /\[곁질문\][\s\S]*곁으로 묻기/);
+    await w.eval((r) => new Promise((ok) => { const t = setInterval(() => { if (r.querySelectorAll('.msg.side').length === 2) { clearInterval(t); ok(); } }, 100); }));
+    assert.equal(await w.eval((r) => r.querySelector('.msg.side .tag').textContent), '곁질문 · 모바일');
+    assert.equal(await w.inputValue(), '');
+    await ctx.close();
+  } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
 });

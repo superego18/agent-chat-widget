@@ -11,7 +11,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { vapidKeys, sendPush } from './web-push.mjs';
-import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS } from './chat-format.mjs';
+import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage } from './chat-format.mjs';
 
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 // 위젯 파일. 요청마다 새로 읽으므로 고치면 열린 화면도 새로고침만으로 바뀐다.
@@ -628,6 +628,38 @@ function queueText(session, message) {
   child.on('exit', (code) => { if (code) console.error(`codex queue 실패(${session.name}): 종료 코드 ${code}`); });
 }
 
+// 곁질문(#2055): 세션을 복제한 사본에게 한 번 묻고 버린다. 원래 세션에는 전달되지 않고 대화 기록도 바뀌지 않는다.
+// 사본은 원래 대화를 다 알고, 앞부분은 캐시로 읽는다(실측: Claude 87%, Codex 1회째 뒤 거의 전부). 읽기 도구만 쓴다.
+// 사본의 훅은 끈다(원래 세션 이름으로 대화창·알림에 새지 않게). 프로젝트 폴더(.ui-feedback 의 상위)에서 실행해야 세션을 찾는다.
+const SIDE_HEAD = '[곁질문] 사용자가 원래 작업을 끊지 않고 따로 묻는 질문입니다. 파일은 읽기만 하고 아무것도 고치지 말고, 지금까지의 대화를 바탕으로 짧게 답하세요.';
+function askSide(s, q) {
+  const prompt = [SIDE_HEAD, ...formatMessage(q, readChat().messages)].join('\n');
+  const settings = path.join(root, 'side-settings.json');
+  fs.writeFileSync(settings, '{"disableAllHooks":true}');
+  const codex = s.tool === 'codex';
+  const args = codex
+    ? ['exec', '--skip-git-repo-check', '--ephemeral', '--json', '--disable', 'hooks', '-s', 'read-only', 'fork', s.sessionId, '-']
+    : ['-p', '--resume', s.sessionId, '--fork-session', '--no-session-persistence', '--settings', settings, '--tools', 'Read,Grep,Glob', '--output-format', 'json'];
+  // Windows 는 claude·codex 가 .cmd 라 셸로 부른다. 인자에 따옴표·공백이 없게 두고 질문은 표준 입력으로 넘긴다.
+  const child = spawn(codex ? 'codex' : 'claude', args, { cwd: path.dirname(root), shell: process.platform === 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+  let out = '', err = '';
+  child.stdout.on('data', (b) => { out += b; });
+  child.stderr.on('data', (b) => { err += b; });
+  const timer = setTimeout(() => child.kill(), 5 * 60_000);
+  const reply = (text) => addChat({ from: 'agent', session: s.sessionId, context: 'side', agent: s.agent || s.name, text: `<re ${q.id}> ${text}` });
+  child.on('error', (e) => { clearTimeout(timer); reply(`곁질문을 실행하지 못했습니다: ${e.message}`); });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    let text = '';
+    try {
+      if (codex) text = out.trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((o) => o?.type === 'item.completed' && o.item?.type === 'agent_message').at(-1)?.item.text || '';
+      else text = JSON.parse(out).result || '';
+    } catch {}
+    reply(text.trim() || `곁질문 답을 받지 못했습니다(종료 코드 ${code}). ${(err || out).trim().slice(-300)}`);
+  });
+  child.stdin.end(prompt);
+}
+
 function readTranscript(id) {
   const session = findSession(id);
   if (!session) return { items: [] };
@@ -938,6 +970,27 @@ function inner(req, res, url) {
         return send(res, 502, { error: '터미널 창에 입력하지 못했습니다(cmux 창이 닫혔을 수 있음): ' + String(e.stderr || e.message).trim().slice(0, 200) });
       }
       send(res, 200, { ok: true });
+    });
+    return;
+  }
+
+  if (url.pathname === '/api/side' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', () => {
+      let msg;
+      try { msg = JSON.parse(body); } catch { return send(res, 400, { error: 'JSON 형식이 아닙니다.' }); }
+      const s = sid(msg.session) && findSession(msg.session);
+      if (!s) return send(res, 400, { error: '곁질문할 세션이 없습니다.' });
+      // 질문은 세션에 전달되지 않게 받는 쪽(to) 없이 그 세션 칸(session)에만 남긴다.
+      const before = readChat().messages.length;
+      const q = addChat({ ...msg, from: 'user', to: undefined, session: s.sessionId, context: 'side', interject: false });
+      if (!q) return send(res, 400, { error: '질문이 비어 있습니다.' });
+      if (q.id > before) askSide(s, q); // 같은 질문을 다시 눌렀으면(cid 같음) 다시 묻지 않는다
+      send(res, 200, q);
     });
     return;
   }

@@ -337,6 +337,8 @@
   form .bcol { align-self: flex-end; }
   form .bcol button[type="submit"] { flex: none; height: 38px; }
   form .bcol button[type="submit"]:has(+ .now[hidden]) { height: 80px; }
+  form .bcol:has(#side) button { height: 25px; }
+  .msg.side { outline: 1.5px dashed #a8a29e; outline-offset: -1.5px; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   /* 보류 = 대화창 맨 아래 점선 말풍선과 같은 남색 점선, 보관함 = 보관함 창과 같은 베이지 상자 */
   form #later, .msg.user.hold .hacts .tohold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #818cf8; }
@@ -421,7 +423,7 @@
   <div class="reloadcover" id="reloadCover" hidden role="status"><b class="ri">↻</b><span></span></div>
   <button type="button" class="tobottom" id="toBottom" hidden aria-label="맨 아래로">↓</button>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" class="adjbtn" id="adjBtn" hidden title="찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값을 함께 보내기">값 바꾸기</button><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button></span></form>
+  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 칩을 붙이면 그 메시지에 대한 질문">곁질문</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aclose" id="adjClose" aria-label="닫기" title="닫기">✕</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
@@ -1266,12 +1268,12 @@
         box.append(newLine);
       }
       const d = document.createElement('div');
-      d.className = 'msg ' + m.from + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' ? (m.session === activeTab ? ' out' : ' in') : '');
+      d.className = 'msg ' + m.from + (m.context === 'side' ? ' side' : '') + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' ? (m.session === activeTab ? ' out' : ' in') : '');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
-      const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
+      const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'side' ? '곁질문' : m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
       tag.textContent = src;
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
@@ -2203,20 +2205,22 @@
     if (st?.where) { where = st.where; setWhereLabel(); $('where').hidden = false; }
   } catch {}
 
-  let interjectNext = false;
+  let interjectNext = false, sideNext = false;
   $('now').onclick = () => { interjectNext = true; $('form').requestSubmit(); };
+  $('side').onclick = () => { sideNext = true; $('form').requestSubmit(); };
   $('form').onsubmit = async (e) => {
     e.preventDefault();
-    const interject = interjectNext;
-    interjectNext = false;
+    const interject = interjectNext, side = sideNext;
+    interjectNext = sideNext = false;
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
-    const kind = 'chat:' + activeTab;
+    const kind = (side ? 'side:' : 'chat:') + activeTab;
     const body = { from: 'user', text, cid: cidFor(kind, text), to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...withQuotes(text), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     // 서버가 받은 뒤에 입력칸을 비운다. 못 보내면 글은 입력칸에 남고, 단추를 다시 누르면 된다.
-    await withBusy(interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
+    // 곁질문(#2055)은 세션에 보내지 않고 서버가 세션 사본에게 묻는다. 답은 10초쯤 뒤 이 칸에 온다.
+    await withBusy(side ? $('side') : interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
       try {
-        const r = await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab } : body) });
         if (!r.ok) throw new Error('send');
         doneCid(kind, text);
         sentTexts.set(text, Date.now());
