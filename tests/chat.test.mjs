@@ -507,3 +507,27 @@ test('메시지를 고정하면 대화창 위에 남고, 거기서 답장·참�
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('고정 칸: 고정한 것마다 앞 3줄만 보이다 하나씩 전체 보기, 크게 보기·숨기기를 고를 수 있다 (#2006)', async () => {
+  const long = Array.from({ length: 12 }, (_, i) => `${i + 1}째 줄`).join('\n\n');
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'agent', session: A, text: long, at: iso(9000) }, { id: 2, from: 'agent', session: A, text: '짧은 답', at: iso(8000) }] }));
+  try {
+    await srv.api('/api/prefs', { pins: { session: A, ids: [1, 2] } });
+    const { w, ctx } = await openWidget(srv);
+    await w.idle(500);
+    const h = () => w.eval((r) => r.querySelector('#pinbar .msg[data-id="1"] .mbody').getBoundingClientRect().height);
+    const small = await h();
+    assert.ok(small < 80, '앞 3줄만');
+    await w.clickText('전체 보기', '#pinbar .msg[data-id="1"]');
+    await w.idle(100);
+    assert.ok((await h()) > small * 2, '하나씩 펼친다');
+    await w.clickText('줄여 보기', '#pinbar .msg[data-id="1"]');
+    await w.clickText('크게 보기', '#pinbar');
+    await w.idle(100);
+    assert.ok((await h()) > small * 2, '크게 보기는 모두 펼친다');
+    await w.clickText('숨기기', '#pinbar');
+    await w.idle(100);
+    assert.equal(await w.eval((r) => r.querySelector('#pinbar .msg').offsetHeight), 0, '숨기면 머리줄만');
+    await ctx.close();
+  } finally { srv.stop(); }
+});

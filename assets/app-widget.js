@@ -193,7 +193,13 @@
   .pinbar { flex: none; max-height: 34vh; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; background: #fffbeb; border-bottom: 1px solid #fde68a; }
   .pinbar[hidden] { display: none; }
   .pinbar > .msg { align-self: stretch; max-width: none; margin: 0; }
-  .pinbar > .pinhead { font-size: 11px; font-weight: 600; color: #92400e; }
+  .pinbar > .pinhead { display: flex; gap: 10px; align-items: center; font-size: 11px; font-weight: 600; color: #92400e; }
+  .pinbar > .pinhead button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+  .pinbar > .pinhead button:first-of-type { margin-left: auto; }
+  /* 보통은 고정한 것마다 앞 3줄만(큰 것 하나가 칸을 다 차지하지 않게), "크게 보기"면 칸을 키우고 모두 펼친다(#2006) */
+  .pinbar > .msg.clamp .mbody { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+  .pinbar.big { max-height: 70vh; }
+  .pinbar.fold > .msg { display: none; }
   /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
   /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 입력칸 글과 같은 폭을 차지하되 글자를 작게 그린다(#1994). */
   #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
@@ -1090,6 +1096,7 @@
   const PAGE = 120;
   let showCount = PAGE, showTab = null, moreClicked = false;
   // 고정(#1999): 세션 탭마다 고정한 메시지 번호. 두 화면이 함께 쓴다(설정 prefs.pins).
+  const openPins = new Set(); // 고정 칸에서 하나씩 펼친 메시지 번호
   const pinsNow = () => prefs?.pins?.[activeTab] || [];
   function togglePin(id) {
     const cur = pinsNow();
@@ -1105,13 +1112,24 @@
     const els = pinsNow().map((id) => box.querySelector(`.msg[data-id="${id}"]`)).filter(Boolean);
     bar.hidden = !els.length;
     if (!els.length) { bar.replaceChildren(); return; }
+    // 칸 모양: 숨기기(머리줄만)·크게 보기(칸을 키우고 모두 펼침)는 이 기기에 기억한다. 하나씩 펼친 것은 이번에만.
+    let mode = {};
+    try { mode = JSON.parse(localStorage.getItem('__uifb_pinbar') || '{}'); } catch {}
+    const setMode = (patch) => { try { localStorage.setItem('__uifb_pinbar', JSON.stringify({ ...mode, ...patch })); } catch {} renderPinned(); };
+    bar.classList.toggle('fold', !!mode.fold);
+    bar.classList.toggle('big', !!mode.big && !mode.fold);
     const head = document.createElement('span');
     head.className = 'pinhead';
-    head.textContent = `📌 고정한 메시지 ${els.length}개`;
+    head.append(`📌 고정한 메시지 ${els.length}개`);
+    const hb = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = fn; head.append(b); };
+    if (!mode.fold) hb(mode.big ? '보통으로' : '크게 보기', () => setMode({ big: !mode.big }));
+    hb(mode.fold ? '보이기' : '숨기기', () => setMode({ fold: !mode.fold }));
     bar.replaceChildren(head, ...els.map((orig) => {
       const c = orig.cloneNode(true);
+      const id = Number(orig.dataset.id);
       c.classList.remove('unread', 'flashing');
       c.classList.add('pinned');
+      c.classList.toggle('clamp', !mode.big && !openPins.has(id));
       const from = [...orig.querySelectorAll('button')];
       [...c.querySelectorAll('button')].forEach((b, i) => {
         b.onclick = (e) => {
@@ -1122,6 +1140,17 @@
           if (!/^(답장|참고|고정|고정 해제|원문으로|펼치기|접기)$/.test(o.textContent.trim())) orig.scrollIntoView({ block: 'center', behavior: 'smooth' });
         };
       });
+      // 보통 모양에서는 고정한 것마다 앞 3줄만 보이고, 잘렸을 때만 "전체 보기"로 하나씩 펼친다.
+      if (!mode.big) {
+        const ob = document.createElement('button');
+        ob.type = 'button';
+        ob.className = 'rp';
+        ob.textContent = openPins.has(id) ? '줄여 보기' : '전체 보기';
+        ob.hidden = true;
+        ob.onclick = (e) => { e.stopPropagation(); openPins.has(id) ? openPins.delete(id) : openPins.add(id); renderPinned(); };
+        c.querySelector('small')?.append(ob);
+        requestAnimationFrame(() => { const b = c.querySelector('.mbody'); ob.hidden = !(openPins.has(id) || (b && b.scrollHeight > b.clientHeight + 1)); });
+      }
       return c;
     }));
   }
