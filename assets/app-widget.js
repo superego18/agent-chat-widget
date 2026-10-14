@@ -185,6 +185,9 @@
   #reply .rref { display: flex; gap: 6px; align-items: flex-start; }
   #reply .rref > span { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   #reply .rref > button { border: 0; background: none; font: inherit; font-size: 15px; line-height: 1; color: inherit; cursor: pointer; padding: 0 2px; }
+  #reply .rref > span { cursor: pointer; }
+  #reply .rref.open > span { display: block; -webkit-line-clamp: unset; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
+  #reply .rref > button.go { font-size: 11px; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   .msg .mbody .quote { margin: 4px 0; }
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
   .selreply { position: fixed; z-index: 2147483647; transform: translateX(-50%); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer; }
@@ -594,6 +597,7 @@
   });
   // 답장·참고는 입력칸 글 속에 표시([↩#번호 "앞부분…"] · [📎#번호 "앞부분…"])로 끼워 넣어, 한 글 안 여러 곳에 붙일 수 있다(#1955).
   // 누를 때마다 커서 자리에 표시를 넣고, 입력칸 아래에 무엇을 붙였는지 한 줄씩 보인다. 표시를 지우면 그 답장·참고도 빠진다.
+  const openRefs = new Set(); // 입력칸 아래 목록에서 펼친 줄
   let refs = []; // 붙인 것들 {id, ref, quote}. 글 속 표시와 번호·종류로 짝짓는다
   const MARK = /\[(↩|📎)#(\d+)(?: "[^"\]\n]*")?\]/g;
   const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${id}]`);
@@ -625,9 +629,30 @@
       const m = messages.find((x) => x.id === r.id);
       const who = m ? quoteOf(m).split(':')[0] : `#${r.id}`;
       const row = document.createElement('div');
-      row.className = 'rref' + (r.ref ? ' ref' : '');
+      const key = `${r.ref ? 'f' : 'r'}${r.id}:${r.quote || ''}`;
+      const open = openRefs.has(key);
+      row.className = 'rref' + (r.ref ? ' ref' : '') + (open ? ' open' : '');
+      // 눌러 펼치면 붙인 원문을 다 보이고(#1971), "원문으로"는 대화에서 그 메시지로 가서 붙인 부분을 칠한다.
+      const full = m ? (m.draft ? m.draft.items.map((it) => it.text).join(' / ') : m.text) : '';
       const t = document.createElement('span');
-      t.textContent = `${r.ref ? '📎' : '↩'}#${r.id} ${r.ref ? '참고' : '답장'} · ` + (r.quote ? `${who}의 일부: "${r.quote}"` : m ? quoteOf(m) : who);
+      t.textContent = `${r.ref ? '📎' : '↩'}#${r.id} ${r.ref ? '참고' : '답장'} · ` + (r.quote ? `${who}의 일부: "${r.quote}"` : m ? (open ? `${who}: ${full}` : quoteOf(m)) : who);
+      t.title = '눌러서 원문 펼치기·접기';
+      t.onclick = () => { open ? openRefs.delete(key) : openRefs.add(key); showReplyText(); };
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'go';
+      go.textContent = '원문으로';
+      go.hidden = !m;
+      go.onclick = () => {
+        const el = $('msgs').querySelector(`.msg[data-id="${r.id}"]`);
+        if (!el) return;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.classList.remove('flashing');
+        void el.offsetWidth;
+        el.classList.add('flashing');
+        setTimeout(() => el.classList.remove('flashing'), 2000);
+        markQuote(r.id, r.quote);
+      };
       const x = document.createElement('button');
       x.type = 'button';
       x.setAttribute('aria-label', '이 답장·참고 빼기');
@@ -637,7 +662,7 @@
         inp.value = v.slice(0, r.at) + v.slice(r.at + r.len).replace(/^ /, '');
         inp.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      row.append(t, x);
+      row.append(t, go, x);
       return row;
     }));
     saveReplyState();

@@ -398,7 +398,7 @@ test('한 글 안 여러 곳에 답장·참고: 커서 자리에 줄을 바꾸�
     await w.clickText('답장', '.msg[data-id="3"]');
     assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"] 이건 좋아 [📎#2 "두 번째 답…"] 이것도 같이 봐 [↩#3 "세 번째 답…"] ');
     assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('#reply .rref span')].map((e) => e.textContent.split(' · ')[0])), ['↩#1 답장', '📎#2 참고', '↩#3 답장']);
-    await w.eval((r) => r.querySelectorAll('#reply .rref button')[2].click()); // 마지막 것을 빼면 글 속 표시도 지워진다
+    await w.eval((r) => r.querySelectorAll('#reply .rref')[2].lastElementChild.click()); // 마지막 것을 빼면 글 속 표시도 지워진다
     assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"] 이건 좋아 [📎#2 "두 번째 답…"] 이것도 같이 봐 ');
     await w.eval((r) => r.getElementById('form').requestSubmit());
     await w.idle(800);
@@ -430,6 +430,22 @@ test('보관함에서 분류째 묶어 보내도 항목마다 붙인 답장·참
     const { w, ctx } = await openWidget(srv);
     await w.idle(300);
     assert.deepEqual(await w.eval((r, id) => [...r.querySelectorAll(`.msg[data-id="${id}"] .mbody .quote`)].map((e) => e.className), m.id), ['quote part', 'quote ref']);
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
+test('입력칸 아래 붙인 답장·참고 줄을 누르면 원문이 다 펼쳐지고, 원문으로를 누르면 그 메시지로 간다 (#1971)', async () => {
+  const long = '긴 원문 '.repeat(40) + '끝부분';
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'agent', session: A, text: long, at: iso(9000) }] }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    await w.clickText('답장', '.msg[data-id="1"]');
+    assert.doesNotMatch(await w.eval((r) => r.querySelector('#reply .rref span').textContent), /끝부분/);
+    await w.eval((r) => r.querySelector('#reply .rref span').click());
+    assert.match(await w.eval((r) => r.querySelector('#reply .rref span').textContent), /끝부분/);
+    await w.clickText('원문으로', '#reply');
+    await w.idle(100);
+    assert.equal(await w.eval((r) => r.querySelector('.msg[data-id="1"]').classList.contains('flashing')), true);
     await ctx.close();
   } finally { srv.stop(); }
 });
