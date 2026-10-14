@@ -518,7 +518,8 @@ test('고정 칸: 처음엔 한 줄씩, 3줄씩으로 바꿀 수 있고, 찾은 
     const h = () => w.eval((r) => r.querySelector('#pinbar .msg[data-id="1"] .mbody').getBoundingClientRect().height);
     const one = await h();
     assert.ok(one < 30, '처음엔 한 줄');
-    assert.equal(await w.eval((r) => r.querySelector('#pinbar .msg[data-id="1"] > .rp').offsetParent !== null), true, '한 줄 모드에서도 펼치기가 보인다 (#2013)');
+    assert.equal(await w.eval((r) => [...r.querySelectorAll('#pinbar .msg[data-id="1"] small button')].find((b) => b.textContent === '펼치기').offsetParent !== null), true, '한 줄 모드에서도 시간·단추 줄과 펼치기가 보인다 (#2013, #2015)');
+    assert.equal(await w.eval((r) => !!r.querySelector('#pinbar .msg[data-id="1"] .mbody > .tag')), true, '꼬리표는 글 첫 줄에');
     await w.clickText('3줄씩 보기', '#pinbar');
     await w.idle(100);
     const three = await h();

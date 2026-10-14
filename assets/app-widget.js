@@ -198,10 +198,7 @@
   .pinbar > .pinhead button:first-of-type { margin-left: auto; }
   /* 고정 목록은 한 줄 모드(글 한 줄만, 눌러서 펼침)와 3줄 모드(글 3줄과 단추)로 바꿔 보고, 찾은 것만 펼친다. 칸은 최대 높이까지만 내용만큼 커진다(#2011) */
   .pinbar > .msg.l1, .pinbar > .msg.l3 { cursor: pointer; }
-  .pinbar > .msg.l1 { padding-top: 5px; padding-bottom: 5px; display: flex; align-items: center; gap: 8px; }
-  .pinbar > .msg.l1 .mbody { flex: 1; min-width: 0; }
-  .pinbar > .msg.l1 > .rp { flex: none; font-size: 11.5px; }
-  .pinbar > .msg.l1 > .tag, .pinbar > .msg.l1 > small, .pinbar > .msg.l1 .quote { display: none; }
+  .pinbar > .msg.l1 .quote, .pinbar > .msg.l3 .quote { display: none; }
   .pinbar > .msg.l1 .mbody, .pinbar > .msg.l3 .mbody { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
   .pinbar > .msg.l1 .mbody { -webkit-line-clamp: 1; }
   .pinbar > .msg.l3 .mbody { -webkit-line-clamp: 3; }
@@ -1153,8 +1150,9 @@
       ob.className = 'rp';
       ob.textContent = open ? '접기' : '펼치기';
       ob.onclick = (e) => { e.stopPropagation(); flip(); };
-      if (!open && lines === 1) c.append(ob); // 한 줄 모드는 단추 줄을 숨기므로 펼치기만 줄 끝에 둔다(#2013)
-      else c.querySelector('small')?.append(ob);
+      c.querySelector('small')?.append(ob);
+      // 꼬리표(터미널·앱 등)는 원래 말풍선처럼 글 첫 줄 앞에 둔다. 줄 수는 글에만 세고, 시간·단추 줄은 늘 보인다(#2015).
+      if (!open) { const tg = c.querySelector(':scope > .tag'), bd = c.querySelector('.mbody'); if (tg && bd) bd.prepend(tg); }
       return c;
     }));
   }
