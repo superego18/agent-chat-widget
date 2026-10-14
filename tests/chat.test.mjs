@@ -92,7 +92,7 @@ test('새로고침해도 입력칸 글과 붙여 둔 참고가 남는다 (하던
     await page.close();
     ({ w } = await openWidget(srv, { ctx }));
     await w.idle(800);
-    assert.equal(await w.inputValue(), '[📎#1 "세션 답…"]\n쓰던 글');
+    assert.equal(await w.inputValue(), '[📎#1 "세션 답…"] 쓰던 글');
     assert.equal(await w.eval((r) => !r.getElementById('reply').hidden && r.getElementById('reply').classList.contains('ref')), true);
     await ctx.close();
   } finally { srv.stop(); }
@@ -383,7 +383,7 @@ test('서브에이전트 보고는 내 글이 아니라 서브에이전트 메�
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
 });
 
-test('한 글 안 여러 곳에 답장·참고: 커서 자리에 표시가 들어가고, 아래 목록에 무엇인지 보이며, 보내면 그 자리에 인용이 그려진다 (#1955, #1957)', async () => {
+test('한 글 안 여러 곳에 답장·참고: 커서 자리에 줄을 바꾸지 않고 표시가 들어가고, 아래 목록에 무엇인지 보이며, 보내면 그 자리에 인용이 그려진다 (#1955, #1957, #1964)', async () => {
   const srv = await startServer(makeDir({ messages: [
     { id: 1, from: 'agent', session: A, text: '첫 번째 답', at: iso(9000) },
     { id: 2, from: 'agent', session: A, text: '두 번째 답', at: iso(8000) },
@@ -396,14 +396,14 @@ test('한 글 안 여러 곳에 답장·참고: 커서 자리에 표시가 들�
     await w.clickText('참고', '.msg[data-id="2"]');
     await w.type((await w.inputValue()) + '이것도 같이 봐');
     await w.clickText('답장', '.msg[data-id="3"]');
-    assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"]\n이건 좋아\n[📎#2 "두 번째 답…"]\n이것도 같이 봐\n[↩#3 "세 번째 답…"]\n');
+    assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"] 이건 좋아 [📎#2 "두 번째 답…"] 이것도 같이 봐 [↩#3 "세 번째 답…"] ');
     assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('#reply .rref span')].map((e) => e.textContent.split(' · ')[0])), ['↩#1 답장', '📎#2 참고', '↩#3 답장']);
     await w.eval((r) => r.querySelectorAll('#reply .rref button')[2].click()); // 마지막 것을 빼면 글 속 표시도 지워진다
-    assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"]\n이건 좋아\n[📎#2 "두 번째 답…"]\n이것도 같이 봐\n');
+    assert.equal(await w.inputValue(), '[↩#1 "첫 번째 답…"] 이건 좋아 [📎#2 "두 번째 답…"] 이것도 같이 봐 ');
     await w.eval((r) => r.getElementById('form').requestSubmit());
     await w.idle(800);
     const m = readChat(srv).at(-1);
-    assert.equal(m.text, '[↩#1]\n이건 좋아\n[📎#2]\n이것도 같이 봐');
+    assert.equal(m.text, '[↩#1] 이건 좋아 [📎#2] 이것도 같이 봐');
     assert.deepEqual(m.quotes, [{ id: 1 }, { id: 2, refer: true }]);
     assert.equal(await w.eval((r) => r.getElementById('reply').hidden), true);
     const kids = await w.eval((r, id) => [...r.querySelector(`.msg[data-id="${id}"] .mbody`).children].map((e) => e.className), m.id);

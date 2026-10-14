@@ -634,7 +634,7 @@
       x.textContent = '×';
       x.onclick = () => {
         const inp = $('input'), v = inp.value;
-        inp.value = v.slice(0, r.at) + v.slice(r.at + r.len).replace(/^\n/, '');
+        inp.value = v.slice(0, r.at) + v.slice(r.at + r.len).replace(/^ /, '');
         inp.dispatchEvent(new Event('input', { bubbles: true }));
       };
       row.append(t, x);
@@ -659,8 +659,9 @@
     const inp = $('input'), v = inp.value;
     const s0 = inp.selectionStart ?? v.length, e0 = inp.selectionEnd ?? s0;
     const mark = `[${ref ? '📎' : '↩'}#${m.id} "${(quote || body).slice(0, 14).replace(/["\]\n]/g, '')}…"]`;
-    const pre = s0 && v[s0 - 1] !== '\n' ? '\n' : '';
-    const post = v[e0] === '\n' ? '' : '\n';
+    // 줄을 바꾸지 않고 커서 자리에 그대로 넣는다(#1964). 앞 글자에 붙으면 띄어 쓰고, 뒤에는 이어 쓸 빈칸을 둔다.
+    const pre = s0 && !/\s/.test(v[s0 - 1]) ? ' ' : '';
+    const post = /\s/.test(v[e0] || '') ? '' : ' ';
     inp.value = v.slice(0, s0) + pre + mark + post + v.slice(e0);
     refs.push({ id: m.id, ref, quote });
     inp.focus();
@@ -726,7 +727,7 @@
     const parts = String(text).split(/\[(?:↩|📎)#\d+\]/);
     body.replaceChildren();
     parts.forEach((part, i) => {
-      if (part.trim()) { const seg = document.createElement('span'); seg.className = 'seg'; seg.innerHTML = mdLite(part.replace(/^\n+|\n+$/g, '')); body.append(seg); }
+      if (part.trim()) { const seg = document.createElement('span'); seg.className = 'seg'; seg.innerHTML = mdLite(part.trim()); body.append(seg); }
       const q = i < parts.length - 1 && quotes[i] && quoteEl(quotes[i], `${key}:${i}`);
       if (q) body.append(q);
     });
