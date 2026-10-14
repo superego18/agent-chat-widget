@@ -578,3 +578,22 @@ test('메시지마다 복사 단추로 글을 복사한다: 원래 글과 서식
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('글머리 항목: 입력칸에서 이어 쓰고 들이고, 보낸 메시지에서는 목록으로 보인다 (#2040)', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'agent', session: A, text: '목록\n- 하나\n  - 하위\n1. 번호', at: iso(9000) }] }));
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg[data-id="1"] .li')].map((e) => [e.textContent, e.style.getPropertyValue('--d')])), [['•하나', '0'], ['•하위', '1'], ['1.번호', '0']]);
+    await w.eval((r) => r.getElementById('input').focus());
+    await page.keyboard.type('- 첫째');
+    await page.keyboard.press('Shift+Enter');
+    assert.equal(await w.inputValue(), '- 첫째\n- ');
+    await page.keyboard.press('Tab');
+    await page.keyboard.type('하위');
+    assert.equal(await w.inputValue(), '- 첫째\n  - 하위');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.press('Shift+Enter'); // 빈 항목에서 한 번 더 바꾸면 목록이 끝난다
+    assert.equal(await w.inputValue(), '- 첫째\n  - 하위\n');
+    await ctx.close();
+  } finally { srv.stop(); }
+});

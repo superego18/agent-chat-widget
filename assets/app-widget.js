@@ -191,6 +191,8 @@
   #reply .rref.open > span { display: block; -webkit-line-clamp: unset; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
   #reply .rref > button.go { font-size: 11px; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   .msg .mbody .quote { margin: 4px 0; }
+  .li { display: block; padding-left: calc(1.15em + var(--d, 0) * 1.15em); text-indent: -1.15em; }
+  .li > .lm { display: inline-block; width: 1.15em; text-indent: 0; }
   /* 고정한 메시지: 대화 목록 위에 붙여 두고, 단추는 대화 속 원래 말풍선의 단추를 대신 누른다(#1999) */
   .pinbar { flex: none; max-height: 45vh; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; background: #fffbeb; border-bottom: 1px solid #fde68a; }
   .pinbar[hidden] { display: none; }
@@ -492,6 +494,8 @@
       // 마크다운 표(머리줄 + |---| 줄)는 표로 그린다(#1812). 폭이 좁으면 표만 옆으로 밀어 본다.
       .replace(/^\|.*\|[ \t]*\n\|[ \t:|-]+\|[ \t]*(?:\n\|.*\|[ \t]*)*\n?/gm, (b) => '<div class="tbl"><table>' + b.trim().split('\n').filter((l, i) => i !== 1)
         .map((l, i) => '<tr>' + l.trim().replace(/^\||\|$/g, '').split('|').map((c) => (i ? `<td>${c.trim()}</td>` : `<th>${c.trim()}</th>`)).join('') + '</tr>').join('') + '</table></div>')
+      // 글머리(-, *, 1.)는 들여쓰기 깊이대로 내어쓴 목록 줄로 그린다(#2040). 줄 끝 줄바꿈까지 먹어 빈 줄이 생기지 않게 한다.
+      .replace(/^([ \t]*)([-*]|\d+[.)])[ \t]+(.*)(?:\n|$)/gm, (_, ind, mk, body) => `<span class="li" style="--d:${Math.min(4, Math.floor(ind.replace(/\t/g, '  ').length / 2))}"><span class="lm">${/\d/.test(mk) ? mk : '•'}</span>${body}</span>`)
       .replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
       .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>')
@@ -2357,7 +2361,23 @@
     }).observe($('msgs'));
   }
   $('input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); return; }
+    // 글머리 항목 쓰기(#2040): 목록 줄에서 줄을 바꾸면 다음 줄에 같은 글머리를 붙이고(번호는 하나 늘림), 빈 항목에서 바꾸면 목록을 끝낸다.
+    // Tab·Shift+Tab 은 목록 줄을 한 단계 들이거나 내어 쓴다.
+    const el = $('input'), v = el.value, a = el.selectionStart;
+    if (a !== el.selectionEnd || e.isComposing) return;
+    const ls = v.lastIndexOf('\n', a - 1) + 1, le = v.indexOf('\n', a) === -1 ? v.length : v.indexOf('\n', a);
+    const m = /^([ \t]*)([-*]|(\d+)([.)]))([ \t]+)(.*)$/.exec(v.slice(ls, le));
+    if (!m) return;
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      if (!m[6].trim() && a === le) editText(el, ls, le, ''); // 빈 항목: 글머리를 지우고 목록을 끝낸다
+      else editText(el, a, a, '\n' + m[1] + (m[3] ? Number(m[3]) + 1 + m[4] : m[2]) + ' ');
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) { const cut = Math.min(2, m[1].length); if (cut) { editText(el, ls, ls + cut, ''); el.setSelectionRange(a - cut, a - cut); } }
+      else { editText(el, ls, ls, '  '); el.setSelectionRange(a + 2, a + 2); }
+    }
   });
 
   // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(대화창 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
