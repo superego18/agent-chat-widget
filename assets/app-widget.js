@@ -1100,7 +1100,36 @@
   const PAGE = 120;
   let showCount = PAGE, showTab = null, moreClicked = false;
   // 메시지 글 복사(#2036). 보안 연결이 아닌 주소(같은 와이파이의 http)에서는 클립보드 API 가 없어 예전 방식으로 복사한다.
+  // 붙여 넣을 HTML: 글머리(-, *, 1.)는 들여쓰기 깊이대로 목록으로, 나머지 문단은 대화창과 같은 방식(mdLite)으로 바꾼다.
+  function copyHtml(t) {
+    const out = [], stack = [];
+    let para = [];
+    const flush = () => { if (para.length) { out.push(`<p>${mdLite(para.join('\n'))}</p>`); para = []; } };
+    const closeTo = (ind) => { while (stack.length && stack.at(-1).indent > ind) out.push(`</li></${stack.pop().type}>`); };
+    for (const line of String(t).split('\n')) {
+      const m = /^(\s*)([-*]|\d+[.)])\s+(.*)$/.exec(line);
+      if (m) {
+        flush();
+        const ind = m[1].length;
+        closeTo(ind);
+        if (stack.length && stack.at(-1).indent === ind) out.push('</li><li>');
+        else { const type = /\d/.test(m[2]) ? 'ol' : 'ul'; out.push(`<${type}><li>`); stack.push({ type, indent: ind }); }
+        out.push(mdLite(m[3]));
+      } else if (!line.trim()) flush();
+      else { closeTo(-1); para.push(line); }
+    }
+    flush();
+    closeTo(-1);
+    return `<div>${out.join('')}</div>`;
+  }
+  // 서식(글머리·굵게·표)이 있는 글은 화면에 그린 모양(HTML)도 함께 넣어, 노션·문서에 붙이면 서식이 살고 메모장 등에는 원래 글이 들어간다(#2038).
   async function copyText(t) {
+    try {
+      const html = copyHtml(t);
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([t], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]);
+      toast('복사했어요');
+      return;
+    } catch {}
     try { await navigator.clipboard.writeText(t); toast('복사했어요'); return; } catch {}
     const ta = document.createElement('textarea');
     ta.value = t;
