@@ -637,7 +637,7 @@ test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인�
     // 끊으면 숨고, 목록에서 다시 펼쳐 이어 물으면 같은 사본에 이어 묻는다 (#2083·#2090)
     await w.eval((r) => r.getElementById('sideCut').click());
     assert.equal(await w.eval((r) => r.querySelectorAll('.msg.side').length), 0, '평소에는 곁질문이 숨는다');
-    await w.eval((r) => r.getElementById('sideList').click());
+    await w.eval((r) => r.getElementById('side').click()); // 입력칸이 비었으면 묶음 목록
     assert.equal(await w.eval((r) => r.querySelectorAll('#sidepop button').length), 1);
     await w.eval((r) => r.querySelector('#sidepop button').click());
     assert.equal(await w.eval((r) => r.querySelectorAll('.msg.side').length), 2);
@@ -646,6 +646,42 @@ test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인�
     for (let i = 0; i < 40 && msgs.length < 4; i++) { await new Promise((r) => setTimeout(r, 100)); msgs = (await srv.api('/api/chat')).messages; }
     assert.deepEqual(msgs.map((m) => m.sideGroup), [q.id, q.id, q.id, q.id]);
     assert.match(msgs[3].text, /--resume fork-1 --settings/, '같은 묶음은 만들어 둔 사본에 이어 묻는다');
+    await ctx.close();
+  } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
+});
+
+test('말풍선을 오른쪽으로 밀면 그 메시지에 대한 곁질문 화면이 된다 (#2099·#2102)', async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({session_id:'fork-2',result:'사본 답 | '+s})));\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin + path.delimiter + oldPath;
+  const srv = await startServer(makeDir());
+  process.env.PATH = oldPath;
+  try {
+    await srv.api('/api/chat', { from: 'agent', session: A, text: '첫 답' });
+    await srv.api('/api/chat', { from: 'agent', session: A, text: '둘째 답' });
+    const { w, ctx } = await openWidget(srv);
+    await w.eval((r) => new Promise((ok) => { const t = setInterval(() => { if (r.querySelectorAll('.msg[data-id]').length === 2) { clearInterval(t); ok(); } }, 50); }));
+    await w.eval((r) => {
+      const el = r.querySelector('.msg[data-id="1"] .mbody'), b = el.getBoundingClientRect();
+      const fire = (type, x) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: b.top + 5 }); el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, composed: true, touches: type === 'touchend' ? [] : [t], changedTouches: [t] })); };
+      fire('touchstart', b.left + 5);
+      for (const dx of [15, 40, 70, 90]) fire('touchmove', b.left + 5 + dx);
+      fire('touchend', b.left + 95);
+    });
+    assert.match(await w.eval((r) => r.getElementById('sideText').textContent), /#1에 대한 새 곁질문/);
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg[data-id]')].map((e) => e.dataset.id)), ['1'], '곁질문 화면에는 고른 메시지만 보인다');
+    await w.type('이거 왜?');
+    await w.eval((r) => r.getElementById('side').click());
+    let msgs = [];
+    for (let i = 0; i < 40 && msgs.length < 4; i++) { await new Promise((r) => setTimeout(r, 100)); msgs = (await srv.api('/api/chat')).messages; }
+    assert.equal(msgs[2].sideOn, 1);
+    assert.match(msgs[3].text, /#1 메시지에 대한 것입니다: "첫 답"/);
+    await w.eval((r) => new Promise((ok) => { const t = setInterval(() => { if (r.querySelectorAll('.msg[data-id]').length === 3) { clearInterval(t); ok(); } }, 50); }));
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg[data-id]')].map((e) => e.dataset.id)), ['1', '3', '4']);
+    await w.eval((r) => r.getElementById('sideCut').click());
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg[data-id]')].map((e) => e.dataset.id)), ['1', '2'], '끊으면 원래 대화로');
+    assert.match(await w.eval((r) => r.querySelector('.msg[data-id="1"] .sideb').textContent), /곁질문 2/);
     await ctx.close();
   } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
 });

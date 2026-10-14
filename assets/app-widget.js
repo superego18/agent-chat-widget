@@ -96,6 +96,7 @@
   .msgs { position: relative; padding-right: 18px; padding-left: 18px; }
   .links { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
   .links { z-index: 0; }
+  .msgs { overflow-x: hidden; } /* 밀어 곁질문(#2099)할 때 말풍선이 옆으로 나가도 가로 스크롤이 생기지 않게 */
   .msgs > .msg { position: relative; z-index: 1; } /* 선 끝이 말풍선 뒤로 들어가게 말풍선을 선 위에 둔다 */
   .links path { fill: url(#uifbLinkGrad) #a5b4fc; opacity: .3; transition: opacity .2s; }
   .links path.on { opacity: .9; }
@@ -350,6 +351,15 @@
   .sidepop button[aria-current="true"] { background: #ecfeff; }
   .sidepop button small { display: block; color: #0e7490; font-size: 11.5px; }
   .msg .small .sideb, small .sideb { color: #0e7490; font-weight: 600; }
+  /* 곁질문 시작(#2099): PC는 단추 줄의 "곁질문", 휴대폰은 말풍선을 오른쪽으로 밀기(단추는 숨김) */
+  .msg .sideq { color: #0e7490; }
+  .msgs.sideview { background: #f0fdff; }
+  .msg.sideanchor { outline: 2px solid #22d3ee; outline-offset: 1px; }
+  @media (hover: none) { .msg .sideq { display: none; } }
+  .msg.swiping { transition: none; }
+  .msg.swipe-back { transition: transform .18s ease; }
+  .swipehint { position: absolute; left: -58px; top: 50%; transform: translateY(-50%); font-size: 11.5px; font-weight: 600; color: #0e7490; background: #ecfeff; border-radius: 999px; padding: 3px 8px; opacity: .5; pointer-events: none; }
+  .swipehint.ready { opacity: 1; background: #cffafe; }
   .msg.side .tag { background: #cffafe; color: #155e75; font-weight: 600; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   /* 보류 = 대화창 맨 아래 점선 말풍선과 같은 남색 점선, 보관함 = 보관함 창과 같은 베이지 상자 */
@@ -422,7 +432,7 @@
 <button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침"><span class="ri">↻</span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="pagesBtn" type="button" title="이 프로젝트의 비교 페이지 목록">비교 페이지</button><button class="notif" id="stopBtn" type="button" title="이 세션이 하던 작업 멈추기(터미널에 Esc)" hidden>중지</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="sideList" type="button" title="이 세션의 곁질문 묶음 목록" hidden>곁질문</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="pagesBtn" type="button" title="이 프로젝트의 비교 페이지 목록">비교 페이지</button><button class="notif" id="stopBtn" type="button" title="이 세션이 하던 작업 멈추기(터미널에 Esc)" hidden>중지</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="pinbar" id="pinbar" hidden></div>
   <div class="msgs" id="msgs" aria-live="polite"></div>
@@ -437,7 +447,7 @@
   <div class="sidepop" id="sidepop" hidden role="dialog" aria-label="곁질문 묶음"></div>
   <div class="where sidebar" id="sidebar" hidden><span id="sideText"></span><button type="button" id="sideCut" title="이 묶음을 닫고, 다음 곁질문은 새 묶음으로">끊기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" class="adjbtn" id="adjBtn" hidden title="찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값을 함께 보내기">값 바꾸기</button><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 칩을 붙이면 그 메시지에 대한 질문">곁질문</button></span></form>
+  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="글을 쓰고 누르면 세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 비어 있을 때 누르면 곁질문 묶음 목록">곁질문</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aclose" id="adjClose" aria-label="닫기" title="닫기">✕</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
@@ -507,6 +517,7 @@
   // 곁질문 묶음(#2083): 평소에는 숨기고, 고른 묶음 하나만 대화 속에 보인다. 묶음 번호는 첫 질문 번호(옛 곁질문은 질문 번호·답의 re).
   const groupOf = (m) => m.sideGroup ?? (m.from === 'user' ? m.id : m.re?.[0]);
   const sideOpen = {}; // 세션별로 펼친 묶음. 펼친 채 곁질문을 보내면 그 묶음에 이어 묻는다.
+  const sideNew = {}; // 세션별로 새 곁질문을 물을 메시지(#2099). 메시지를 오른쪽으로 밀거나 "곁질문"을 누르면 정해진다.
   function sideGroups(tab) {
     const gs = new Map();
     for (const m of messages) {
@@ -518,25 +529,33 @@
     for (const g of gs.values()) {
       const q = g.items.find((m) => m.from === 'user') || g.items[0];
       g.first = q;
-      g.anchor = q.quotes?.[0]?.id ?? q.replyTo ?? null; // 칩을 붙여 연 묶음은 그 메시지에 매단다
+      g.anchor = q.sideOn ?? q.quotes?.[0]?.id ?? q.replyTo ?? null; // 메시지를 밀어 연 묶음(옛 묶음은 칩)은 그 메시지에 매단다
       g.last = g.items.at(-1).at;
     }
     return [...gs.values()].sort((a, b) => String(b.last).localeCompare(String(a.last)));
   }
   function openSide(id) {
     sideOpen[activeTab] = id;
+    delete sideNew[activeTab];
     $('sidepop').hidden = true;
     render();
     const el = id && $('msgs').querySelector(`.msg.side[data-group="${id}"]`);
     if (el) el.scrollIntoView({ block: 'nearest' });
   }
+  function startSide(m) {
+    sideNew[activeTab] = m.id;
+    delete sideOpen[activeTab];
+    $('sidepop').hidden = true;
+    render();
+    $('input').focus();
+  }
   function renderSide() {
     const gs = sideGroups(activeTab), open = gs.find((g) => g.id === sideOpen[activeTab]);
     if (!open) delete sideOpen[activeTab];
-    $('sideList').hidden = !gs.length;
-    $('sideList').textContent = gs.length ? `곁질문 ${gs.length}` : '곁질문';
-    $('sidebar').hidden = !open;
+    const fresh = !open && sideNew[activeTab];
+    $('sidebar').hidden = !open && !fresh;
     if (open) $('sideText').textContent = `곁질문 묶음${open.anchor ? ` · #${open.anchor}에 대해` : ''} · ${open.first.text.replace(/\s+/g, ' ').slice(0, 30)} (${open.items.length})`;
+    else if (fresh) $('sideText').textContent = `#${fresh}에 대한 새 곁질문 · 쓰고 「곁질문」을 누르세요`;
     const pop = $('sidepop');
     if (pop.hidden) return;
     pop.textContent = '';
@@ -1290,7 +1309,11 @@
     };
     box.textContent = '';
     renderSide();
-    const items = timeline(activeTab).filter((m) => m.context !== 'side' || groupOf(m) === sideOpen[activeTab]);
+    // 곁질문 화면(#2102): 묶음을 펼쳤거나 새 곁질문을 시작하면 그 메시지와 그 묶음 곁질문만 보인다. 끊기를 누르면 원래 대화로 돌아간다.
+    const sg = sideOpen[activeTab] && sideGroups(activeTab).find((g) => g.id === sideOpen[activeTab]);
+    const sideAnchor = sg ? sg.anchor : sideNew[activeTab] || null, sideView = !!(sg || sideAnchor);
+    box.classList.toggle('sideview', sideView);
+    const items = timeline(activeTab).filter((m) => sideView ? m.id === sideAnchor || (sg && m.context === 'side' && groupOf(m) === sg.id) : m.context !== 'side');
     const anchored = new Map(sideGroups(activeTab).filter((g) => g.anchor).map((g) => [g.anchor, []]));
     for (const g of sideGroups(activeTab)) if (g.anchor) anchored.get(g.anchor).push(g);
     if (!items.length && !holds().length) {
@@ -1338,6 +1361,7 @@
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       if (m.context === 'side') d.dataset.group = String(groupOf(m));
+      if (sideView && m.id === sideAnchor) d.classList.add('sideanchor');
       const tag = document.createElement('span');
       tag.className = 'tag';
       const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'side' ? '곁질문' : m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
@@ -1399,6 +1423,15 @@
         pn.title = '대화창 위에 고정해 두고 계속 참고·답장하기';
         pn.onclick = () => togglePin(m.id);
         small.append(pn);
+        if (m.context !== 'side') {
+          const sq = document.createElement('button');
+          sq.type = 'button';
+          sq.className = 'rp sideq';
+          sq.textContent = '곁질문';
+          sq.title = '이 메시지에 대해 곁질문하기(휴대폰은 말풍선을 오른쪽으로 밀기)';
+          sq.onclick = () => startSide(m);
+          small.append(sq);
+        }
         for (const g of anchored.get(m.id) || []) {
           const sb = document.createElement('button');
           sb.type = 'button';
@@ -2283,9 +2316,12 @@
 
   let interjectNext = false, sideNext = false;
   $('now').onclick = () => { interjectNext = true; $('form').requestSubmit(); };
-  $('side').onclick = () => { sideNext = true; $('form').requestSubmit(); };
+  // 입력칸이 비었으면 곁질문 묶음 목록을 열고 닫는다(#2097).
+  $('side').onclick = () => {
+    if (!$('input').value.trim()) { $('sidepop').hidden = !$('sidepop').hidden; renderSide(); return; }
+    sideNext = true; $('form').requestSubmit();
+  };
   $('sideCut').onclick = () => openSide(null);
-  $('sideList').onclick = () => { $('sidepop').hidden = !$('sidepop').hidden; renderSide(); };
   $('form').onsubmit = async (e) => {
     e.preventDefault();
     const interject = interjectNext, side = sideNext;
@@ -2298,9 +2334,9 @@
     // 곁질문(#2055)은 세션에 보내지 않고 서버가 세션 사본에게 묻는다. 답은 10초쯤 뒤 이 칸에 온다.
     await withBusy(side ? $('side') : interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
       try {
-        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab, sideGroup: sideOpen[activeTab] } : body) });
+        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab, sideGroup: sideOpen[activeTab], sideOn: sideOpen[activeTab] ? undefined : sideNew[activeTab] } : body) });
         if (!r.ok) throw new Error('send');
-        if (side) { const q = await r.json(); sideOpen[activeTab] = q.sideGroup; } // 새 묶음이면 그 묶음을 펼친다
+        if (side) { const q = await r.json(); sideOpen[activeTab] = q.sideGroup; delete sideNew[activeTab]; } // 새 묶음이면 그 묶음을 펼친다
         doneCid(kind, text);
         sentTexts.set(text, Date.now());
         if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
@@ -3040,6 +3076,41 @@
   $('phid').onclick = () => { showHiddenPages = !showHiddenPages; renderPages(); };
   // 보관함이 열려 있을 때 대화 목록(시트 바깥)을 누르면 닫는다.
   $('msgs').addEventListener('pointerdown', () => { if (showDrafts) setDraftsView(false); });
+  // 말풍선을 오른쪽으로 밀면 그 메시지에 대한 곁질문을 시작한다(#2099). 옆으로 넘겨 보는 표 안, 위아래 스크롤, 길게 눌러 글 고르기는 그대로 둔다.
+  let swipe = null;
+  $('msgs').addEventListener('touchstart', (e) => {
+    const el = e.target.closest?.('.msg[data-id]');
+    const m = el && messages.find((x) => x.id === Number(el.dataset.id));
+    swipe = e.touches.length === 1 && m && m.context !== 'side' && !isHeld(m) && !e.target.closest('.tbl, textarea, button')
+      ? { el, m, x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now(), on: false } : null;
+  }, { passive: true });
+  $('msgs').addEventListener('touchmove', (e) => {
+    if (!swipe) return;
+    const dx = e.touches[0].clientX - swipe.x, dy = e.touches[0].clientY - swipe.y;
+    if (!swipe.on) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      if (dx < 0 || Math.abs(dy) * 1.5 > dx || Date.now() - swipe.at > 450) { swipe = null; return; } // 위아래·왼쪽·길게 누른 뒤는 밀기가 아니다
+      swipe.on = true;
+      swipe.hint = Object.assign(document.createElement('span'), { className: 'swipehint', textContent: '곁질문' });
+      swipe.el.classList.add('swiping');
+      swipe.el.append(swipe.hint);
+    }
+    e.preventDefault();
+    swipe.dx = Math.min(Math.max(dx - 10, 0), 80);
+    swipe.el.style.transform = `translateX(${swipe.dx}px)`;
+    swipe.hint.classList.toggle('ready', swipe.dx >= 56);
+  }, { passive: false });
+  const endSwipe = () => {
+    if (!swipe?.on) { swipe = null; return; }
+    const { el, m, hint, dx } = swipe;
+    swipe = null;
+    el.classList.replace('swiping', 'swipe-back');
+    el.style.transform = '';
+    setTimeout(() => { el.classList.remove('swipe-back'); hint.remove(); }, 200);
+    if (dx >= 56) startSide(m);
+  };
+  $('msgs').addEventListener('touchend', endSwipe);
+  $('msgs').addEventListener('touchcancel', () => { if (swipe) swipe.dx = 0; endSwipe(); });
   $('draftsBtn').onclick = () => (showDrafts && sheetLabel === null ? setDraftsView(false) : openSheet(null));
   $('dall').onchange = () => { mine().forEach((d) => ($('dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
   $('dsend').onclick = () => withBusy($('dsend'), () => sendDrafts(mine().filter((d) => checked.has(d.id)).map((d) => d.id)));

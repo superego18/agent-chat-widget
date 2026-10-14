@@ -329,6 +329,8 @@ function addChat(msg) {
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
   // 곁질문 묶음(#2083): 묶음 번호는 그 묶음 첫 질문의 번호다.
   if (entry.context === 'side') entry.sideGroup = Number.isInteger(msg.sideGroup) && msg.sideGroup > 0 && msg.sideGroup <= entry.id ? msg.sideGroup : entry.id;
+  // 메시지를 밀어(또는 단추로) 연 곁질문은 그 메시지(sideOn)에 대한 묶음이다(#2099).
+  if (entry.context === 'side' && entry.from === 'user' && Number.isInteger(msg.sideOn) && msg.sideOn > 0 && msg.sideOn < entry.id) entry.sideOn = msg.sideOn;
   chat.messages.push(entry);
   writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
@@ -644,7 +646,8 @@ function askSide(s, q) {
   sideQueue.set(q.sideGroup, run);
 }
 function runSide(s, q, done) {
-  const prompt = [SIDE_HEAD, ...formatMessage(q, readChat().messages)].join('\n');
+  const all = readChat().messages, on = q.sideOn && all.find((m) => m.id === q.sideOn);
+  const prompt = [SIDE_HEAD, ...(on ? [`이 질문은 대화의 #${on.id} 메시지에 대한 것입니다: "${on.text.slice(0, 2000)}"`] : []), ...formatMessage(q, all)].join('\n');
   const settings = path.join(root, 'side-settings.json');
   fs.writeFileSync(settings, '{"disableAllHooks":true}');
   const fork = (readJsonSafe(sideFile) || {})[q.sideGroup]?.fork;
