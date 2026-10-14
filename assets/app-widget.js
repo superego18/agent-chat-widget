@@ -1090,7 +1090,7 @@
   const PAGE = 120;
   let showCount = PAGE, showTab = null, moreClicked = false;
   // 고정(#1999): 세션 탭마다 고정한 메시지 번호. 두 화면이 함께 쓴다(설정 prefs.pins).
-  const pinsNow = () => (activeTab !== 'all' && prefs?.pins?.[activeTab]) || [];
+  const pinsNow = () => prefs?.pins?.[activeTab] || [];
   function togglePin(id) {
     const cur = pinsNow();
     const ids = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
@@ -1172,7 +1172,7 @@
       };
       box.append(more);
     }
-    const links = activeTab === 'all' ? { ans: new Map(), by: new Map() } : answerLinks(items); // 여러 세션을 함께 보는 탭에서는 잇지 않는다
+    const links = answerLinks(items);
     const firstUnread = shown.findIndex(isUnread);
     let newLine = null;
     const heldEls = [];
@@ -1185,13 +1185,13 @@
         box.append(newLine);
       }
       const d = document.createElement('div');
-      d.className = 'msg ' + m.from + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' && activeTab !== 'all' ? (m.session === activeTab ? ' out' : ' in') : '');
+      d.className = 'msg ' + m.from + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' ? (m.session === activeTab ? ' out' : ' in') : '');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
       const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
-      tag.textContent = activeTab === 'all' && ownerOf(m) && m.from !== 'peer' ? `${nameOf(ownerOf(m))} · ${src}` : src;
+      tag.textContent = src;
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
@@ -1235,15 +1235,13 @@
         rf.title = '답장이 아니라 참고하라고 이 메시지를 붙이기';
         rf.onclick = () => setReply(m, true);
         small.append(rf);
-        if (activeTab !== 'all') {
-          const pn = document.createElement('button');
-          pn.type = 'button';
-          pn.className = 'rp';
-          pn.textContent = pinsNow().includes(m.id) ? '고정 해제' : '고정';
-          pn.title = '대화창 위에 고정해 두고 계속 참고·답장하기';
-          pn.onclick = () => togglePin(m.id);
-          small.append(pn);
-        }
+        const pn = document.createElement('button');
+        pn.type = 'button';
+        pn.className = 'rp';
+        pn.textContent = pinsNow().includes(m.id) ? '고정 해제' : '고정';
+        pn.title = '대화창 위에 고정해 두고 계속 참고·답장하기';
+        pn.onclick = () => togglePin(m.id);
+        small.append(pn);
       }
       // 내가 보낸 글은 그 말풍선 안에서 고쳐 다시 보낸다(안 읽힌 글도). 새 메시지에는 "다시 보냄"이 붙는다.
       if (typeof m.id === 'number' && m.from === 'user' && m.context !== 'terminal') {
