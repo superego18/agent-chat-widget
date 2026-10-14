@@ -461,6 +461,11 @@ test('입력칸 속 답장·참고 표시는 칩처럼 칠해지고, 지우면 �
     await page.keyboard.press('Backspace');
     assert.equal(await w.inputValue(), ' 좋아');
     assert.equal(await w.eval((r) => r.getElementById('reply').hidden), true, '칩을 지우면 붙인 것도 빠진다');
+    await w.eval((r) => { const i = r.getElementById('input'); i.value = '좋아'; i.dispatchEvent(new Event('input', { bubbles: true })); i.setSelectionRange(2, 2); });
+    await w.clickText('답장', '.msg[data-id="12"]'); // 붙인 직후 커서는 칩 뒤 빈칸 뒤
+    assert.equal(await w.inputValue(), '좋아 ↩12 ');
+    await page.keyboard.press('Backspace');
+    assert.equal(await w.inputValue(), '좋아 ', '붙인 직후 한 번 지우면 칩과 그 뒤 빈칸이 함께 지워진다 (#1983)');
     await ctx.close();
   } finally { srv.stop(); }
 });

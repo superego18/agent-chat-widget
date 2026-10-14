@@ -2129,9 +2129,11 @@
         let s0 = a, e0 = b;
         if (a === b) {
           const fwd = /Forward/.test(e.inputType);
-          const hit = ms.find(([p, q]) => (fwd ? p <= a && a < q : p < a && a <= q));
+          // 칩 뒤에 붙여 넣은 빈칸 하나는 칩의 일부로 본다: 칩을 붙인 직후(커서가 그 빈칸 뒤) 한 번 지우면 칩이 빈칸과 함께 지워진다(#1983).
+          const v = el.value;
+          const hit = ms.find(([p, q]) => (fwd ? p <= a && a < q : p < a && (a <= q || (a === q + 1 && v[q] === ' '))));
           if (!hit) return;
-          [s0, e0] = hit;
+          [s0, e0] = [hit[0], fwd ? hit[1] : Math.max(hit[1], a)];
         } else {
           for (const [p, q] of ms) if (p < e0 && q > s0) { s0 = Math.min(s0, p); e0 = Math.max(e0, q); }
           if (s0 === a && e0 === b) return;
