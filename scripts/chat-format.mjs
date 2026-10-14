@@ -22,13 +22,18 @@ export function formatMessage(m, all) {
   const dev = m.device === 'mobile' ? '·모바일' : m.device === 'desktop' ? '·데스크톱' : '';
   lines.push(`[${m.id}]${m.context === 'app' ? `[앱 화면${dev}]` : `[비교 페이지${dev}]`}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
   if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
-  // 이전 메시지에 단 답장이면 원문을 붙인다.
-  const orig = m.replyTo ? all.find((x) => x.id === m.replyTo) : null;
-  const who = orig ? (orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : orig.from === 'sub' ? '서브에이전트' : '에이전트') : '';
+  // 이전 메시지에 단 답장이면 원문을 붙인다. 글 속 여러 곳에 붙였으면(quotes) 글 속 표시([↩#번호]·[📎#번호]) 순서대로 하나씩 적는다.
   // 참고(refer)는 그 메시지에 답하라는 뜻이 아니라 함께 보라고 붙인 것이다.
-  const label = m.refer ? '참고로 붙인 메시지(답장 아님)' : '답장 대상';
-  if (orig && m.replyQuote) lines.push(`    ${label} [${orig.id}] ${who} 메시지 중 이 부분: "${m.replyQuote}"`);
-  else if (orig) lines.push(`    ${label} [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
+  const qs = m.quotes?.length ? m.quotes : m.replyTo ? [{ id: m.replyTo, quote: m.replyQuote, refer: m.refer }] : [];
+  if (m.quotes?.length) lines.push('    글 속 [↩#번호]는 그 자리 아래 말이 그 메시지에 대한 답장, [📎#번호]는 참고로 붙인 메시지라는 표시:');
+  for (const q of qs) {
+    const orig = all.find((x) => x.id === q.id);
+    if (!orig) continue;
+    const who = orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : orig.from === 'sub' ? '서브에이전트' : '에이전트';
+    const label = (m.quotes?.length ? `[${q.refer ? '📎' : '↩'}#${q.id}] ` : '') + (q.refer ? '참고로 붙인 메시지(답장 아님)' : '답장 대상');
+    if (q.quote) lines.push(`    ${label} [${orig.id}] ${who} 메시지 중 이 부분: "${q.quote}"`);
+    else lines.push(`    ${label} [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
+  }
   // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
   if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
     lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.component ? ' · 컴포넌트 ' + m.where.component : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);

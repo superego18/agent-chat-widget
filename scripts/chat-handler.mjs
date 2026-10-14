@@ -282,6 +282,14 @@ function draftMessageText(draft) {
 }
 
 // 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
+// 한 글 안 여러 곳에 붙인 답장·참고(글 속 [↩#번호]·[📎#번호] 표시와 순서대로 짝, #1955). 앞 번호만, 10개까지.
+function cleanQuotes(q, below = Infinity) {
+  if (!Array.isArray(q)) return undefined;
+  const out = q.filter((x) => Number.isInteger(x?.id) && x.id > 0 && x.id < below).slice(0, 10)
+    .map((x) => ({ id: x.id, ...(typeof x.quote === 'string' && x.quote.trim() ? { quote: x.quote.trim().slice(0, 500) } : {}), ...(x.refer === true ? { refer: true } : {}) }));
+  return out.length ? out : undefined;
+}
+
 function addChat(msg) {
   const draft = msg.from === 'user' ? cleanDraft(msg.draft) : undefined;
   const text = draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
@@ -316,6 +324,7 @@ function addChat(msg) {
     if (typeof msg.replyQuote === 'string' && msg.replyQuote.trim()) entry.replyQuote = msg.replyQuote.trim().slice(0, 500); // 원문 중 사용자가 고른 부분만 인용
   }
   if (msg.interject === true && entry.from === 'user') entry.interject = true;
+  if (entry.from === 'user' && cleanQuotes(msg.quotes, entry.id)) entry.quotes = cleanQuotes(msg.quotes, entry.id);
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
   chat.messages.push(entry);
   writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
@@ -496,7 +505,7 @@ function draftText(d) {
 function sendPlain(ids, device, interject) {
   const store = readDrafts();
   const picked = store.drafts.filter((d) => ids.includes(d.id));
-  const sent = picked.map((d) => addChat({ from: 'user', to: d.to, text: d.text, where: d.where, context: d.context, round: d.round, device: device || d.device, interject, replyTo: d.replyTo, replyQuote: d.replyQuote, refer: d.refer })).filter(Boolean);
+  const sent = picked.map((d) => addChat({ from: 'user', to: d.to, text: d.text, where: d.where, context: d.context, round: d.round, device: device || d.device, interject, replyTo: d.replyTo, replyQuote: d.replyQuote, refer: d.refer, quotes: d.quotes })).filter(Boolean);
   toTrash(store, picked, 'sent', Object.fromEntries(picked.map((d, i) => [d.id, { msgId: sent[i]?.id }])));
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
   writeDrafts(store);
@@ -543,7 +552,7 @@ function handleDrafts(req) {
     if (dup) return { status: 200, body: dup };
     const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}), ...(cid ? { cid } : {}),
       // 답장·참고를 붙인 채 담았으면 그대로 남겨, 보류에서 보낼 때 함께 보낸다.
-      ...(Number.isInteger(req.replyTo) && req.replyTo > 0 ? { replyTo: req.replyTo, ...(typeof req.replyQuote === 'string' && req.replyQuote.trim() ? { replyQuote: req.replyQuote.trim().slice(0, 500) } : {}), ...(req.refer === true ? { refer: true } : {}) } : {}) };
+      ...(Number.isInteger(req.replyTo) && req.replyTo > 0 ? { replyTo: req.replyTo, ...(typeof req.replyQuote === 'string' && req.replyQuote.trim() ? { replyQuote: req.replyQuote.trim().slice(0, 500) } : {}), ...(req.refer === true ? { refer: true } : {}) } : {}), ...(cleanQuotes(req.quotes) ? { quotes: cleanQuotes(req.quotes) } : {}) };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
