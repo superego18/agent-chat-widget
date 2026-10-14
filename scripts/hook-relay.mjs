@@ -88,6 +88,11 @@ try {
       const fromName = /from-name="([^"]*)"/.exec(m[1])?.[1] || '';
       if (m[2].trim()) await post(port, { from: 'peer', to: session.sessionId, fromName, text: m[2].trim() });
     }
+    // 서브에이전트가 끝나며 돌려준 보고는 사용자 글이 아니라 "서브에이전트" 메시지로 남긴다(#1948). 앞의 안내문은 떼고, 줄마다 붙은 들여쓰기를 걷는다.
+    for (const m of text.matchAll(/<agent-message\b([^>]*)>([\s\S]*?)<\/agent-message>/g)) {
+      const body = m[2].split(/The report follows:\s*\n/).at(-1).replace(/^ {2}/gm, '').trim();
+      if (body) await post(port, { ...base, from: 'sub', sub: /from="([^"]*)"/.exec(m[1])?.[1] || '', text: body });
+    }
   }
 
   if (input.hook_event_name === 'PreToolUse') {

@@ -4,10 +4,13 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { A, B, makeDir, startServer, openWidget, closeBrowser, sleep } from './helpers.mjs';
 
 after(closeBrowser);
 
+const here = path.dirname(fileURLToPath(import.meta.url));
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 const readChat = (srv) => JSON.parse(fs.readFileSync(path.join(srv.dir, 'chat.json'), 'utf8')).messages;
 
@@ -352,4 +355,30 @@ test('위젯 파일이 바뀌기만 해서는 새로고침하지 않고, reload-
     await page.waitForFunction(() => window.__mark === undefined, null, { timeout: 5000 });
     await ctx.close();
   } finally { srv.stop(); }
+});
+
+test('서브에이전트 보고는 내 글이 아니라 서브에이전트 메시지로 남고, 앞 3줄만 보이다 펼치면 다 보인다 (#1945, #1948)', async () => {
+  const srv = await startServer(makeDir());
+  const cwd = fs.mkdtempSync(path.join(srv.dir, '..', 'uifb-cwd-'));
+  try {
+    fs.symlinkSync(srv.dir, path.join(cwd, '.ui-feedback'));
+    const sf = path.join(srv.dir, 'sessions', `${A}.json`);
+    fs.writeFileSync(sf, JSON.stringify({ ...JSON.parse(fs.readFileSync(sf, 'utf8')), port: srv.port }));
+    const report = Array.from({ length: 8 }, (_, i) => `  보고 ${i + 1}줄`).join('\n');
+    const prompt = `<agent-message from="a1b2">\n[Subagent hand-back] 안내문. The report follows:\n${report}\n</agent-message>`;
+    execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'hook-relay.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: A, cwd, prompt }) });
+    const [m] = readChat(srv);
+    assert.equal(m.from, 'sub');
+    assert.equal(m.sub, 'a1b2');
+    assert.ok(m.text.startsWith('보고 1줄\n보고 2줄'), '안내문과 들여쓰기는 뗀다');
+    const { w, ctx } = await openWidget(srv);
+    await w.idle(300);
+    const h = () => w.eval((r) => r.querySelector('.msg.sub .mbody').clientHeight);
+    const folded = await h();
+    assert.equal(await w.eval((r) => r.querySelector('.msg.sub .tag').textContent), '서브에이전트 보고');
+    await w.eval((r) => r.querySelector('.msg.sub .subt').click());
+    await w.idle(200);
+    assert.ok((await h()) > folded * 2, '펼치면 길어진다');
+    await ctx.close();
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
 });

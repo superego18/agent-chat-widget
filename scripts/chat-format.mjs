@@ -24,7 +24,7 @@ export function formatMessage(m, all) {
   if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
   // 이전 메시지에 단 답장이면 원문을 붙인다.
   const orig = m.replyTo ? all.find((x) => x.id === m.replyTo) : null;
-  const who = orig ? (orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : '에이전트') : '';
+  const who = orig ? (orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : orig.from === 'sub' ? '서브에이전트' : '에이전트') : '';
   // 참고(refer)는 그 메시지에 답하라는 뜻이 아니라 함께 보라고 붙인 것이다.
   const label = m.refer ? '참고로 붙인 메시지(답장 아님)' : '답장 대상';
   if (orig && m.replyQuote) lines.push(`    ${label} [${orig.id}] ${who} 메시지 중 이 부분: "${m.replyQuote}"`);

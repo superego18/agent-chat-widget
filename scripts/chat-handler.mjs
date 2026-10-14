@@ -286,7 +286,7 @@ function addChat(msg) {
   const draft = msg.from === 'user' ? cleanDraft(msg.draft) : undefined;
   const text = draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
   if (text && msg.from === 'peer') return addPeer(msg, text);
-  if (!text || !['user', 'agent'].includes(msg.from)) return null;
+  if (!text || !['user', 'agent', 'sub'].includes(msg.from)) return null; // sub: 세션의 서브에이전트가 돌려준 보고
   const chat = readChat();
   // 같은 cid 로 다시 온 글(느린 망에서 다시 누름)은 새로 만들지 않고 먼저 받은 것을 돌려준다.
   const cid = typeof msg.cid === 'string' ? msg.cid.slice(0, 80) : null;
@@ -294,6 +294,7 @@ function addChat(msg) {
   const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
   if (cid) entry.cid = cid;
   if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
+  if (msg.from === 'sub' && typeof msg.sub === 'string') entry.sub = msg.sub.slice(0, 40);
   // 세션 답 맨 앞의 <re 1090 1091>: 이 답이 어느 메시지에 대한 답인지. 글에서는 떼어 내고 re 로 남긴다(대화창이 연결선으로 잇는다).
   if (msg.from === 'agent') {
     const mk = /^\s*<re\s+([#\d,\s]+)>\s*/.exec(text);

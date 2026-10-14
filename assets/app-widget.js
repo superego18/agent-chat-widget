@@ -134,6 +134,11 @@
   @keyframes hold { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @keyframes drop { from { transform: translateY(-16px); opacity: .55; } to { transform: none; opacity: 1; } }
   /* 세션끼리 주고받은 메시지: 사람이 쓴 글이 아니라는 게 한눈에 보이게 점선 테두리·다른 색으로 둔다. 받은 세션 탭에서는 오른쪽, 보낸 세션 탭에서는 왼쪽(그 세션이 말한 쪽). */
+  .msg.sub { align-self: flex-start; background: #ecfdf5; color: #064e3b; box-shadow: 0 0 0 1px #6ee7b7; }
+  .msg.sub .tag { background: #a7f3d0; color: #065f46; }
+  .msg.sub .mbody { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .msg.sub.open .mbody { display: block; -webkit-line-clamp: unset; }
+  .msg.sub .subt { display: block; margin-top: 4px; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: #047857; cursor: pointer; }
   .msg.peer { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
   .msg.peer.in { align-self: flex-end; }
   .msg.peer .tag { background: #fed7aa; color: #9a3412; }
@@ -487,7 +492,7 @@
     return el.tagName.toLowerCase() + (el.id ? '#' + el.id : el.classList[0] ? '.' + el.classList[0] : '');
   }
 
-  const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
+  const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.from === 'sub' ? '서브에이전트' : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
   // 일부만 인용: 메시지 글의 일부를 길게 눌러(또는 끌어) 고른 뒤 그 메시지의 "답장"을 누르면 고른 부분만 인용한다.
   // 버튼을 누르는 순간 선택이 풀리기도 해서, 마지막으로 고른 글을 잠시 기억해 둔다.
   let replyQuote = null;
@@ -528,6 +533,7 @@
   });
   let replyMsg = null;
   const openQuotes = new Set(); // 펼친 인용(메시지 번호)
+  const openSubs = new Set(); // 펼친 서브에이전트 보고(메시지 번호)
   function showReplyText() {
     const m = replyMsg;
     if (!m) return;
@@ -984,12 +990,12 @@
         box.append(newLine);
       }
       const d = document.createElement('div');
-      d.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' && activeTab !== 'all' ? (m.session === activeTab ? ' out' : ' in') : '');
+      d.className = 'msg ' + m.from + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' && activeTab !== 'all' ? (m.session === activeTab ? ' out' : ' in') : '');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       const tag = document.createElement('span');
       tag.className = 'tag';
-      const src = m.from === 'peer' ? '세션끼리' : (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
+      const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
       tag.textContent = activeTab === 'all' && ownerOf(m) && m.from !== 'peer' ? `${nameOf(ownerOf(m))} · ${src}` : src;
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
@@ -1006,6 +1012,17 @@
         small.textContent = new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (m.readAt ? ' · 받음' : '');
         d.append(tag, route, body, small);
       } else d.append(tag, body, small);
+      if (m.from === 'sub') {
+        // 서브에이전트 보고는 앞 3줄만 보이고, 잘렸거나 펼친 상태일 때만 "펼치기/접기"를 보인다(#1948).
+        const t = document.createElement('button');
+        t.type = 'button';
+        t.className = 'subt';
+        t.textContent = openSubs.has(m.id) ? '접기' : '펼치기';
+        t.hidden = true;
+        t.onclick = () => { openSubs.has(m.id) ? openSubs.delete(m.id) : openSubs.add(m.id); render(); };
+        body.after(t);
+        requestAnimationFrame(() => { t.hidden = !(openSubs.has(m.id) || body.scrollHeight > body.clientHeight + 1); });
+      }
       const orig = m.replyTo && messages.find((x) => x.id === m.replyTo);
       if (orig) {
         // 인용: 길면 4줄로 줄여 보이고 "펼치기"로 전체를 본다. "원문으로"는 원래 메시지로 가서 인용한 부분을 칠한다.
