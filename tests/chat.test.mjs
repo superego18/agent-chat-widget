@@ -564,3 +564,15 @@ test('앱 화면에서 대화창을 열어 둬도, 같은 기기의 비교 페�
     await ctx.close();
   } finally { srv.stop(); }
 });
+
+test('메시지마다 복사 단추로 글을 복사한다 (#2036)', async () => {
+  const srv = await startServer(makeDir({ messages: [{ id: 1, from: 'agent', session: A, text: '복사할 **글**', at: iso(9000) }] }));
+  try {
+    const { w, page, ctx } = await openWidget(srv);
+    await page.evaluate(() => { window.__copied = null; navigator.clipboard.writeText = async (t) => { window.__copied = t; }; });
+    await w.clickText('복사', '.msg[data-id="1"]');
+    await w.idle(100);
+    assert.equal(await page.evaluate(() => window.__copied), '복사할 **글**');
+    await ctx.close();
+  } finally { srv.stop(); }
+});

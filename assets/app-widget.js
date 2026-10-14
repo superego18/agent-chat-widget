@@ -1099,6 +1099,19 @@
   // 이전 대화 더 보기: 기본은 최근 120개. 누를 때마다 120개씩 더 그린다. 세션 탭을 바꾸거나 대화창을 다시 열면 120개로 돌아가고, 새 메시지가 와도 늘린 만큼은 그대로 둔다.
   const PAGE = 120;
   let showCount = PAGE, showTab = null, moreClicked = false;
+  // 메시지 글 복사(#2036). 보안 연결이 아닌 주소(같은 와이파이의 http)에서는 클립보드 API 가 없어 예전 방식으로 복사한다.
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); toast('복사했어요'); return; } catch {}
+    const ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+    root.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch {}
+    ta.remove();
+    toast(ok ? '복사했어요' : '복사하지 못했어요');
+  }
   // 고정(#1999): 세션 탭마다 고정한 메시지 번호. 두 화면이 함께 쓴다(설정 prefs.pins).
   const openPins = new Set(); // 고정 칸에서 하나씩 펼친 메시지 번호
   const pinsNow = () => prefs?.pins?.[activeTab] || [];
@@ -1144,7 +1157,7 @@
           const o = from[i];
           if (!o) return;
           o.click();
-          if (!/^(답장|참고|고정|고정 해제|원문으로|펼치기|접기)$/.test(o.textContent.trim())) orig.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          if (!/^(답장|참고|복사|고정|고정 해제|원문으로|펼치기|접기)$/.test(o.textContent.trim())) orig.scrollIntoView({ block: 'center', behavior: 'smooth' });
         };
       });
       const ob = document.createElement('button');
@@ -1268,6 +1281,13 @@
         rf.title = '답장이 아니라 참고하라고 이 메시지를 붙이기';
         rf.onclick = () => setReply(m, true);
         small.append(rf);
+        const cp = document.createElement('button');
+        cp.type = 'button';
+        cp.className = 'rp';
+        cp.textContent = '복사';
+        cp.title = '이 메시지 글을 복사';
+        cp.onclick = () => copyText(m.draft ? m.draft.items.map((it) => it.text).join('\n\n') : m.text);
+        small.append(cp);
         const pn = document.createElement('button');
         pn.type = 'button';
         pn.className = 'rp';
