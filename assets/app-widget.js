@@ -517,6 +517,9 @@
   const sessionById = (id) => sessions.find((x) => x.id === id);
   const nameOf = (id) => sessionById(id)?.name || '세션';
   const ownerOf = (m) => m.to || m.session || null;
+  // 메시지 번호: 대화창 기록은 숫자, Codex 대화 기록에서 읽은 메시지는 x 로 시작하는 글자(#2113). 둘 다 답장·참고·고정·곁질문할 수 있다.
+  const idOf = (v) => (/^x[\w-]+$/.test(String(v)) ? String(v) : Number(v));
+  const canRef = (m) => typeof m.id === 'number' || /^x[\w-]+$/.test(String(m.id));
   // 곁질문 묶음(#2083): 평소에는 숨기고, 고른 묶음 하나만 대화 속에 보인다. 묶음 번호는 첫 질문 번호(옛 곁질문은 질문 번호·답의 re).
   const groupOf = (m) => m.sideGroup ?? (m.from === 'user' ? m.id : m.re?.[0]);
   const sideOpen = {}; // 세션별로 펼친 묶음. 펼친 채 곁질문을 보내면 그 묶음에 이어 묻는다.
@@ -691,7 +694,7 @@
     } catch {}
   }
   // 글을 고르면(이 탭의 메시지 안 글일 때만) 입력칸 위에 "고른 부분에 답장" 버튼을 띄운다.
-  const msgOfSel = (t) => (t ? timeline(activeTab).filter((m) => typeof m.id === 'number' && !isHeld(m)).reverse().find((m) => plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text).includes(t)) : null);
+  const msgOfSel = (t) => (t ? timeline(activeTab).filter((m) => canRef(m) && !isHeld(m)).reverse().find((m) => plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text).includes(t)) : null);
   document.addEventListener('selectionchange', () => {
     const m = lastSel && Date.now() - lastSel.at < 300 ? (lastSel.id ? messages.find((x) => String(x.id) === lastSel.id) : msgOfSel(lastSel.text)) : null;
     const b = $('selReply');
@@ -716,12 +719,12 @@
   const openRefs = new Set(); // 입력칸 아래 목록에서 펼친 줄
   let refs = []; // 붙인 것들 {id, ref, quote}. 글 속 표시와 번호·종류로 짝짓는다
   // 입력칸 속 표시는 짧게 ↩1940「자동으…」 처럼 번호와 붙인 글 앞 3글자로 두고 칩처럼 칠한다(#1973, #1993). 보낼 때는 [↩#1940] 으로 바꿔 적는다.
-  const MARK = /\[?(↩|📎)#?(\d+)(?:「[^」\n]*」)?\]?/g;
+  const MARK = /\[?(↩|📎)#?(\d+|x[\w-]+)(?:「[^」\n]*」)?\]?/g;
   const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${id}]`);
   function pairRefs(t) {
     const left = [...refs];
     return [...String(t).matchAll(MARK)].map((x) => {
-      const ref = x[1] === '📎', id = Number(x[2]);
+      const ref = x[1] === '📎', id = idOf(x[2]);
       const i = left.findIndex((r) => r.id === id && r.ref === ref);
       return { ...(i >= 0 ? left.splice(i, 1)[0] : { id, ref, quote: null }), at: x.index, len: x[0].length };
     });
@@ -875,7 +878,7 @@
   }
   // 글 속 표시([↩#번호])마다 그 자리에 인용 상자를 넣어 그린다.
   function fillWithQuotes(body, text, quotes, key) {
-    const parts = String(text).split(/\[(?:↩|📎)#\d+\]/);
+    const parts = String(text).split(/\[(?:↩|📎)#(?:\d+|x[\w-]+)\]/);
     body.replaceChildren();
     parts.forEach((part, i) => {
       if (part.trim()) { const seg = document.createElement('span'); seg.className = 'seg'; seg.innerHTML = mdLite(part.trim()); body.append(seg); }
@@ -973,7 +976,7 @@
   $('msgs').addEventListener('click', (e) => {
     if (e.target.closest('button, a, textarea, input, select, .quote')) return;
     const m = e.target.closest('.msg');
-    const id = m ? Number(m.dataset.id) : null;
+    const id = m ? idOf(m.dataset.id) : null;
     linkFocus = id && id !== linkFocus ? id : null;
     if (lastLinks) drawLinks(lastLinks);
   });
@@ -994,7 +997,7 @@
     svg.innerHTML = '<defs><linearGradient id="uifbLinkGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>'
       + '<linearGradient id="uifbReplyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#fbbf24"/></linearGradient></defs>';
     box.prepend(svg);
-    const byId = new Map([...box.querySelectorAll('.msg[data-id]')].map((e) => [Number(e.dataset.id), e]));
+    const byId = new Map([...box.querySelectorAll('.msg[data-id]')].map((e) => [idOf(e.dataset.id), e]));
     const pos = (id) => {
       const el = byId.get(id);
       if (!el || el.classList.contains('held')) return null;
@@ -1264,7 +1267,7 @@
     head.append(lb);
     bar.replaceChildren(head, ...els.map((orig) => {
       const c = orig.cloneNode(true);
-      const id = Number(orig.dataset.id);
+      const id = idOf(orig.dataset.id);
       c.classList.remove('unread', 'flashing');
       c.classList.add('pinned');
       const open = openPins.has(id);
@@ -1398,7 +1401,7 @@
       }
       const oq = !m.quotes?.length && m.replyTo && quoteEl({ id: m.replyTo, quote: m.replyQuote, refer: m.refer }, m.id);
       if (oq) body.before(oq);
-      if (typeof m.id === 'number' && !isHeld(m)) {
+      if (canRef(m) && !isHeld(m)) {
         const rp = document.createElement('button');
         rp.type = 'button';
         rp.className = 'rp';
@@ -3106,7 +3109,7 @@
   let swipe = null;
   $('msgs').addEventListener('touchstart', (e) => {
     const el = e.target.closest?.('.msg[data-id]');
-    const m = el && messages.find((x) => x.id === Number(el.dataset.id));
+    const m = el && messages.find((x) => x.id === idOf(el.dataset.id));
     swipe = e.touches.length === 1 && m && m.context !== 'side' && !isHeld(m) && !e.target.closest('.tbl, textarea, button')
       ? { el, m, x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now(), on: false } : null;
   }, { passive: true });

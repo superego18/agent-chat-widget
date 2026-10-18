@@ -207,6 +207,36 @@ test('Codex 세션 상태는 대화 기록의 턴 표시로 읽는다 (#2113)', 
   } finally { srv.stop(); }
 });
 
+test('Codex 답에도 답장 단추가 있고, 답장하면 원문이 Codex 에 함께 간다 (#2113)', async () => {
+  const dir = makeDir();
+  const roll = path.join(dir, 'rollout.jsonl');
+  fs.writeFileSync(roll, JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', id: 'msg_1', role: 'assistant', content: [{ type: 'output_text', text: '코덱스 답' }] } }) + '\n');
+  const f = path.join(dir, 'sessions', `${B}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), tool: 'codex', path: roll }));
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
+  const log = path.join(bin, 'args.json');
+  fs.writeFileSync(path.join(bin, 'codex'), `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin + path.delimiter + oldPath;
+  const srv = await startServer(dir);
+  process.env.PATH = oldPath;
+  try {
+    const { w, ctx } = await openWidget(srv, { tab: B });
+    await w.eval((r) => new Promise((ok) => { const t = setInterval(() => { if (r.querySelector('.msg[data-id="xmsg_1"] .rp')) { clearInterval(t); ok(); } }, 50); }));
+    assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg[data-id="xmsg_1"] .rp')].map((b) => b.textContent)).then((l) => l.slice(0, 4)), ['답장', '참고', '복사', '고정']);
+    await w.eval((r) => r.querySelector('.msg[data-id="xmsg_1"] .rp').click());
+    const v = await w.inputValue();
+    assert.match(v, /↩xmsg_1「/, '입력칸에 답장 칩이 들어간다');
+    await w.type(v + '이거 다시');
+    await w.click('#form button[type="submit"]');
+    for (let i = 0; i < 40 && !fs.existsSync(log); i++) await new Promise((r) => setTimeout(r, 100));
+    const msg = JSON.parse(fs.readFileSync(log, 'utf8')).at(-1);
+    assert.match(msg, /이거 다시/);
+    assert.match(msg, /답장 대상 \[xmsg_1\] 에이전트: 코덱스 답/);
+    await ctx.close();
+  } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
+});
+
 test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남는다(높이 포함) (#1864)', async () => {
   const dir = makeDir();
   fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ desktop: { panel: { w: 500, h: 400 } } }));

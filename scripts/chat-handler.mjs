@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { readQueuePickups } from './codex-pickup.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
-import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage } from './chat-format.mjs';
+import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines } from './chat-format.mjs';
 
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 // 위젯 파일. 요청마다 새로 읽으므로 고치면 열린 화면도 새로고침만으로 바뀐다.
@@ -355,9 +355,11 @@ function draftMessageText(draft) {
 }
 
 // 한 글 안 여러 곳에 붙인 답장·참고(글 속 [↩#번호]·[📎#번호] 표시와 순서대로 짝, #1955). 앞 번호만, 10개까지.
+// 붙일 수 있는 메시지 번호: 대화창 기록의 숫자 번호(지금 메시지보다 앞) 또는 Codex 대화 기록에서 읽은 답의 x 번호(#2113).
+const msgRef = (v, below = Infinity) => (Number.isInteger(v) && v > 0 && v < below) || (typeof v === 'string' && /^x[\w-]{1,80}$/.test(v));
 function cleanQuotes(q, below = Infinity) {
   if (!Array.isArray(q)) return undefined;
-  const out = q.filter((x) => Number.isInteger(x?.id) && x.id > 0 && x.id < below).slice(0, 30)
+  const out = q.filter((x) => msgRef(x?.id, below)).slice(0, 30)
     .map((x) => ({ id: x.id, ...(typeof x.quote === 'string' && x.quote.trim() ? { quote: x.quote.trim().slice(0, 500) } : {}), ...(x.refer === true ? { refer: true } : {}) }));
   return out.length ? out : undefined;
 }
@@ -391,7 +393,7 @@ function addChat(msg) {
   if (msg.device === 'mobile' || msg.device === 'desktop') entry.device = msg.device;
   if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
   if (draft) entry.draft = draft;
-  if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) {
+  if (msgRef(msg.replyTo, entry.id)) {
     entry.replyTo = msg.replyTo;
     if (msg.refer === true) entry.refer = true; // 답장이 아니라 참고로만 붙인 인용
     if (typeof msg.replyQuote === 'string' && msg.replyQuote.trim()) entry.replyQuote = msg.replyQuote.trim().slice(0, 500); // 원문 중 사용자가 고른 부분만 인용
@@ -402,7 +404,7 @@ function addChat(msg) {
   // 곁질문 묶음(#2083): 묶음 번호는 그 묶음 첫 질문의 번호다.
   if (entry.context === 'side') entry.sideGroup = Number.isInteger(msg.sideGroup) && msg.sideGroup > 0 && msg.sideGroup <= entry.id ? msg.sideGroup : entry.id;
   // 메시지를 밀어(또는 단추로) 연 곁질문은 그 메시지(sideOn)에 대한 묶음이다(#2099).
-  if (entry.context === 'side' && entry.from === 'user' && Number.isInteger(msg.sideOn) && msg.sideOn > 0 && msg.sideOn < entry.id) entry.sideOn = msg.sideOn;
+  if (entry.context === 'side' && entry.from === 'user' && msgRef(msg.sideOn, entry.id)) entry.sideOn = msg.sideOn;
   chat.messages.push(entry);
   writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
@@ -504,7 +506,7 @@ function savePrefs(req) {
   if ('draftLabel' in req && sid(req.session)) prefs.draftLabels = { ...(prefs.draftLabels || {}), [req.session]: typeof req.draftLabel === 'string' && req.draftLabel.trim() ? req.draftLabel.trim().slice(0, 30) : null };
   // 세션마다 보고 있던 메시지(맨 위에 보이던 메시지 id, 맨 아래면 'bottom'). 화면 폭과 상관없이 같은 메시지로 돌아간다.
   // 세션마다 대화창 위에 고정해 둔 메시지 번호들(#1999, 두 화면 공용)
-  if (req.pins && sid(req.pins.session) && Array.isArray(req.pins.ids)) prefs.pins = { ...(prefs.pins || {}), [req.pins.session]: [...new Set(req.pins.ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, 10) };
+  if (req.pins && sid(req.pins.session) && Array.isArray(req.pins.ids)) prefs.pins = { ...(prefs.pins || {}), [req.pins.session]: [...new Set(req.pins.ids.filter((n) => msgRef(n)))].slice(0, 10) };
   if (req.pos && sid(req.pos.session) && typeof req.pos.id === 'string' && req.pos.id.length < 80) prefs.pos = { ...(prefs.pos || {}), [req.pos.session]: req.pos.id };
   // 보관함에서 접어 둔 분류와 "최근 보낸 것·지운 것"을 펼쳤는지(세션마다, 두 화면 공용)
   if (req.fold && sid(req.fold.session)) {
@@ -646,7 +648,7 @@ function handleDrafts(req) {
     if (dup) return { status: 200, body: dup };
     const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}), ...(cid ? { cid } : {}),
       // 답장·참고를 붙인 채 담았으면 그대로 남겨, 보류에서 보낼 때 함께 보낸다.
-      ...(Number.isInteger(req.replyTo) && req.replyTo > 0 ? { replyTo: req.replyTo, ...(typeof req.replyQuote === 'string' && req.replyQuote.trim() ? { replyQuote: req.replyQuote.trim().slice(0, 500) } : {}), ...(req.refer === true ? { refer: true } : {}) } : {}), ...(cleanQuotes(req.quotes) ? { quotes: cleanQuotes(req.quotes) } : {}) };
+      ...(msgRef(req.replyTo) ? { replyTo: req.replyTo, ...(typeof req.replyQuote === 'string' && req.replyQuote.trim() ? { replyQuote: req.replyQuote.trim().slice(0, 500) } : {}), ...(req.refer === true ? { refer: true } : {}) } : {}), ...(cleanQuotes(req.quotes) ? { quotes: cleanQuotes(req.quotes) } : {}) };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
@@ -717,7 +719,9 @@ function queueToCodex(session, entry) {
   const attempt = randomUUID();
   const receipt = entry.queue?.receipt || randomUUID();
   saveQueue(entry, { state: 'pending', attempt, receipt });
-  const request = queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${where}`)
+  // 답장·참고로 붙인 원문도 함께 넣는다(Claude 세션이 받는 글과 같게). Codex 답은 대화 기록에서 찾는다.
+  const quotes = quoteLines(entry, [...readChat().messages, ...readTranscript(session.sessionId).items]);
+  const request = queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`)
     .then((outcome) => {
       saveQueue(entry, { ...outcome, attempt, receipt }, attempt);
       if (queueRequests.get(entry.id) === request) queueRequests.delete(entry.id);
@@ -781,7 +785,7 @@ function askSide(s, q) {
   sideQueue.set(q.sideGroup, run);
 }
 function runSide(s, q, done) {
-  const all = readChat().messages, on = q.sideOn && all.find((m) => m.id === q.sideOn);
+  const all = [...readChat().messages, ...readTranscript(s.sessionId).items], on = q.sideOn && all.find((m) => m.id === q.sideOn);
   const prompt = [SIDE_HEAD, ...(on ? [`이 질문은 대화의 #${on.id} 메시지에 대한 것입니다: "${on.text.slice(0, 2000)}"`] : []), ...formatMessage(q, all)].join('\n');
   const settings = path.join(root, 'side-settings.json');
   fs.writeFileSync(settings, '{"disableAllHooks":true}');

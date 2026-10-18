@@ -22,6 +22,17 @@ export function formatMessage(m, all) {
   const dev = m.device === 'mobile' ? '·모바일' : m.device === 'desktop' ? '·데스크톱' : '';
   lines.push(`[${m.id}]${m.context === 'app' ? `[앱 화면${dev}]` : `[비교 페이지${dev}]`}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
   if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
+  lines.push(...quoteLines(m, all));
+  // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
+  if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
+    lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.component ? ' · 컴포넌트 ' + m.where.component : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
+    if (adjustText(m.where)) lines.push(`    ${adjustText(m.where)}`);
+  }
+  return lines;
+}
+
+export function quoteLines(m, all) {
+  const lines = [];
   // 이전 메시지에 단 답장이면 원문을 붙인다. 글 속 여러 곳에 붙였으면(quotes) 글 속 표시([↩#번호]·[📎#번호]) 순서대로 하나씩 적는다.
   // 참고(refer)는 그 메시지에 답하라는 뜻이 아니라 함께 보라고 붙인 것이다.
   const qs = m.quotes?.length ? m.quotes : m.replyTo ? [{ id: m.replyTo, quote: m.replyQuote, refer: m.refer }] : [];
@@ -33,11 +44,6 @@ export function formatMessage(m, all) {
     const label = (m.quotes?.length ? `[${q.refer ? '📎' : '↩'}#${q.id}] ` : '') + (q.refer ? '참고로 붙인 메시지(답장 아님)' : '답장 대상');
     if (q.quote) lines.push(`    ${label} [${orig.id}] ${who} 메시지 중 이 부분: "${q.quote}"`);
     else lines.push(`    ${label} [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);
-  }
-  // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
-  if ((m.where?.selector || m.where?.url) && !m.text.includes('\n위치(')) {
-    lines.push(`    위치: ${m.where.url || ''}${m.where.selector ? ' · ' + m.where.selector : ''}${m.where.component ? ' · 컴포넌트 ' + m.where.component : ''}${m.where.text ? ' · "' + m.where.text + '"' : ''}`);
-    if (adjustText(m.where)) lines.push(`    ${adjustText(m.where)}`);
   }
   return lines;
 }
