@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Claude Code 훅에서 불려, 터미널 대화를 대화창 서버 대화 기록(chat.json)으로 보낸다. 의존성 없음 (Node 18+).
-// 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, PostToolUse, Stop, Notification 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
+// 훅 설정: UserPromptSubmit, MessageDisplay, PreToolUse, PostToolUse, Stop, Notification, SubagentStart, SubagentStop 이벤트에 command 훅으로 `node <이 파일>` 을 건다.
 //   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답, 세션끼리 주고받은 메시지(SendMessage)를 chat.json 으로 보낸다.
 //   - 상태: 작업 시작·도구 사용·응답 끝·승인 대기를 /api/status 로 보내, 대화 창에 "작업 중" 표시를 한다.
 //   - 끼워 넣기: 작업 중에 대화창에서 "끼워넣기"로 보낸 메시지를 도구를 하나 쓸 때마다(PostToolUse) 세션에 바로 넣는다(터미널에서 작업 중에 입력하는 것처럼).
@@ -79,6 +79,36 @@ try {
 
   const status = (state, detail = '') => post(port, { session: session.sessionId, state, detail }, 'status');
 
+  // 메인 턴이 끝나도 백그라운드 서브에이전트가 돌고 있으면 "쉬는 중" 대신 "작업 중"으로 둔다.
+  // 돌고 있는 서브에이전트(SubagentStart~SubagentStop)와 메인 턴이 끝났는지를 세션별 파일에 적는다.
+  const runFile = path.join(dir, `.running-${input.session_id}.json`);
+  const readRun = () => {
+    const r = readJsonSafe(runFile) || {};
+    const cutoff = Date.now() - 6 * 60 * 60 * 1000; // 끝 알림을 못 받은 오래된 항목은 버린다
+    const agents = Object.fromEntries(Object.entries(r.agents || {}).filter(([, at]) => Date.parse(at) > cutoff));
+    return { agents, mainIdle: !!r.mainIdle };
+  };
+  const settle = async (run) => {
+    writeJsonAtomic(runFile, run);
+    if (!run.mainIdle) return;
+    const n = Object.keys(run.agents).length;
+    await (n ? status('working', `하위 작업 ${n}개 진행 중`) : status('idle'));
+  };
+
+  if (input.hook_event_name === 'SubagentStart' && input.agent_id) {
+    const run = readRun();
+    run.agents[String(input.agent_id)] = new Date().toISOString();
+    await settle(run);
+  }
+
+  if (input.hook_event_name === 'SubagentStop' && input.agent_id) {
+    const run = readRun();
+    delete run.agents[String(input.agent_id)];
+    await settle(run);
+  }
+
+  if (input.hook_event_name === 'UserPromptSubmit') writeJsonAtomic(runFile, { ...readRun(), mainIdle: false });
+
   if (input.hook_event_name === 'UserPromptSubmit') {
     const text = String(input.prompt_text ?? input.prompt ?? '').trim();
     await status('working', '생각하는 중');
@@ -123,7 +153,7 @@ try {
   }
 
   if (input.hook_event_name === 'Stop') {
-    await status('idle');
+    await settle({ ...readRun(), mainIdle: true });
   }
 
   if (input.hook_event_name === 'Notification') {

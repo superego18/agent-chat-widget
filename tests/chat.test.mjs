@@ -483,6 +483,33 @@ test('서브에이전트 보고는 내 글이 아니라 서브에이전트 메�
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
 });
 
+test('메인 턴이 끝나도 백그라운드 서브에이전트가 돌면 작업 중으로 두고, 모두 끝나면 쉬는 중으로 바꾼다', async () => {
+  const srv = await startServer(makeDir());
+  const cwd = fs.mkdtempSync(path.join(srv.dir, '..', 'uifb-cwd-'));
+  try {
+    fs.symlinkSync(srv.dir, path.join(cwd, '.ui-feedback'), process.platform === 'win32' ? 'junction' : 'dir');
+    const sf = path.join(srv.dir, 'sessions', `${A}.json`);
+    fs.writeFileSync(sf, JSON.stringify({ ...JSON.parse(fs.readFileSync(sf, 'utf8')), port: srv.port }));
+    const hook = (hook_event_name, extra = {}) => execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'hook-relay.mjs')],
+      { input: JSON.stringify({ hook_event_name, session_id: A, cwd, ...extra }), encoding: 'utf8', timeout: 10_000 });
+    const state = () => JSON.parse(fs.readFileSync(path.join(srv.dir, `status-${A}.json`), 'utf8'));
+    hook('UserPromptSubmit', { prompt: '' });
+    hook('SubagentStart', { agent_id: 'bg1' });
+    assert.equal(state().state, 'working');
+    hook('Stop');
+    assert.equal(state().state, 'working', '서브에이전트가 남아 있으면 쉬는 중으로 바꾸지 않는다');
+    assert.match(state().detail, /하위 작업 1개/);
+    hook('SubagentStop', { agent_id: 'bg1' });
+    assert.equal(state().state, 'idle', '마지막 서브에이전트가 끝나면 쉬는 중');
+    hook('UserPromptSubmit', { prompt: '' });
+    hook('SubagentStart', { agent_id: 'fg1' });
+    hook('SubagentStop', { agent_id: 'fg1' });
+    assert.equal(state().state, 'working', '메인 턴 중에 끝난 서브에이전트는 쉬는 중을 보내지 않는다');
+    hook('Stop');
+    assert.equal(state().state, 'idle');
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
+});
+
 test('한 글 안 여러 곳에 답장·참고: 커서 자리에 줄을 바꾸지 않고 표시가 들어가고, 아래 목록에 무엇인지 보이며, 보내면 그 자리에 인용이 그려진다 (#1955, #1957, #1964)', async () => {
   const srv = await startServer(makeDir({ messages: [
     { id: 1, from: 'agent', session: A, text: '첫 번째 답', at: iso(9000) },
