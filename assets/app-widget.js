@@ -353,6 +353,7 @@
   .msg .small .sideb, small .sideb { color: #0e7490; font-weight: 600; }
   /* 곁질문 시작(#2099): PC는 단추 줄의 "곁질문", 휴대폰은 말풍선을 오른쪽으로 밀기(단추는 숨김) */
   .msg .sideq { color: #0e7490; }
+  .msg.agent.interim { opacity: .75; }
   .msgs.sideview { background: #f0fdff; }
   .msg.sideanchor { outline: 2px solid #22d3ee; outline-offset: 1px; }
   @media (hover: none) { .msg .sideq { display: none; } }
@@ -1363,7 +1364,7 @@
         box.append(newLine);
       }
       const d = document.createElement('div');
-      d.className = 'msg ' + m.from + (m.context === 'side' ? ' side' : '') + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' ? (m.session === activeTab ? ' out' : ' in') : '');
+      d.className = 'msg ' + m.from + (m.interim ? ' interim' : '') + (m.context === 'side' ? ' side' : '') + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' ? (m.session === activeTab ? ' out' : ' in') : '');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       if (m.context === 'side') d.dataset.group = String(groupOf(m));
@@ -1371,7 +1372,7 @@
       const tag = document.createElement('span');
       tag.className = 'tag';
       const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'side' ? '곁질문' : m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
-      tag.textContent = src;
+      tag.textContent = src + (m.interim ? ' · 중간 안내' : ''); // Codex 가 일하며 남긴 안내(최종 답과 구분 #2113)
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +

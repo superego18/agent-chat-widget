@@ -46,7 +46,7 @@ export async function startServer(dir) {
     const r = await fetch(base + p, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return r.json();
   };
-  return { base, port, dir, api, stop: () => { child.kill(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { base, port, dir, api, log: () => out, stop: () => { child.kill(); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
 
 let browser;

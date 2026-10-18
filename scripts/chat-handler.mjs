@@ -216,7 +216,7 @@ function notifyStatus(s, prev) {
     setTimeout(() => {
       const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
       // 마지막 답을 이미 답장 알림으로 보냈으면, 답장 알림을 켠 기기에는 작업 끝 알림을 또 보내지 않는다(같은 글이 두 번 오지 않게).
-      const dup = last && answerPushed.has(last.id);
+      const dup = s.lastPushed || (!s.last && last && answerPushed.has(last.id));
       pushAll({ title: `${name} 작업 끝`, body: s.last ? plainBody(s.last) : last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}`, session: s.session }, 'done', dup ? (p) => p.answer : null);
     }, 3000);
   }
@@ -254,14 +254,28 @@ function codexStatus(file) {
   return null;
 }
 const codexSeen = new Map(); // 세션마다 마지막으로 본 대화 기록 상태(처음 본 상태는 알리지 않는다)
+const codexAnswered = new Map(); // 세션마다 답장 알림을 보낸 마지막 Codex 답 번호
 setInterval(() => {
   let files = [];
   try { files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith('.json')); } catch {}
   for (const f of files) {
     const s = readJsonSafe(path.join(sessionsDir, f));
     if (s?.tool !== 'codex' || !s.path || !sid(s.sessionId)) continue;
+    // 새 최종 답(중간 안내 빼고)이 대화 기록에 생기면 답장 알림을 보낸다(Claude 세션이 답을 남길 때와 같게).
+    const answers = readTranscript(s.sessionId).items.filter((m) => m.from === 'agent' && !m.interim);
+    const lastAns = answers.at(-1)?.id ?? null, seenAns = codexAnswered.get(s.sessionId);
+    if (seenAns === undefined) codexAnswered.set(s.sessionId, lastAns); // 서버를 띄웠을 때 이미 있던 답은 알리지 않는다
+    else if (lastAns !== seenAns) {
+      codexAnswered.set(s.sessionId, lastAns);
+      const from = answers.findIndex((x) => x.id === seenAns);
+      for (const m of from < 0 && seenAns !== null ? answers.slice(-1) : answers.slice(from + 1)) { // 앞 답이 읽는 범위 밖으로 밀려났으면 마지막 답만
+        answerPushed.add(m.id);
+        pushAll({ title: `${s.name || '세션'} 답장`, body: plainBody(m.text), tag: `uifb-${s.sessionId}`, session: s.sessionId }, 'answer');
+      }
+    }
     const now = codexStatus(s.path);
     if (!now) continue;
+    if (now.state === 'idle' && lastAns && answerPushed.has(lastAns)) now.lastPushed = true;
     const key = `${now.state}|${now.detail || ''}|${now.at}`, before = codexSeen.get(s.sessionId);
     if (before === key) continue;
     codexSeen.set(s.sessionId, key);
@@ -858,7 +872,7 @@ function readTranscript(id) {
     if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
     const text = stripTags((p.content || []).filter((b) => b.type === 'input_text' || b.type === 'output_text').map((b) => b.text).join('\n'));
     if (!text || (p.role === 'user' && (text.startsWith('<') || text.startsWith(QUEUE_PREFIX) || text.includes('AGENTS.md instructions')))) continue;
-    items.push({ id: `x${p.id || o.ordinal}`, from: p.role === 'user' ? 'user' : 'agent', session: id, context: 'terminal', agent: session.agent, text: text.slice(0, 8000), at: o.timestamp });
+    items.push({ id: `x${p.id || o.ordinal}`, from: p.role === 'user' ? 'user' : 'agent', session: id, context: 'terminal', agent: session.agent, text: text.slice(0, 8000), at: o.timestamp, ...(p.phase === 'commentary' ? { interim: true } : {}) });
   }
   const data = { items: items.slice(-300) };
   transcriptCache.set(id, { key, data });
@@ -894,9 +908,10 @@ function readReviewWatch(sessionKey, round) {
     files = fs.readdirSync(root).filter((f) => /^watch-.+\.json$/.test(f));
   } catch {}
   // 감시가 라운드를 정했으면 그 라운드 페이지에만 보인다. 다른 라운드·비교 페이지에 "자동 이어가기 켜짐"으로 잘못 뜨지 않게.
-  const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone && (w.round == null || !round || String(w.round) === round));
-  if (live[0]) return live[0];
+  // 페이지가 받을 세션을 정했으면 그 세션의 감시만 본다(다른 세션의 감시로 "켜짐"이 뜨지 않게 #2113).
   const s = findSessionByKey(sessionKey);
+  const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone && (!s || w.session === s.sessionId) && (w.round == null || !round || String(w.round) === round));
+  if (live[0]) return live[0];
   // 평가 완료는 대화로도 그 세션에 가므로(onDone → addChat), 그 세션의 대화 감시가 살아 있어도 이어진다.
   const chatWatch = s && readWatchFile(`watch-${s.sessionId}.json`);
   if (chatWatch?.active) return { ...chatWatch, handlesDone: true, via: 'chat' };

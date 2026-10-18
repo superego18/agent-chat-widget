@@ -202,8 +202,11 @@ test('Codex 세션 상태는 대화 기록의 턴 표시로 읽는다 (#2113)', 
     const st = await until((x) => x.state === 'working');
     assert.equal(st.state, 'working');
     assert.equal(st.detail, '명령 실행 중');
+    fs.appendFileSync(roll, JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', id: 'a1', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: '다 했어' }] } }) + '\n');
     fs.appendFileSync(roll, line({ type: 'task_complete', last_agent_message: '다 했어' }));
     assert.equal((await until((x) => x.state === 'idle')).state, 'idle');
+    for (let i = 0; i < 30 && !/answer → .*작업 세션 답장/.test(srv.log()); i++) await new Promise((r) => setTimeout(r, 200));
+    assert.match(srv.log(), /answer → .*작업 세션 답장/, '새 Codex 답에 답장 알림');
   } finally { srv.stop(); }
 });
 
@@ -235,6 +238,33 @@ test('Codex 답에도 답장 단추가 있고, 답장하면 원문이 Codex 에 
     assert.match(msg, /답장 대상 \[xmsg_1\] 에이전트: 코덱스 답/);
     await ctx.close();
   } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
+});
+
+test('비교 페이지 자동 이어가기는 받을 세션의 감시만 본다 (#2113)', async () => {
+  const dir = makeDir();
+  fs.writeFileSync(path.join(dir, `watch-${A}.json`), JSON.stringify({ session: A, name: '스킬 세션', handlesDone: true, pid: process.pid, startedAt: new Date().toISOString() }));
+  const srv = await startServer(dir);
+  try {
+    assert.equal((await srv.api('/api/watch?session=' + encodeURIComponent('작업 세션'))).active, false, '다른 세션의 감시로 켜짐이 뜨지 않는다');
+    assert.equal((await srv.api('/api/watch?session=' + encodeURIComponent('스킬 세션'))).active, true);
+  } finally { srv.stop(); }
+});
+
+test('Codex 의 중간 안내는 최종 답과 구분해 보인다 (#2113)', async () => {
+  const dir = makeDir();
+  const roll = path.join(dir, 'rollout.jsonl');
+  const msg = (id, text, phase) => JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', id, role: 'assistant', phase, content: [{ type: 'output_text', text }] } }) + '\n';
+  fs.writeFileSync(roll, msg('m1', '확인할게', 'commentary') + msg('m2', '다 됐어', 'final_answer'));
+  const f = path.join(dir, 'sessions', `${B}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), tool: 'codex', path: roll }));
+  const srv = await startServer(dir);
+  try {
+    const { w, ctx } = await openWidget(srv, { tab: B });
+    await w.eval((r) => new Promise((ok) => { const t = setInterval(() => { if (r.querySelector('.msg[data-id="xm2"]')) { clearInterval(t); ok(); } }, 50); }));
+    assert.deepEqual(await w.eval((r) => ['xm1', 'xm2'].map((id) => r.querySelector(`.msg[data-id="${id}"]`).classList.contains('interim'))), [true, false]);
+    assert.match(await w.eval((r) => r.querySelector('.msg[data-id="xm1"] .tag').textContent), /중간 안내/);
+    await ctx.close();
+  } finally { srv.stop(); }
 });
 
 test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남는다(높이 포함) (#1864)', async () => {
