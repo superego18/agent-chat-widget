@@ -35,7 +35,7 @@ async function proxyFixture(t, flags, lan = true) {
     if (child.exitCode === null && child.signalCode === null) { const ended = once(child, 'exit'); child.kill(); await ended; }
     upstream.closeAllConnections?.();
     await new Promise(resolve => upstream.close(resolve));
-    assert.equal(path.dirname(root), fs.realpathSync(os.tmpdir()));
+    assert.equal(fs.realpathSync(path.dirname(root)), fs.realpathSync(os.tmpdir())); // macOS 임시 폴더는 /private 아래로 연결돼 있어 양쪽 다 실제 경로로 비교한다
     assert.ok(path.basename(root).startsWith('widget-proxy-security-'));
     fs.rmSync(root, { recursive: true, force: true });
   });

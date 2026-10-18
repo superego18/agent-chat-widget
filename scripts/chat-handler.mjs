@@ -217,10 +217,59 @@ function notifyStatus(s, prev) {
       const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
       // 마지막 답을 이미 답장 알림으로 보냈으면, 답장 알림을 켠 기기에는 작업 끝 알림을 또 보내지 않는다(같은 글이 두 번 오지 않게).
       const dup = last && answerPushed.has(last.id);
-      pushAll({ title: `${name} 작업 끝`, body: last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}`, session: s.session }, 'done', dup ? (p) => p.answer : null);
+      pushAll({ title: `${name} 작업 끝`, body: s.last ? plainBody(s.last) : last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}`, session: s.session }, 'done', dup ? (p) => p.answer : null);
     }, 3000);
   }
 }
+// Codex 세션 상태: Codex 에는 hook-relay 훅이 없어서, 대화 기록(rollout)의 마지막 턴 표시로 읽는다.
+// task_started 뒤에 task_complete·turn_aborted 가 없으면 작업 중(하는 일은 그 뒤 마지막 도구), 있으면 쉬는 중.
+// 승인 대기는 대화 기록에 남지 않아 알 수 없다. 대화 기록이 마지막으로 바뀐 시각을 at 으로 적어 "오래 멈춤"이 실제로 멈췄을 때만 울리게 한다.
+function codexToolLabel(name = '') {
+  if (/^(exec|exec_command|shell|local_shell)$/.test(name)) return '명령 실행 중';
+  if (name === 'apply_patch') return '파일 수정 중';
+  if (name === 'read_file') return '파일 읽는 중';
+  if (name.startsWith('mcp__')) return `${name.split('__')[1]} 도구 사용 중`;
+  return name ? `${name} 사용 중` : '생각하는 중';
+}
+function codexStatus(file) {
+  try {
+    const st = fs.statSync(file);
+    const len = Math.min(st.size, 512 * 1024);
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    let tool = '';
+    for (const l of buf.toString('utf8').split('\n').reverse()) {
+      if (!l.includes('"type"')) continue;
+      let o;
+      try { o = JSON.parse(l); } catch { continue; }
+      const t = o.payload?.type;
+      if (!tool && (t === 'function_call' || t === 'custom_tool_call')) tool = String(o.payload.name || '');
+      if (t === 'task_complete') return { state: 'idle', last: o.payload.last_agent_message || '', at: st.mtime.toISOString() };
+      if (t === 'turn_aborted') return { state: 'idle', at: st.mtime.toISOString() };
+      if (t === 'task_started') return { state: 'working', detail: codexToolLabel(tool), at: st.mtime.toISOString() };
+    }
+  } catch {}
+  return null;
+}
+const codexSeen = new Map(); // 세션마다 마지막으로 본 대화 기록 상태(처음 본 상태는 알리지 않는다)
+setInterval(() => {
+  let files = [];
+  try { files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith('.json')); } catch {}
+  for (const f of files) {
+    const s = readJsonSafe(path.join(sessionsDir, f));
+    if (s?.tool !== 'codex' || !s.path || !sid(s.sessionId)) continue;
+    const now = codexStatus(s.path);
+    if (!now) continue;
+    const key = `${now.state}|${now.detail || ''}|${now.at}`, before = codexSeen.get(s.sessionId);
+    if (before === key) continue;
+    codexSeen.set(s.sessionId, key);
+    const prev = readStatus(s.sessionId);
+    if (before !== undefined && (now.state !== prev.state || (now.detail || '') !== (prev.detail || ''))) notifyStatus({ session: s.sessionId, ...now }, prev);
+    fs.writeFileSync(path.join(root, `status-${s.sessionId}.json`), JSON.stringify({ state: now.state, detail: now.detail || '', at: now.at }) + '\n');
+  }
+}, 2000).unref();
 // 오래 멈춤: "작업 중"이 5분 넘게 그대로면 그 상태에 한 번 알린다.
 const staleSent = new Map();
 setInterval(() => {

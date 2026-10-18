@@ -188,6 +188,25 @@ test('세션 탭에 컨텍스트 사용률: Claude 는 상태 줄이 남긴 값,
   } finally { srv.stop(); }
 });
 
+test('Codex 세션 상태는 대화 기록의 턴 표시로 읽는다 (#2113)', async () => {
+  const dir = makeDir();
+  const roll = path.join(dir, 'rollout.jsonl');
+  const line = (payload) => JSON.stringify({ timestamp: new Date().toISOString(), type: payload.type === 'custom_tool_call' ? 'response_item' : 'event_msg', payload }) + '\n';
+  fs.writeFileSync(roll, line({ type: 'task_complete', last_agent_message: '앞 답' }) + line({ type: 'task_started' }) + line({ type: 'custom_tool_call', name: 'exec' }));
+  const f = path.join(dir, 'sessions', `${B}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), tool: 'codex', path: roll }));
+  const srv = await startServer(dir);
+  const stateOf = async () => (await srv.api('/api/sessions')).sessions.find((x) => x.id === B).status;
+  const until = async (ok) => { for (let i = 0; i < 40; i++) { const st = await stateOf(); if (ok(st)) return st; await new Promise((r) => setTimeout(r, 200)); } return stateOf(); };
+  try {
+    const st = await until((x) => x.state === 'working');
+    assert.equal(st.state, 'working');
+    assert.equal(st.detail, '명령 실행 중');
+    fs.appendFileSync(roll, line({ type: 'task_complete', last_agent_message: '다 했어' }));
+    assert.equal((await until((x) => x.state === 'idle')).state, 'idle');
+  } finally { srv.stop(); }
+});
+
 test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남는다(높이 포함) (#1864)', async () => {
   const dir = makeDir();
   fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ desktop: { panel: { w: 500, h: 400 } } }));
