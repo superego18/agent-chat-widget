@@ -2612,8 +2612,8 @@
     if (got(m)) return ' · 읽음';
     if (m.queue?.state === 'failed') return ' · 전달 실패 · 전달 재시도 가능';
     if (m.queue?.state === 'unknown') return ' · 전달 결과 미확인 · 재전송 시 중복 가능';
-    if (m.queue?.state === 'pending') return ' · 큐 접수 확인 중';
-    if (m.queue?.state === 'accepted') return ' · 큐 접수됨 · 읽음 확인 전';
+    if (m.queue?.state === 'pending') return ' · 전달 요청 중';
+    if (m.queue?.state === 'accepted') return ' · 전달 요청됨 · 읽음 확인 전';
     const s = sessionById(m.to);
     if (s?.status?.state === 'working' || s?.status?.state === 'permission') return m.interject ? ' · 안 읽음(다음 단계에서 바로 읽음)' : ' · 안 읽음(작업 중이라 끝나면 읽음)';
     return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';

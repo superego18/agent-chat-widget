@@ -69,7 +69,7 @@ for (const width of [390, 1440]) {
     await retry.click();
     await page.waitForFunction(() => {
       const root = [...document.querySelectorAll('*')].find(e => e.shadowRoot?.getElementById('panel')).shadowRoot;
-      return root.querySelector('.msg[data-id="1"]')?.textContent.includes('큐 접수됨');
+      return root.querySelector('.msg[data-id="1"]')?.textContent.includes('전달 요청됨');
     });
     assert.deepEqual(store.posts.filter(p => p.path.endsWith('/chat-retry')).map(p => p.body), [{ id: 1, confirmUnknown: true }]);
     assert.equal(store.messages.length, 1);
@@ -79,7 +79,7 @@ for (const width of [390, 1440]) {
     const bubble = page.locator('.msg[data-id="1"]');
     await page.waitForFunction(() => {
       const root = [...document.querySelectorAll('*')].find((e) => e.shadowRoot?.getElementById('panel')).shadowRoot;
-      return root.querySelector('.msg[data-id="1"]')?.textContent.includes('큐 접수 확인 중');
+      return root.querySelector('.msg[data-id="1"]')?.textContent.includes('전달 요청 중');
     });
     assert.equal(await bubble.getByRole('button', { name: '다시 보내기', exact: true }).count(), 0);
     store.messages[0].queue.state = 'failed';
@@ -90,9 +90,10 @@ for (const width of [390, 1440]) {
     await retry.click();
     await page.waitForFunction(() => {
       const root = [...document.querySelectorAll('*')].find((e) => e.shadowRoot?.getElementById('panel')).shadowRoot;
-      return root.querySelector('.msg[data-id="1"]')?.textContent.includes('큐 접수됨');
+      return root.querySelector('.msg[data-id="1"]')?.textContent.includes('전달 요청됨');
     });
     assert.match(await bubble.textContent(), /읽음 확인 전/);
+    assert.doesNotMatch(await bubble.textContent(), /큐|queue/i);
     assert.doesNotMatch(await bubble.textContent(), / · 읽음(?:$| ·)/);
     assert.equal(store.messages.length, 1);
     assert.deepEqual(store.posts.filter((p) => p.path.endsWith('chat-retry')).map((p) => p.body), [{ id: 1 }]);
