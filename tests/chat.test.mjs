@@ -15,6 +15,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 const readChat = (srv) => JSON.parse(fs.readFileSync(path.join(srv.dir, 'chat.json'), 'utf8')).messages;
 
+function writeFakeClaude(bin, source) {
+  const windows = process.platform === 'win32';
+  fs.writeFileSync(path.join(bin, windows ? 'claude.cjs' : 'claude'), source, { mode: 0o755 });
+  if (windows) fs.writeFileSync(path.join(bin, 'claude.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0claude.cjs" %*\r\n`);
+}
+
 test('보내면 메시지가 하나 생기고 입력칸이 빈다', async () => {
   const srv = await startServer(makeDir());
   try {
@@ -362,12 +368,13 @@ test('서브에이전트 보고는 내 글이 아니라 서브에이전트 메�
   const srv = await startServer(makeDir());
   const cwd = fs.mkdtempSync(path.join(srv.dir, '..', 'uifb-cwd-'));
   try {
-    fs.symlinkSync(srv.dir, path.join(cwd, '.ui-feedback'));
+    fs.symlinkSync(srv.dir, path.join(cwd, '.ui-feedback'), process.platform === 'win32' ? 'junction' : 'dir');
     const sf = path.join(srv.dir, 'sessions', `${A}.json`);
     fs.writeFileSync(sf, JSON.stringify({ ...JSON.parse(fs.readFileSync(sf, 'utf8')), port: srv.port }));
     const report = Array.from({ length: 8 }, (_, i) => `  보고 ${i + 1}줄`).join('\n');
     const prompt = `<agent-message from="a1b2">\n[Subagent hand-back] 안내문. The report follows:\n${report}\n</agent-message>`;
-    execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'hook-relay.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: A, cwd, prompt }) });
+    const output = execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'hook-relay.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: A, cwd, prompt }), encoding: 'utf8', timeout: 10_000 });
+    assert.equal(output, '', 'The hook exits without stray output or hanging');
     const [m] = readChat(srv);
     assert.equal(m.from, 'sub');
     assert.equal(m.sub, 'a1b2');
@@ -611,7 +618,7 @@ test('글머리 항목: 입력칸에서 이어 쓰고 들이고, 보낸 메시�
 test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인다 (#2055)', async () => {
   // 가짜 claude: 받은 인자와 질문을 그대로 답으로 돌려준다.
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
-  fs.writeFileSync(path.join(bin, 'claude'), `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({session_id:'fork-1',result:'사본 답 '+process.argv.slice(2).join(' ')+' | '+s})));\n`, { mode: 0o755 });
+  writeFakeClaude(bin, `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({session_id:'fork-1',result:'사본 답 '+process.argv.slice(2).join(' ')+' | '+s})));\n`);
   const oldPath = process.env.PATH;
   process.env.PATH = bin + path.delimiter + oldPath;
   const srv = await startServer(makeDir());
@@ -652,7 +659,7 @@ test('곁질문: 세션에 보내지 않고 사본 답을 같은 칸에 붙인�
 
 test('말풍선을 오른쪽으로 밀면 그 메시지에 대한 곁질문 화면이 된다 (#2099·#2102)', async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
-  fs.writeFileSync(path.join(bin, 'claude'), `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({session_id:'fork-2',result:'사본 답 | '+s})));\n`, { mode: 0o755 });
+  writeFakeClaude(bin, `#!/usr/bin/env node\nlet s='';process.stdin.on('data',(b)=>s+=b).on('end',()=>console.log(JSON.stringify({session_id:'fork-2',result:'사본 답 | '+s})));\n`);
   const oldPath = process.env.PATH;
   process.env.PATH = bin + path.delimiter + oldPath;
   const srv = await startServer(makeDir());

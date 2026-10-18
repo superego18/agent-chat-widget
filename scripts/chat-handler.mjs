@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { readQueuePickups } from './codex-pickup.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
 import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage } from './chat-format.mjs';
 
@@ -25,7 +27,8 @@ const SHARED = {
 const MAX_BODY = 256 * 1024;
 const NOT_MINE = Symbol('not mine');
 
-export function createChatHandler({ root, auth = { key: null } }) {
+export function createChatHandler({ root, auth = { key: null }, queueSpawn = spawn, queueTimeoutMs = 15000 }) {
+if (!Number.isFinite(queueTimeoutMs) || queueTimeoutMs <= 0) throw new Error('queueTimeoutMs must be positive');
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -51,6 +54,25 @@ function readChat() {
   }
 }
 
+// A previous process may have submitted the request before losing its outcome.
+const interrupted = readChat();
+let recovered = false;
+for (const message of interrupted.messages) {
+  if (message.queue?.state !== 'pending') continue;
+  message.queue = { ...message.queue, state: 'unknown', error: 'interrupted', at: new Date().toISOString() };
+  recovered = true;
+}
+if (recovered) writeJsonAtomic(chatFile, interrupted);
+
+function queueWatch(session) {
+  const configured = process.platform === 'win32' ? Boolean(windowsQueueCommand()) :
+    (process.env.PATH || '').split(path.delimiter).some(dir => {
+      try { fs.accessSync(path.join(dir, 'codex'), fs.constants.X_OK); return true; } catch { return false; }
+    });
+  return { active: configured, configured, via: 'queue', handlesDone: true,
+    agent: session.agent || session.name, session: session.sessionId };
+}
+
 // register-session.mjs 가 등록한 세션들(.ui-feedback/sessions/<세션 id>.json)
 function listSessions() {
   let files = [];
@@ -67,7 +89,7 @@ function listSessions() {
     })
     .filter(Boolean)
     .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)))
-    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? { active: true, via: 'queue' } : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId), compact: !!s.cmux?.surface, ctx: readCtx(s) }));
+    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? queueWatch(s) : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId), compact: !!s.cmux?.surface, ctx: readCtx(s) }));
 }
 
 // 컨텍스트 사용률(#1856). Claude 는 상태 줄 스크립트가 남긴 값(.ui-feedback/statusline/<세션>.json)을 쓰고,
@@ -127,8 +149,9 @@ function cleanWhere(w) {
   if (!w || typeof w !== 'object') return undefined;
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
   const num = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([, v]) => Number.isFinite(v)).slice(0, 4)) : undefined);
+  const adjustValue = (k, v) => k === 'text' ? String(v ?? '') : String(v ?? '').slice(0, 120);
   const adj = w.adjust && typeof w.adjust === 'object'
-    ? Object.fromEntries(ADJUST_KEYS.filter((k) => w.adjust[k]).map((k) => [k, { from: String(w.adjust[k].from ?? '').slice(0, 120), to: String(w.adjust[k].to ?? '').slice(0, 120) }]))
+    ? Object.fromEntries(ADJUST_KEYS.filter((k) => w.adjust[k]).map((k) => [k, { from: adjustValue(k, w.adjust[k].from), to: adjustValue(k, w.adjust[k].to) }]))
     : {};
   return { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), component: str(w.component, 80), rect: num(w.rect), viewport: num(w.viewport), ...(Object.keys(adj).length ? { adjust: adj } : {}) };
 }
@@ -334,7 +357,7 @@ function addChat(msg) {
   chat.messages.push(entry);
   writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
-  if (target?.tool === 'codex' && !msg.noQueue) { queueToCodex(target, entry); markDelivered(target.sessionId, entry.id); } // noQueue: 서버가 따로 넣는 글(리뷰 완료)이 있어 두 번 넣지 않는다
+  if (target?.tool === 'codex' && !msg.noQueue) queueToCodex(target, entry); // noQueue: the host queues review completion separately.
   // 사용자가 터미널이나 화면에서 그 세션에 말을 걸었다면 그때까지의 답은 읽은 것이다.
   // 세션이 답하면 알림을 켠 기기들에 알린다.
   if (entry.from === 'agent' && entry.session) {
@@ -369,19 +392,26 @@ const cmuxCli = () => process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Appl
 
 // ── 읽음 상태 ──
 // 세션마다 사용자가 마지막으로 읽은 답의 시각. 앱 화면(4798)과 리뷰 페이지(4799)는 주소가 달라 브라우저 저장소를 함께 못 쓰므로 서버에 둔다.
-// 세션이 받아 간 마지막 메시지 번호. Claude 는 대화 감시(wait-review)가 메시지를 넘길 때, Codex 는 codex queue 에 넣을 때 적는다.
+// Actual pickup only. Queue acceptance is stored separately on the message.
 const deliveredFile = path.join(root, 'delivered.json');
 let lastDelivered = {};
 function readDelivered() {
   const d = readJsonSafe(deliveredFile);
   if (d) lastDelivered = d; // 다른 쪽이 쓰는 중이라 못 읽으면 마지막으로 읽은 기록을 쓴다(빈 기록을 대화창에 보내지 않게)
-  return d || lastDelivered;
+  const delivered = d || lastDelivered;
+  const messages = readChat().messages.filter(m => m.queue?.receipt && !delivered._at?.[m.id]);
+  let changed = false;
+  for (const id of new Set(messages.map(m => m.to))) {
+    const session = findSession(id);
+    if (session?.tool !== 'codex') continue;
+    for (const [messageId, at] of Object.entries(readQueuePickups(session, messages))) {
+      delivered._at = { ...(delivered._at || {}), [messageId]: at };
+      changed = true;
+    }
+  }
+  if (changed) writeJsonAtomic(deliveredFile, delivered);
+  return delivered;
 }
-function markDelivered(id, msgId) {
-  const d = readJsonSafe(deliveredFile);
-  if (d && !(d[id] >= msgId)) writeJsonAtomic(deliveredFile, { ...d, [id]: msgId, _at: { ...(d._at || {}), [msgId]: new Date().toISOString() } });
-}
-
 const seenFile = path.join(root, 'seen.json');
 function readSeen() {
   try {
@@ -612,24 +642,80 @@ function handleDrafts(req) {
 }
 
 const QUEUE_PREFIX = '[대화/피드백 · ';
+const queueRequests = new Map();
+
+function saveQueue(entry, outcome, expectedAttempt) {
+  const chat = readChat();
+  const saved = chat.messages.find((m) => m.id === entry.id);
+  if (expectedAttempt && saved?.queue?.attempt !== expectedAttempt) return;
+  entry.queue = { ...outcome, at: new Date().toISOString() };
+  if (saved) { saved.queue = entry.queue; writeJsonAtomic(chatFile, chat); }
+}
+
+async function sendChatEntry(res, entry) {
+  await queueRequests.get(entry.id);
+  const saved = readChat().messages.find((m) => m.id === entry.id) || entry;
+  send(res, ['failed', 'unknown'].includes(saved.queue?.state) ? 502 : 200, saved);
+}
 
 // 페이지 메시지를 실행 중인 Codex 세션에 넣는다. 쉬고 있으면 바로 새 턴이 시작되고, 작업 중이면 그 턴이 끝난 뒤 처리된다.
-// 메시지는 인자나 환경 변수로만 넘겨 셸이 해석하지 않게 한다(Windows는 codex.cmd 라서 PowerShell 로 부른다).
+// Pass arguments directly, including on Windows; shell shims can corrupt quotes and newlines.
 function queueToCodex(session, entry) {
   const where = entry.where?.url || entry.where?.selector
     ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.component ? ' · 컴포넌트 ' + entry.where.component : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}${adjustText(entry.where) ? '\n' + adjustText(entry.where) : ''}`
     : '';
   const src = (entry.context === 'app' ? '앱 화면' : '비교 페이지') + (entry.device === 'mobile' ? ' · 모바일' : entry.device === 'desktop' ? ' · 데스크톱' : '');
-  queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`);
+  const attempt = randomUUID();
+  const receipt = entry.queue?.receipt || randomUUID();
+  saveQueue(entry, { state: 'pending', attempt, receipt });
+  const request = queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${where}`)
+    .then((outcome) => {
+      saveQueue(entry, { ...outcome, attempt, receipt }, attempt);
+      if (queueRequests.get(entry.id) === request) queueRequests.delete(entry.id);
+      return outcome;
+    });
+  queueRequests.set(entry.id, request);
+  return request;
+}
+
+function windowsQueueCommand() {
+  for (const entry of (process.env.PATH || '').split(path.delimiter).filter(Boolean)) {
+    const dir = entry.replace(/^"(.*)"$/, '$1');
+    const executable = path.join(dir, 'codex.exe');
+    if (fs.existsSync(executable)) return { file: executable, prefix: [] };
+    const shim = ['codex.cmd', 'codex.ps1'].some((name) => fs.existsSync(path.join(dir, name)));
+    const cli = path.join(dir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    if (shim && fs.existsSync(cli)) return { file: process.execPath, prefix: [cli] };
+  }
+  return null;
 }
 
 function queueText(session, message) {
   const args = ['queue', '--thread', session.sessionId, '--message', message];
-  const child = process.platform === 'win32'
-    ? spawn('powershell', ['-NoProfile', '-Command', '& codex queue --thread $env:UIFB_THREAD --message $env:UIFB_MESSAGE'], { env: { ...process.env, UIFB_THREAD: session.sessionId, UIFB_MESSAGE: message }, stdio: 'ignore' })
-    : spawn('codex', args, { stdio: 'ignore' });
-  child.on('error', (e) => console.error(`codex queue 실패(${session.name}): ${e.message}`));
-  child.on('exit', (code) => { if (code) console.error(`codex queue 실패(${session.name}): 종료 코드 ${code}`); });
+  // Resolve once. Return only diagnostic categories, never raw stderr or prompt fragments.
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer;
+    const finish = (outcome) => { if (!settled) { settled = true; clearTimeout(timer); resolve(outcome); } };
+    try {
+      const command = process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] };
+      if (!command) { finish({ ok: false, state: 'failed', error: 'spawn_failed', diagnostic: 'cli_not_found' }); return; }
+      const child = queueSpawn(command.file, [...command.prefix, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      timer = setTimeout(() => {
+        finish({ ok: false, state: 'unknown', error: 'queue_timeout' });
+        try { child.kill?.(); } catch {}
+      }, queueTimeoutMs);
+      let stderr = '';
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (chunk) => { stderr = (stderr + chunk).slice(0, 4096); });
+      child.once('error', () => finish({ ok: false, state: 'failed', error: 'spawn_failed' }));
+      child.once('close', (code, signal) => finish(code === 0 && !signal
+        ? { ok: true, state: 'accepted', code: 0 }
+        : { ok: false, state: signal ? 'unknown' : 'failed', error: signal ? 'queue_interrupted' : 'queue_failed', code, signal: signal || null, ...(stderr.trim() ? { diagnostic: /unexpected argument|unrecognized (?:argument|option)|invalid (?:argument|value)|unknown option/i.test(stderr) ? 'invalid_arguments' : 'cli_error' } : {}) }));
+    } catch {
+      finish({ ok: false, state: 'failed', error: 'spawn_failed' });
+    }
+  });
 }
 
 // 곁질문(#2055): 세션을 복제한 사본에게 묻는다. 원래 세션에는 전달되지 않고 대화 기록도 바뀌지 않는다.
@@ -657,16 +743,22 @@ function runSide(s, q, done) {
       ? ['exec', 'resume', '--skip-git-repo-check', '--json', '--disable', 'hooks', '-c', 'sandbox_mode=read-only', fork, '-']
       : ['exec', '--skip-git-repo-check', '--json', '--disable', 'hooks', '-s', 'read-only', 'fork', s.sessionId, '-'])
     : ['-p', '--resume', fork || s.sessionId, ...(fork ? [] : ['--fork-session']), '--settings', settings, '--tools', 'Read,Grep,Glob', '--output-format', 'json'];
-  // Windows 는 claude·codex 가 .cmd 라 셸로 부른다. 인자에 따옴표·공백이 없게 두고 질문은 표준 입력으로 넘긴다.
-  const child = spawn(codex ? 'codex' : 'claude', args, { cwd: path.dirname(root), shell: process.platform === 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+  // Keep Windows paths as individual arguments; disable profile output and preserve UTF-8.
+  const options = { cwd: path.dirname(root), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true };
+  const command = codex ? 'codex' : 'claude';
+  const child = process.platform === 'win32'
+    ? spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', "$ErrorActionPreference = 'Stop'; [Console]::InputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding; $OutputEncoding = [Console]::OutputEncoding; $sideArgs = ConvertFrom-Json $env:UIFB_SIDE_ARGS; & $env:UIFB_SIDE_COMMAND @sideArgs; exit $LASTEXITCODE"], { ...options, env: { ...process.env, UIFB_SIDE_COMMAND: command, UIFB_SIDE_ARGS: JSON.stringify(args) } })
+    : spawn(command, args, options);
   let out = '', err = '';
   child.stdout.on('data', (b) => { out += b; });
   child.stderr.on('data', (b) => { err += b; });
   const timer = setTimeout(() => child.kill(), 5 * 60_000);
-  const reply = (text) => { addChat({ from: 'agent', session: s.sessionId, context: 'side', sideGroup: q.sideGroup, agent: s.agent || s.name, text: `<re ${q.id}> ${text}` }); done(); };
+  let replied = false;
+  const reply = (text) => { if (replied) return; replied = true; addChat({ from: 'agent', session: s.sessionId, context: 'side', sideGroup: q.sideGroup, agent: s.agent || s.name, text: `<re ${q.id}> ${text}` }); done(); };
   child.on('error', (e) => { clearTimeout(timer); reply(`곁질문을 실행하지 못했습니다: ${e.message}`); });
   child.on('close', (code) => {
     clearTimeout(timer);
+    if (replied) return;
     let text = '', id = '';
     try {
       if (codex) {
@@ -755,7 +847,7 @@ function readReviewWatch(sessionKey, round) {
   // 평가 완료는 대화로도 그 세션에 가므로(onDone → addChat), 그 세션의 대화 감시가 살아 있어도 이어진다.
   const chatWatch = s && readWatchFile(`watch-${s.sessionId}.json`);
   if (chatWatch?.active) return { ...chatWatch, handlesDone: true, via: 'chat' };
-  if (s?.tool === 'codex') return { active: true, via: 'queue', agent: s.agent || s.name, session: s.sessionId, handlesDone: true };
+  if (s?.tool === 'codex') return queueWatch(s);
   return { active: false };
 }
 
@@ -1019,6 +1111,24 @@ function inner(req, res, url) {
     return;
   }
 
+  if (url.pathname === '/api/chat-retry' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; if (body.length > MAX_BODY) req.destroy(); });
+    req.on('end', () => {
+      let id, confirmUnknown;
+      try { const input = JSON.parse(body); id = Number(input.id); confirmUnknown = input.confirmUnknown === true; } catch {}
+      const entry = readChat().messages.find((m) => m.id === id);
+      const session = entry && findSession(entry.to);
+      if (!entry || entry.from !== 'user' || entry.cancelled || session?.tool !== 'codex') return send(res, 400, { error: '재시도할 메시지가 없습니다.' });
+      const d = readDelivered();
+      if (d._at?.[id] || !['failed', 'unknown'].includes(entry.queue?.state)) return send(res, 409, { error: '재시도할 수 없는 메시지입니다.' });
+      if (entry.queue.state === 'unknown' && !confirmUnknown) return send(res, 409, { error: '이미 전달됐을 수 있습니다. 중복 전송 가능성을 확인해야 합니다.' });
+      queueToCodex(session, entry);
+      sendChatEntry(res, entry);
+    });
+    return;
+  }
+
   if (url.pathname === '/api/chat-cancel' && req.method === 'POST') {
     let body = '';
     req.on('data', (chunk) => {
@@ -1080,7 +1190,7 @@ function inner(req, res, url) {
         }
         const entry = addChat(msg);
         if (!entry) return send(res, 400, { error: 'from(user|agent|peer)과 text가 필요합니다.' });
-        send(res, 200, entry);
+        sendChatEntry(res, entry);
       });
       return;
     }

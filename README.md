@@ -39,6 +39,9 @@ node scripts/app-proxy.mjs --app http://localhost:3000 --port 4798 --review http
 
 ## 시험
 
+Codex queue outcomes, restart recovery, pickup evidence, embedding contracts and optional
+proxy security are described in [Reliable Delivery](docs/reliable-delivery.md).
+
 ```bash
 npm install   # 시험용 playwright-core 만 설치(설치된 크롬을 씀)
 npm test      # 휴대폰 크기 크롬으로 대화창 핵심 흐름 시험

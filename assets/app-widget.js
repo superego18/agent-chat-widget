@@ -493,11 +493,14 @@
     if (!text) return;
     const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, cid: cidFor('resend:' + m.id, text), ...(m.quotes ? { quotes: m.quotes } : {}), ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
     const r = await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error('resend');
+    const saved = await r.json();
+    const failed = r.status === 502 && saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
+    if (!r.ok && !failed) throw new Error('resend');
     doneCid('resend:' + m.id, text);
     editing = null;
     await poll();
     render();
+    if (failed) toast(saved.queue.state === 'unknown' ? '메시지는 저장됐지만 전달 결과를 확인하지 못했습니다. 재시도하면 중복될 수 있습니다.' : '메시지는 저장됐지만 전달하지 못했습니다. 전달 재시도를 눌러 주세요.');
   }
   const WIDGET_PREFIX = '대화창 › '; // 대화창 안을 찍은 위치의 선택자 앞에 붙인다
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
@@ -1101,7 +1104,7 @@
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
   // 세션이 받아 갔는지: 감시 명령이 넘긴 마지막 번호까지, 또는 끼워넣기로 따로 넘긴 것(_at).
   // 받아 간 번호(_at)로 본다. _at 이 생기기 전의 하루 넘은 메시지만 마지막 번호로 본다(scripts/chat-format.mjs 의 wasDelivered 와 같다).
-  const got = (m) => !!delivered._at?.[m.id] || (m.id <= (delivered[m.to] || 0) && Date.now() - Date.parse(m.at) > 86_400_000);
+  const got = (m) => !!delivered._at?.[m.id] || (!m.queue && m.id <= (delivered[m.to] || 0) && Date.now() - Date.parse(m.at) > 86_400_000);
   const isHeld = (m) => m.from === 'user' && m.context !== 'terminal' && !!m.to && !m.cancelled && !got(m);
   let wasHeld = new Set();
   function orderAt(m) {
@@ -1499,6 +1502,20 @@
           });
           small.append(bh);
         }
+        if (['failed', 'unknown'].includes(m.queue?.state) && !got(m)) {
+          const retry = document.createElement('button');
+          retry.type = 'button';
+          retry.className = 'rp';
+          retry.textContent = m.queue.state === 'unknown' ? '중복 가능성 확인 후 재시도' : '전달 재시도';
+          retry.onclick = () => withBusy(retry, async () => {
+            const uncertain = m.queue.state === 'unknown';
+            if (uncertain && !confirm('이미 세션에 전달됐을 수 있습니다. 같은 작업이 중복될 수 있음을 확인하고 다시 보낼까요?')) return;
+            const r = await fetch('/__uifb/api/chat-retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, ...(uncertain ? { confirmUnknown: true } : {}) }) });
+            if (!r.ok) toast('전달하지 못했습니다. 메시지 상태를 확인해 주세요.');
+            await poll();
+          });
+          small.append(retry);
+        }
         if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
         if (editing?.id === m.id) {
           d.classList.add('editing');
@@ -1537,7 +1554,7 @@
           body.replaceWith(ta);
           small.after(bar);
           editEl = ta.matches('textarea') ? ta : ta.querySelector('textarea');
-        } else if (!(isHeld(m) && sessionById(m.to)?.tool !== 'codex')) {
+        } else if (!(isHeld(m) && sessionById(m.to)?.tool !== 'codex') && !['pending', 'failed', 'unknown'].includes(m.queue?.state)) {
           // 아직 안 읽힌 글은 "보내기 취소"·"보류로"로 고칠 수 있으니 "다시 보내기"는 읽힌 뒤에만 보인다.
           const again = document.createElement('button');
           again.type = 'button';
@@ -1572,7 +1589,7 @@
       const s = sessionById(ownerOf(last));
       // 중지(Esc)로 멈췄으면 답하는 중이 아니라 멈췄다고 알린다(#1928).
       const stopped = st?.state === 'idle' && st.detail === '중지함' && String(st.at) > String(last.at);
-      w.textContent = got(last) && stopped ? `${s ? s.name : '세션'}이(가) 읽었지만 중지해서 멈췄습니다. 이어서 하려면 다시 보내 주세요.` : got(last) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
+      w.textContent = last.queue && !got(last) ? readMark(last).slice(3) : got(last) && stopped ? `${s ? s.name : '세션'}이(가) 읽었지만 중지해서 멈췄습니다. 이어서 하려면 다시 보내 주세요.` : got(last) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
     }
     box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
@@ -1680,6 +1697,8 @@
     $('mode').className = target?.watch?.active ? 'on' : 'off';
     $('mode').textContent = !target
       ? '등록된 세션이 없습니다.'
+      : target.watch?.via === 'queue'
+        ? `${target.name}에게 전달 요청을 보냅니다.`
       : target.watch?.handling
         ? `${target.name}이(가) 메시지를 처리하는 중입니다. 지금 보내도 처리가 끝나면 바로 받습니다.`
         : target.watch?.active
@@ -1844,7 +1863,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(delivered) + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      const k = JSON.stringify(delivered) + ':' + messages.filter((m) => m.queue).map((m) => m.id + m.queue.state).join() + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
       const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
@@ -2335,8 +2354,10 @@
     await withBusy(side ? $('side') : interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
       try {
         const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab, sideGroup: sideOpen[activeTab], sideOn: sideOpen[activeTab] ? undefined : sideNew[activeTab] } : body) });
-        if (!r.ok) throw new Error('send');
-        if (side) { const q = await r.json(); sideOpen[activeTab] = q.sideGroup; delete sideNew[activeTab]; } // 새 묶음이면 그 묶음을 펼친다
+        const saved = await r.json();
+        const failed = r.status === 502 && saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
+        if (!r.ok && !failed) throw new Error('send');
+        if (side) { sideOpen[activeTab] = saved.sideGroup; delete sideNew[activeTab]; } // 새 묶음이면 그 묶음을 펼친다
         doneCid(kind, text);
         sentTexts.set(text, Date.now());
         if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
@@ -2349,6 +2370,7 @@
         // 세션이 쉬는 중이면 감시 명령이 1초 안에 받아 간다. 3초마다 확인하면 그동안 "안 읽음"으로 보여서, 보낸 직후 몇 초는 자주 확인한다.
         for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500);
         render();
+        if (failed) toast(saved.queue.state === 'unknown' ? '메시지는 저장됐지만 전달 결과를 확인하지 못했습니다. 재시도하면 중복될 수 있습니다.' : '메시지는 저장됐지만 전달하지 못했습니다. 전달 재시도를 눌러 주세요.');
       } catch {
         toast('보내지 못했어요. 글은 입력칸에 남겨 뒀어요');
       }
@@ -2588,6 +2610,10 @@
     if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
     if (m.cancelled) return ' · 보내기 취소함';
     if (got(m)) return ' · 읽음';
+    if (m.queue?.state === 'failed') return ' · 전달 실패 · 전달 재시도 가능';
+    if (m.queue?.state === 'unknown') return ' · 전달 결과 미확인 · 재전송 시 중복 가능';
+    if (m.queue?.state === 'pending') return ' · 큐 접수 확인 중';
+    if (m.queue?.state === 'accepted') return ' · 큐 접수됨 · 읽음 확인 전';
     const s = sessionById(m.to);
     if (s?.status?.state === 'working' || s?.status?.state === 'permission') return m.interject ? ' · 안 읽음(다음 단계에서 바로 읽음)' : ' · 안 읽음(작업 중이라 끝나면 읽음)';
     return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';

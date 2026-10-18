@@ -3,6 +3,8 @@
 // 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799] [--lan --dir .ui-feedback] [--no-widget]
 //   --no-widget: 위젯을 넣지 않고 접속 키만 확인한다(비교 페이지 안에 실제 앱을 띄울 때. 안에 위젯이 또 뜨지 않게).
 //   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, 키는 대화창 서버와 같은 <dir>/lan-key, lan-auth.mjs).
+//   --loopback: bind 127.0.0.1 even with --lan, for Tailscale Serve.
+//   --strict-origin: require same-origin writes before forwarding rewrites Origin.
 //   http://localhost:<port>/ 로 열면 앱을 그대로 보여 주고, HTML 응답에만 피드백 위젯 스크립트를 넣는다.
 //   위젯이 보낸 메시지는 대화창 서버(/api/chat)로 넘어가 리뷰 대화와 같은 기록(chat.json)에 쌓인다.
 //   앱 코드는 고치지 않는다. dev 서버의 실시간 갱신(HMR) 웹소켓도 그대로 앱으로 넘긴다
@@ -27,6 +29,12 @@ const auth = lanAuth({ dir: path.resolve(arg('dir', '.ui-feedback')), lan: proce
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
 const TAG = '<script src="/__uifb/widget.js" defer></script>';
 const noWidget = process.argv.includes('--no-widget');
+const loopback = process.argv.includes('--loopback');
+const strictOrigin = process.argv.includes('--strict-origin');
+const localOnly = loopback && !process.argv.includes('--lan');
+const localAddresses = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const isForwarded = req => !localAddresses.has(req.socket.remoteAddress) ||
+  ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'tailscale-user-login'].some(k => req.headers[k]);
 function forward(req, res, target, rewrite) {
   const headers = { ...req.headers, host: target.host };
   // 폰 등 다른 주소로 열면 Origin·Referer 가 그 주소라서 dev 서버(Next 등)가 다른 출처 요청으로 막는다(403, 실시간 갱신이 끊겨 페이지가 계속 새로고침됨).
@@ -64,7 +72,19 @@ function forward(req, res, target, rewrite) {
 }
 
 const server = http.createServer((req, res) => {
+  if (localOnly && isForwarded(req)) {
+    res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('Remote access is disabled');
+  }
   if (!auth.check(req, res)) return;
+  if (strictOrigin && !['GET', 'HEAD'].includes(req.method)) {
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    if (req.headers.origin !== `${protocol}://${host}`) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('Same-origin request required');
+    }
+  }
   if (req.url === '/__uifb/widget.js') {
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(fs.readFileSync(widgetPath));
@@ -81,6 +101,7 @@ const server = http.createServer((req, res) => {
 
 // WebSocket(HMR 등)은 앱 서버로 그대로 이어 준다.
 server.on('upgrade', (req, socket, head) => {
+  if (localOnly && isForwarded(req)) return socket.destroy();
   if (!auth.checkUpgrade(req)) return socket.destroy();
   const up = net.connect(Number(app.port) || 80, app.hostname, () => {
     const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
@@ -102,7 +123,7 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(port, auth.host, () => {
+server.listen(port, loopback ? '127.0.0.1' : auth.host, () => {
   console.log(`피드백 버튼이 붙은 앱: http://localhost:${port}/  (원본 ${app.origin}, 비교 페이지 서버 ${review.origin})`);
-  for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
+  if (!loopback) for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
 });

@@ -156,4 +156,4 @@ try {
 } catch {
   // 조용히 끝낸다.
 }
-process.exit(0);
+process.exitCode = 0;
