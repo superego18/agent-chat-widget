@@ -510,6 +510,21 @@ test('메인 턴이 끝나도 백그라운드 서브에이전트가 돌면 작�
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
 });
 
+test('끼워넣기는 서브에이전트의 도구 훅에는 넣지 않고 메인 세션의 도구 훅에 넣는다', async () => {
+  const srv = await startServer(makeDir({ messages: [
+    { id: 1, from: 'user', to: A, text: '중간에 한마디', interject: true, at: iso(1000) },
+  ] }));
+  const cwd = fs.mkdtempSync(path.join(srv.dir, '..', 'uifb-cwd-'));
+  try {
+    fs.symlinkSync(srv.dir, path.join(cwd, '.ui-feedback'), process.platform === 'win32' ? 'junction' : 'dir');
+    fs.writeFileSync(path.join(srv.dir, 'delivered.json'), JSON.stringify({}));
+    const hook = (extra = {}) => execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'hook-relay.mjs')],
+      { input: JSON.stringify({ hook_event_name: 'PostToolUse', session_id: A, cwd, tool_name: 'Bash', tool_input: {}, ...extra }), encoding: 'utf8', timeout: 10_000 });
+    assert.equal(hook({ agent_id: 'sub1' }), '', '서브에이전트에는 넣지 않는다');
+    assert.match(hook(), /중간에 한마디/, '메인 세션에는 넣는다');
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
+});
+
 test('한 글 안 여러 곳에 답장·참고: 커서 자리에 줄을 바꾸지 않고 표시가 들어가고, 아래 목록에 무엇인지 보이며, 보내면 그 자리에 인용이 그려진다 (#1955, #1957, #1964)', async () => {
   const srv = await startServer(makeDir({ messages: [
     { id: 1, from: 'agent', session: A, text: '첫 번째 답', at: iso(9000) },

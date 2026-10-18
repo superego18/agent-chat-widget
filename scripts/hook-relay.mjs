@@ -133,7 +133,8 @@ try {
     if (peer) await post(port, { from: 'peer', session: session.sessionId, toName: peer, text: ti.message });
   }
 
-  if (input.hook_event_name === 'PostToolUse') {
+  // 서브에이전트 안의 도구 훅(agent_id 가 있음)에는 넣지 않는다. 넣으면 메인 세션이 아니라 서브에이전트가 읽고 답해 버린다.
+  if (input.hook_event_name === 'PostToolUse' && !input.agent_id) {
     const all = JSON.parse(fs.readFileSync(path.join(dir, 'chat.json'), 'utf8')).messages || [];
     const file = path.join(dir, 'delivered.json');
     const d = readJsonSafe(file) || null;

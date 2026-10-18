@@ -74,7 +74,10 @@ process.on('SIGTERM', () => { cleanup(); process.exit(143); });
 function pendingMessages() {
   let st = {};
   try { st = JSON.parse(fs.readFileSync(path.join(dir, `status-${sid}.json`), 'utf8')); } catch {}
-  if (['working', 'permission'].includes(st.state) && Date.now() - Date.parse(st.at) < 30 * 60_000) return [];
+  // 메인 턴이 끝나고 백그라운드 서브에이전트만 돌고 있으면(중계 훅의 .running 파일) 메인은 받을 수 있으니 기다리지 않는다.
+  let run = {};
+  try { run = JSON.parse(fs.readFileSync(path.join(dir, `.running-${sid}.json`), 'utf8')); } catch {}
+  if (['working', 'permission'].includes(st.state) && !(st.state === 'working' && run.mainIdle) && Date.now() - Date.parse(st.at) < 30 * 60_000) return [];
   let messages = [];
   try {
     messages = JSON.parse(fs.readFileSync(chatFile, 'utf8')).messages || [];
