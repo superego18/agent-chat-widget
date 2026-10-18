@@ -274,6 +274,8 @@ test('세션 탭은 머리줄 단추 옆에 갇히지 않고 한 줄에 들어�
     const tops = await w.eval((r) => [...r.querySelectorAll('#tabs .chipbtn')].map((b) => b.offsetTop));
     assert.equal(tops.length, 2);
     assert.equal(tops[0], tops[1], '두 탭이 같은 줄');
+    // 좁은 폭에서도 탭 하나 안의 글은 한 줄(#2143)
+    assert.ok(await w.eval((r) => [...r.querySelectorAll('#tabs .chipbtn')].every((b) => getComputedStyle(b).whiteSpace === 'nowrap')));
     await ctx.close();
   } finally { srv.stop(); }
 });
