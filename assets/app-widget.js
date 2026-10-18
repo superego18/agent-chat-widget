@@ -114,7 +114,7 @@
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; margin-right: 5px; background: rgba(0,0,0,.08); }
   .msg.user .tag { background: rgba(255,255,255,.22); }
   .empty { margin: auto; text-align: center; font-size: 12px; color: #8f8c84; line-height: 1.6; white-space: pre-line; }
-  .tabs { padding: 6px 0 2px !important; }
+  .tabs { padding: 6px 0 2px !important; clear: both; } /* 머리줄 단추(float) 아래로 내려 폭을 다 쓴다. 안 그러면 단추 옆 좁은 칸에 갇혀 탭이 두 줄이 된다(#2136) */
   .tabs .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
   .tabs .dot.on { background: #15803d; } .tabs .dot.off { background: #8f8c84; }
   .tabs .dot.busy { background: #4f46e5; animation: pulse 1s ease-in-out infinite; }

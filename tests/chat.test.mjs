@@ -267,6 +267,17 @@ test('Codex 의 중간 안내는 최종 답과 구분해 보인다 (#2113)', asy
   } finally { srv.stop(); }
 });
 
+test('세션 탭은 머리줄 단추 옆에 갇히지 않고 한 줄에 들어가면 한 줄로 (#2136)', async () => {
+  const srv = await startServer(makeDir());
+  try {
+    const { w, ctx } = await openWidget(srv);
+    const tops = await w.eval((r) => [...r.querySelectorAll('#tabs .chipbtn')].map((b) => b.offsetTop));
+    assert.equal(tops.length, 2);
+    assert.equal(tops[0], tops[1], '두 탭이 같은 줄');
+    await ctx.close();
+  } finally { srv.stop(); }
+});
+
 test('데스크톱에서 끌어 정한 대화창 크기가 다시 열어도 남는다(높이 포함) (#1864)', async () => {
   const dir = makeDir();
   fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ desktop: { panel: { w: 500, h: 400 } } }));
