@@ -75,8 +75,19 @@ export function readJsonSafe(file) {
   }
   return null;
 }
+// Windows 에서는 다른 프로세스(감시 명령·중계 훅·백신 검사)가 대상 파일을 열고 있으면 이름 바꾸기가 EPERM·EACCES·EBUSY 로 잠깐 실패한다.
+// 그때는 조금씩 기다리며 다시 시도하고, 끝내 안 되면 대상 파일에 바로 쓴다(읽는 쪽은 readJsonSafe 가 반쯤 쓴 파일을 다시 읽는다).
 export function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+  const text = JSON.stringify(obj, null, 2) + '\n';
+  fs.writeFileSync(tmp, text);
+  for (let i = 0; ; i++) {
+    try { fs.renameSync(tmp, file); return; } catch (e) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) { try { fs.unlinkSync(tmp); } catch {} throw e; }
+      if (i >= 10) break;
+      const until = Date.now() + 20 * (i + 1);
+      while (Date.now() < until) {} // 다른 쪽이 파일을 닫기를 잠깐 기다린다
+    }
+  }
+  try { fs.writeFileSync(file, text); } finally { try { fs.unlinkSync(tmp); } catch {} }
 }

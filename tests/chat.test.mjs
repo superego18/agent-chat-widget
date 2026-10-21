@@ -8,6 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { A, B, makeDir, startServer, openWidget, closeBrowser, sleep } from './helpers.mjs';
+import { writeJsonAtomic } from '../scripts/chat-format.mjs';
 
 after(closeBrowser);
 
@@ -845,4 +846,20 @@ test('감시를 쓰던 세션이 감시 없이 턴을 끝내려 하면 한 번 �
     fs.writeFileSync(wf, JSON.stringify({ session: A, pid: process.pid }));
     assert.equal(stop(), '', '감시가 살아 있으면 막지 않는다');
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
+});
+
+test('Windows 에서 이름 바꾸기가 잠깐 막혀도(EPERM) 다시 시도하고, 끝내 막히면 대상 파일에 바로 써서 프로세스를 죽이지 않는다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-atomic-'));
+  const file = path.join(dir, 'chat.json');
+  const real = fs.renameSync;
+  try {
+    let fails = 2;
+    fs.renameSync = (...a) => { if (fails-- > 0) throw Object.assign(new Error('busy'), { code: 'EPERM' }); return real(...a); };
+    writeJsonAtomic(file, { n: 1 });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).n, 1, '두 번 막힌 뒤 바꾸기에 성공한다');
+    fs.renameSync = () => { throw Object.assign(new Error('busy'), { code: 'EPERM' }); };
+    writeJsonAtomic(file, { n: 2 });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).n, 2, '끝내 막히면 바로 쓴다');
+    assert.deepEqual(fs.readdirSync(dir), ['chat.json'], '임시 파일을 남기지 않는다');
+  } finally { fs.renameSync = real; fs.rmSync(dir, { recursive: true, force: true }); }
 });
