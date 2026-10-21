@@ -826,3 +826,23 @@ test('말풍선을 오른쪽으로 밀면 그 메시지에 대한 곁질문 화�
     await ctx.close();
   } finally { srv.stop(); fs.rmSync(bin, { recursive: true, force: true }); }
 });
+
+test('감시를 쓰던 세션이 감시 없이 턴을 끝내려 하면 한 번 막고, 감시가 살아 있거나 이미 한 번 막았으면 끝낸다', async () => {
+  const srv = await startServer(makeDir());
+  const cwd = fs.mkdtempSync(path.join(srv.dir, '..', 'uifb-cwd-'));
+  try {
+    fs.symlinkSync(srv.dir, path.join(cwd, '.ui-feedback'), process.platform === 'win32' ? 'junction' : 'dir');
+    const wf = path.join(srv.dir, `watch-${A}.json`);
+    const stop = (extra = {}) => execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'hook-relay.mjs')],
+      { input: JSON.stringify({ hook_event_name: 'Stop', session_id: A, cwd, ...extra }), encoding: 'utf8', timeout: 10_000 });
+    fs.rmSync(wf, { force: true });
+    assert.equal(stop(), '', '감시를 쓴 적 없는 세션은 막지 않는다');
+    fs.writeFileSync(wf, JSON.stringify({ session: A, pid: null, state: 'handling' }));
+    const out = JSON.parse(stop());
+    assert.equal(out.decision, 'block');
+    assert.match(out.reason, /wait-review\.mjs/);
+    assert.equal(stop({ stop_hook_active: true }), '', '같은 턴에 두 번은 막지 않는다');
+    fs.writeFileSync(wf, JSON.stringify({ session: A, pid: process.pid }));
+    assert.equal(stop(), '', '감시가 살아 있으면 막지 않는다');
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); srv.stop(); }
+});

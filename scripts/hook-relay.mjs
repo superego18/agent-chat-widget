@@ -4,13 +4,15 @@
 //   - 대화: 사용자 입력과 화면에 표시되는 에이전트 답, 세션끼리 주고받은 메시지(SendMessage)를 chat.json 으로 보낸다.
 //   - 상태: 작업 시작·도구 사용·응답 끝·승인 대기를 /api/status 로 보내, 대화 창에 "작업 중" 표시를 한다.
 //   - 끼워 넣기: 작업 중에 대화창에서 "끼워넣기"로 보낸 메시지를 도구를 하나 쓸 때마다(PostToolUse) 세션에 바로 넣는다(터미널에서 작업 중에 입력하는 것처럼).
-//   - 입력 JSON 은 표준 입력으로 받는다. 표준 출력에는 끼워 넣기(PostToolUse) 말고는 아무것도 쓰지 않는다(MessageDisplay 는 출력이 없으면 원문을 그대로 표시한다).
+//   - 감시 확인: 감시를 쓰던 세션이 감시를 다시 켜지 않고 턴을 끝내려 하면(Stop) 한 번 막고 다시 켜라고 알린다.
+//   - 입력 JSON 은 표준 입력으로 받는다. 표준 출력에는 끼워 넣기(PostToolUse)와 감시 확인(Stop) 말고는 아무것도 쓰지 않는다(MessageDisplay 는 출력이 없으면 원문을 그대로 표시한다).
 //   - <cwd>/.ui-feedback/sessions/<session_id>.json 으로 등록된 세션일 때만 보낸다.
 //     그 밖의 프로젝트·세션에서는 아무것도 하지 않고 끝난다.
 //   - 어떤 오류가 나도 조용히 끝난다(대화 표시를 막지 않는다).
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { formatMessage, pendingFor, readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 
 async function readStdin() {
@@ -154,7 +156,16 @@ try {
   }
 
   if (input.hook_event_name === 'Stop') {
-    await settle({ ...readRun(), mainIdle: true });
+    // 감시를 쓰던 세션(watch 파일이 있음)이 감시를 다시 켜지 않고 턴을 끝내려 하면 한 번 막고 다시 켜라고 알린다.
+    // 감시가 메시지를 넘기고 끝나면 pid 가 비고, 강제로 죽으면 pid 가 남은 채 프로세스가 없다. 같은 턴에 두 번은 막지 않는다.
+    const w = readJsonSafe(path.join(dir, `watch-${input.session_id}.json`));
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    if (w?.session && !input.stop_hook_active && !(Number.isInteger(w.pid) && alive(w.pid))) {
+      const cmd = `node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'wait-review.mjs')}" --session ${input.session_id} --dir "${dir}"`;
+      process.stdout.write(JSON.stringify({ decision: 'block', reason: `[대화창] 감시가 꺼져 있어 대화창 메시지가 와도 깨어나지 못합니다. 이 명령을 백그라운드로(run_in_background) 다시 켠 뒤 턴을 끝내세요: ${cmd}` }));
+    } else {
+      await settle({ ...readRun(), mainIdle: true });
+    }
   }
 
   if (input.hook_event_name === 'Notification') {
