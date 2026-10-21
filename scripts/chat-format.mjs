@@ -75,6 +75,26 @@ export function readJsonSafe(file) {
   }
   return null;
 }
+// Claude 세션을 터미널에서 Esc 로 멈추면 Stop 훅이 오지 않아 상태가 "작업 중"으로 남는다.
+// 대신 대화 기록에 "[Request interrupted by user" 줄이 시각과 함께 남으므로, 그 시각이 상태보다 늦으면 멈춘 것으로 본다.
+export function interruptedSince(transcript, at) {
+  const since = Date.parse(at);
+  if (!transcript || !Number.isFinite(since)) return false;
+  try {
+    const fd = fs.openSync(transcript, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(size, 256 * 1024); // 끝부분만 본다
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len);
+      return buf.toString('utf8').split('\n').some((line) => {
+        if (!line.includes('[Request interrupted by user')) return false;
+        try { return Date.parse(JSON.parse(line).timestamp) > since; } catch { return false; }
+      });
+    } finally { fs.closeSync(fd); }
+  } catch { return false; }
+}
+
 // Windows 에서는 다른 프로세스(감시 명령·중계 훅·백신 검사)가 대상 파일을 열고 있으면 이름 바꾸기가 EPERM·EACCES·EBUSY 로 잠깐 실패한다.
 // 그때는 조금씩 기다리며 다시 시도하고, 끝내 안 되면 대상 파일에 바로 쓴다(읽는 쪽은 readJsonSafe 가 반쯤 쓴 파일을 다시 읽는다).
 export function writeJsonAtomic(file, obj) {

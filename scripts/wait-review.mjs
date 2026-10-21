@@ -11,7 +11,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatMessage, pendingFor, readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
+import { formatMessage, pendingFor, readJsonSafe, writeJsonAtomic, interruptedSince } from './chat-format.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -77,7 +77,9 @@ function pendingMessages() {
   // 메인 턴이 끝나고 백그라운드 서브에이전트만 돌고 있으면(중계 훅의 .running 파일) 메인은 받을 수 있으니 기다리지 않는다.
   let run = {};
   try { run = JSON.parse(fs.readFileSync(path.join(dir, `.running-${sid}.json`), 'utf8')); } catch {}
-  if (['working', 'permission'].includes(st.state) && !(st.state === 'working' && run.mainIdle) && Date.now() - Date.parse(st.at) < 30 * 60_000) return [];
+  // 터미널에서 Esc 로 멈춘 세션도 받을 수 있으니 기다리지 않는다.
+  if (['working', 'permission'].includes(st.state) && !(st.state === 'working' && run.mainIdle) &&
+    !interruptedSince(session.path, st.at) && Date.now() - Date.parse(st.at) < 30 * 60_000) return [];
   let messages = [];
   try {
     messages = JSON.parse(fs.readFileSync(chatFile, 'utf8')).messages || [];

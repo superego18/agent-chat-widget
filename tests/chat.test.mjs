@@ -8,7 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { A, B, makeDir, startServer, openWidget, closeBrowser, sleep } from './helpers.mjs';
-import { writeJsonAtomic } from '../scripts/chat-format.mjs';
+import { writeJsonAtomic, interruptedSince } from '../scripts/chat-format.mjs';
 
 after(closeBrowser);
 
@@ -870,4 +870,23 @@ test('Windows 에서 이름 바꾸기가 잠깐 막혀도(EPERM) 다시 시도�
     assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).n, 2, '끝내 막히면 바로 쓴다');
     assert.deepEqual(fs.readdirSync(dir), ['chat.json'], '임시 파일을 남기지 않는다');
   } finally { fs.renameSync = real; fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('터미널에서 Esc 로 멈춰 작업 중이 남아도, 대화 기록의 중단 표시가 더 늦으면 쉬는 중으로 본다', async () => {
+  const at = new Date(Date.now() - 60_000).toISOString();
+  const dir = makeDir({ status: { [A]: { state: 'working', detail: '명령 실행', at } } });
+  const roll = path.join(dir, 'transcript.jsonl');
+  const line = (ts) => JSON.stringify({ type: 'user', timestamp: ts, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } });
+  fs.writeFileSync(roll, line(new Date(Date.now() - 120_000).toISOString()) + '\n');
+  assert.equal(interruptedSince(roll, at), false, '상태보다 앞선 중단은 지난 일이다');
+  const f = path.join(dir, 'sessions', `${A}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), path: roll }));
+  const srv = await startServer(dir);
+  try {
+    const state = async () => (await srv.api('/api/sessions')).sessions.find((s) => s.id === A).status.state;
+    assert.equal(await state(), 'working');
+    fs.appendFileSync(roll, line(new Date().toISOString()) + '\n');
+    assert.equal(interruptedSince(roll, at), true);
+    assert.equal(await state(), 'idle', '중단 뒤에는 쉬는 중');
+  } finally { srv.stop(); }
 });

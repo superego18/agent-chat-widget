@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { readQueuePickups } from './codex-pickup.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
-import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines } from './chat-format.mjs';
+import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines, interruptedSince } from './chat-format.mjs';
 
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 // 위젯 파일. 요청마다 새로 읽으므로 고치면 열린 화면도 새로고침만으로 바뀐다.
@@ -127,6 +127,8 @@ function readStatus(id) {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(root, `status-${id}.json`), 'utf8'));
     if (s.state !== 'idle' && Date.now() - Date.parse(s.at) > 30 * 60_000) return { state: 'unknown' };
+    // 터미널에서 Esc 로 멈추면 Stop 훅이 오지 않는다. 그 뒤 대화 기록에 남은 중단 표시로 쉬는 중을 보인다.
+    if (s.state !== 'idle' && interruptedSince(findSession(id)?.path, s.at)) return { state: 'idle', detail: '', at: s.at };
     return s;
   } catch {
     return { state: 'unknown' };
