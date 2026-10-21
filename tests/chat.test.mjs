@@ -878,7 +878,7 @@ test('터미널에서 Esc 로 멈춰 작업 중이 남아도, 대화 기록의 �
   const roll = path.join(dir, 'transcript.jsonl');
   const line = (ts) => JSON.stringify({ type: 'user', timestamp: ts, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } });
   fs.writeFileSync(roll, line(new Date(Date.now() - 120_000).toISOString()) + '\n');
-  assert.equal(interruptedSince(roll, at), false, '상태보다 앞선 중단은 지난 일이다');
+  assert.equal(interruptedSince(roll, at), null, '상태보다 앞선 중단은 지난 일이다');
   const f = path.join(dir, 'sessions', `${A}.json`);
   fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), path: roll }));
   const srv = await startServer(dir);
@@ -886,7 +886,10 @@ test('터미널에서 Esc 로 멈춰 작업 중이 남아도, 대화 기록의 �
     const state = async () => (await srv.api('/api/sessions')).sessions.find((s) => s.id === A).status.state;
     assert.equal(await state(), 'working');
     fs.appendFileSync(roll, line(new Date().toISOString()) + '\n');
-    assert.equal(interruptedSince(roll, at), true);
+    assert.ok(interruptedSince(roll, at));
     assert.equal(await state(), 'idle', '중단 뒤에는 쉬는 중');
+    const st = (await srv.api('/api/sessions')).sessions.find((s) => s.id === A).status;
+    assert.equal(st.detail, '중지함', '중지 단추를 누른 것처럼 멈췄다고 보인다');
+    assert.ok(Date.parse(st.at) > Date.parse(at), '중단 시각이 상태 시각이 된다');
   } finally { srv.stop(); }
 });

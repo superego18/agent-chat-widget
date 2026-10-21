@@ -127,8 +127,9 @@ function readStatus(id) {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(root, `status-${id}.json`), 'utf8'));
     if (s.state !== 'idle' && Date.now() - Date.parse(s.at) > 30 * 60_000) return { state: 'unknown' };
-    // 터미널에서 Esc 로 멈추면 Stop 훅이 오지 않는다. 그 뒤 대화 기록에 남은 중단 표시로 쉬는 중을 보인다.
-    if (s.state !== 'idle' && interruptedSince(findSession(id)?.path, s.at)) return { state: 'idle', detail: '', at: s.at };
+    // 터미널에서 Esc 로 멈추면 Stop 훅이 오지 않는다. 대화 기록에 남은 중단 시각으로, 중지 단추를 누른 것처럼 "중지함"을 보인다(#1928).
+    const stoppedAt = s.state !== 'idle' && interruptedSince(findSession(id)?.path, s.at);
+    if (stoppedAt) return { state: 'idle', detail: '중지함', at: stoppedAt };
     return s;
   } catch {
     return { state: 'unknown' };

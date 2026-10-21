@@ -76,10 +76,10 @@ export function readJsonSafe(file) {
   return null;
 }
 // Claude 세션을 터미널에서 Esc 로 멈추면 Stop 훅이 오지 않아 상태가 "작업 중"으로 남는다.
-// 대신 대화 기록에 "[Request interrupted by user" 줄이 시각과 함께 남으므로, 그 시각이 상태보다 늦으면 멈춘 것으로 본다.
+// 대신 대화 기록에 "[Request interrupted by user" 줄이 시각과 함께 남으므로, 그 시각이 상태보다 늦으면 멈춘 것으로 보고 그 시각을 돌려준다(없으면 null).
 export function interruptedSince(transcript, at) {
   const since = Date.parse(at);
-  if (!transcript || !Number.isFinite(since)) return false;
+  if (!transcript || !Number.isFinite(since)) return null;
   try {
     const fd = fs.openSync(transcript, 'r');
     try {
@@ -87,12 +87,14 @@ export function interruptedSince(transcript, at) {
       const len = Math.min(size, 256 * 1024); // 끝부분만 본다
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, size - len);
-      return buf.toString('utf8').split('\n').some((line) => {
-        if (!line.includes('[Request interrupted by user')) return false;
-        try { return Date.parse(JSON.parse(line).timestamp) > since; } catch { return false; }
-      });
+      let last = null;
+      for (const line of buf.toString('utf8').split('\n')) {
+        if (!line.includes('[Request interrupted by user')) continue;
+        try { const t = JSON.parse(line).timestamp; if (Date.parse(t) > since) last = t; } catch {}
+      }
+      return last;
     } finally { fs.closeSync(fd); }
-  } catch { return false; }
+  } catch { return null; }
 }
 
 // Windows 에서는 다른 프로세스(감시 명령·중계 훅·백신 검사)가 대상 파일을 열고 있으면 이름 바꾸기가 EPERM·EACCES·EBUSY 로 잠깐 실패한다.
