@@ -893,3 +893,19 @@ test('터미널에서 Esc 로 멈춰 작업 중이 남아도, 대화 기록의 �
     assert.ok(Date.parse(st.at) > Date.parse(at), '중단 시각이 상태 시각이 된다');
   } finally { srv.stop(); }
 });
+
+test('마지막 글이 세션 답이어도 그 뒤에 중지했으면 작업을 중지했다고 보이고, 답 뒤에 끝났으면 보이지 않는다', async () => {
+  const msg = { id: 1, from: 'agent', session: A, text: '지금 시작할게', at: iso(60000) };
+  const srv = await startServer(makeDir({ messages: [msg], status: { [A]: { state: 'idle', detail: '중지함', at: iso(30000) } } }));
+  try {
+    const { w, ctx } = await openWidget(srv);
+    assert.match(await w.eval((r) => r.getElementById('msgs').textContent), /작업을 중지했어요/);
+    await ctx.close();
+  } finally { srv.stop(); }
+  const done = await startServer(makeDir({ messages: [msg], status: { [A]: { state: 'idle', detail: '', at: iso(30000) } } }));
+  try {
+    const { w, ctx } = await openWidget(done);
+    assert.doesNotMatch(await w.eval((r) => r.getElementById('msgs').textContent), /중지/);
+    await ctx.close();
+  } finally { done.stop(); }
+});

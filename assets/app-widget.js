@@ -1596,6 +1596,14 @@
       const stopped = st?.state === 'idle' && st.detail === '중지함' && String(st.at) > String(last.at);
       w.textContent = last.queue && !got(last) ? readMark(last).slice(3) : got(last) && stopped ? `${s ? s.name : '세션'}이(가) 읽었지만 중지해서 멈췄습니다. 이어서 하려면 다시 보내 주세요.` : got(last) ? `${s ? s.name : '세션'}이(가) 읽고 답하는 중…` : s?.watch?.active ? `${s.name}에게 전달하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
       box.append(w);
+    } else if (st?.state === 'idle' && st.detail === '중지함' && (!last || String(st.at) > String(last.at))) {
+      // 마지막 글이 세션 답이어도, 그 뒤에 Esc·중지로 멈췄으면 끝난 게 아니라 멈췄다고 알린다.
+      const w = document.createElement('p');
+      w.className = 'empty';
+      w.style.margin = '0';
+      const s = sessionById(activeTab);
+      w.textContent = `${s ? s.name : '세션'}이(가) 작업을 중지했어요. 이어서 하려면 다시 보내 주세요.`;
+      box.append(w);
     }
     box.append(...heldEls); // 작업 중 표시보다도 아래에 둔다
     // 보류: 아직 보내지 않은 글. 점선 말풍선으로 맨 아래에 쌓이고, 보내기를 누를 때까지 세션에 가지 않는다.
