@@ -219,7 +219,15 @@ test('Codex 답에도 답장 단추가 있고, 답장하면 원문이 Codex 에 
   fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), tool: 'codex', path: roll }));
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
   const log = path.join(bin, 'args.json');
-  fs.writeFileSync(path.join(bin, 'codex'), `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`, { mode: 0o755 });
+  const fake = `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`;
+  fs.writeFileSync(path.join(bin, 'codex'), fake, { mode: 0o755 });
+  // Windows 에서는 npm 설치 모양(codex.cmd 옆의 node_modules/@openai/codex/bin/codex.js)을 찾아 node 로 바로 부른다.
+  if (process.platform === 'win32') {
+    const cli = path.join(bin, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    fs.mkdirSync(path.dirname(cli), { recursive: true });
+    fs.writeFileSync(cli, fake);
+    fs.writeFileSync(path.join(bin, 'codex.cmd'), '@echo off\r\nexit /b 99\r\n');
+  }
   const oldPath = process.env.PATH;
   process.env.PATH = bin + path.delimiter + oldPath;
   const srv = await startServer(dir);
