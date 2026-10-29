@@ -11,6 +11,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { replaceSessionState } from './session-state.mjs';
+import { carryTranscriptHistory } from './transcript-store.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -102,12 +104,18 @@ function cmuxOf() {
   return process.env.CMUX_SURFACE_ID ? { cmux: { surface: process.env.CMUX_SURFACE_ID, workspace: process.env.CMUX_WORKSPACE_ID || null } } : {};
 }
 fs.mkdirSync(sessionsDir, { recursive: true });
-// 같은 이름으로 등록된 다른(예전) 세션은 지운다. 한 이름 = 한 세션.
+// Preserve the role's widget state and native history before replacing its execution session.
+const previous = [];
 for (const f of fs.readdirSync(sessionsDir)) {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(sessionsDir, f), 'utf8'));
-    if (s.name === name && s.sessionId !== sessionId) fs.rmSync(path.join(sessionsDir, f));
+    if (s.name === name && s.sessionId !== sessionId) previous.push({ file: path.join(sessionsDir, f), session: s });
   } catch {}
+}
+replaceSessionState(dir, previous.map(({ session: s }) => ({ from: s.sessionId, to: sessionId })));
+for (const { file, session } of previous) {
+  carryTranscriptHistory(dir, session, sessionId);
+  fs.rmSync(file);
 }
 fs.rmSync(path.join(dir, 'session.json'), { force: true });
 fs.writeFileSync(

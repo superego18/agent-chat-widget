@@ -1869,7 +1869,7 @@
         if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts();
       }
       sessions = ss.sessions || [];
-      for (const x of sessions.filter((x) => x.tool === 'codex')) {
+      for (const x of sessions) {
         transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
       }
       const fresh = [];

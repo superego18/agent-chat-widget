@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import zlib from 'node:zlib';
 import { readQueuePickups } from './codex-pickup.mjs';
+import { readCodexHistory, readStoredHistory } from './transcript-store.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
 import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines, interruptedSince } from './chat-format.mjs';
 
@@ -43,16 +44,6 @@ function sendGzip(req, res, status, body) {
 
 const chatFile = path.join(root, 'chat.json');
 const sessionsDir = path.join(root, 'sessions');
-const TAIL_BYTES = 4 * 1024 * 1024;
-const transcriptCache = new Map();
-
-function stripTags(text) {
-  return text
-    .replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/g, '')
-    .replace(/<(local-command-[a-z]+|command-[a-z]+)>[\s\S]*?<\/\1>/g, '')
-    .trim();
-}
-
 function readChat() {
   try {
     return JSON.parse(fs.readFileSync(chatFile, 'utf8'));
@@ -853,40 +844,8 @@ function runSide(s, q, done) {
 function readTranscript(id) {
   const session = findSession(id);
   if (!session) return { items: [] };
-  if (session.tool !== 'codex') return { items: [], via: 'hooks' };
-  let st;
-  try {
-    st = fs.statSync(session.path);
-  } catch {
-    return { items: [] };
-  }
-  const key = `${st.size}:${st.mtimeMs}`;
-  const cached = transcriptCache.get(id);
-  if (cached && cached.key === key) return cached.data;
-  const len = Math.min(st.size, TAIL_BYTES);
-  const fd = fs.openSync(session.path, 'r');
-  const buf = Buffer.alloc(len);
-  fs.readSync(fd, buf, 0, len, st.size - len);
-  fs.closeSync(fd);
-  const lines = buf.toString('utf8').split('\n');
-  if (len < st.size) lines.shift();
-  const items = [];
-  for (const line of lines) {
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const p = o.payload;
-    if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
-    const text = stripTags((p.content || []).filter((b) => b.type === 'input_text' || b.type === 'output_text').map((b) => b.text).join('\n'));
-    if (!text || (p.role === 'user' && (text.startsWith('<') || text.startsWith(QUEUE_PREFIX) || text.includes('AGENTS.md instructions')))) continue;
-    items.push({ id: `x${p.id || o.ordinal}`, from: p.role === 'user' ? 'user' : 'agent', session: id, context: 'terminal', agent: session.agent, text: text.slice(0, 8000), at: o.timestamp, ...(p.phase === 'commentary' ? { interim: true } : {}) });
-  }
-  const data = { items: items.slice(-300) };
-  transcriptCache.set(id, { key, data });
-  return data;
+  if (session.tool !== 'codex') return { ...readStoredHistory(root, id), via: 'hooks' };
+  return readCodexHistory(root, session);
 }
 
 function readWatchFile(name) {
