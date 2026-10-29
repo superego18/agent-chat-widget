@@ -1834,7 +1834,14 @@
     updateBadges();
     placeToBottom();
   }
-  async function poll() {
+  // 확인이 3초보다 오래 걸리면(느린 폰 연결) 겹쳐 쌓이지 않게, 하던 확인이 있으면 그것을 기다린다.
+  let polling = null;
+  let pollStartedAt = 0;
+  function poll() {
+    return (polling ||= pollOnce().finally(() => { polling = null; }));
+  }
+  async function pollOnce() {
+    pollStartedAt = Date.now();
     try {
       const [c, ss, dd, sv, pf, cp] = await Promise.all([
         fetch('/__uifb/api/chat').then((r) => r.json()),
@@ -2366,8 +2373,12 @@
     // 곁질문(#2055)은 세션에 보내지 않고 서버가 세션 사본에게 묻는다. 답은 10초쯤 뒤 이 칸에 온다.
     await withBusy(side ? $('side') : interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
       try {
-        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab, sideGroup: sideOpen[activeTab], sideOn: sideOpen[activeTab] ? undefined : sideNew[activeTab] } : body) });
+        // 단추가 8초 뒤 풀릴 때 요청도 끊어, 답 없이 멈춘 요청이 알림 없이 묻히지 않게 한다(같은 cid 라 다시 눌러도 한 번만 받는다).
+        const ac = new AbortController();
+        const abortT = side ? 0 : setTimeout(() => ac.abort(), 8000); // 곁질문은 서버가 사본 답을 기다려 10초 넘게 걸린다
+        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', signal: ac.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab, sideGroup: sideOpen[activeTab], sideOn: sideOpen[activeTab] ? undefined : sideNew[activeTab] } : body) });
         const saved = await r.json();
+        clearTimeout(abortT);
         const failed = r.status === 502 && saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
         if (!r.ok && !failed) throw new Error('send');
         if (side) { sideOpen[activeTab] = saved.sideGroup; delete sideNew[activeTab]; } // 새 묶음이면 그 묶음을 펼친다
@@ -3317,7 +3328,8 @@
     // 새로고침 등으로 보낸 기록(sentTexts)이 사라졌어도, 같은 글이 2분 안에 이미 이 세션에 보내졌으면 되살리지 않는다.
     const justSent = want && messages.some((m) => m.from === 'user' && m.to === activeTab && m.text === shortMarks(want.trim()) && Date.now() - Date.parse(m.at) < 120_000);
     if (want && ((sentAt && Date.now() - sentAt < 10 * 60_000) || justSent)) { want = ''; saveCompose(activeTab, ''); }
-    if (!force && (Date.now() - typedAt < 3000 || composeT)) return;
+    // 확인을 시작한 뒤에 이 화면에서 쓰거나 저장했으면, 받은 글은 그보다 옛 글이라 덮어쓰지 않는다(느린 연결에서 입력칸 글이 중간까지로 잘리던 문제).
+    if (!force && (Date.now() - typedAt < 3000 || composeT || typedAt >= pollStartedAt)) return;
     if (el.value !== want) { el.value = want; autoGrow(el); }
   }
   $('clr').onclick = () => { $('input').value = ''; $('input').dispatchEvent(new Event('input')); $('input').focus(); };

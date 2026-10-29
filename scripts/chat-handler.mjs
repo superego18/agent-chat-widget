@@ -11,6 +11,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import zlib from 'node:zlib';
 import { readQueuePickups } from './codex-pickup.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
 import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines, interruptedSince } from './chat-format.mjs';
@@ -32,6 +33,12 @@ if (!Number.isFinite(queueTimeoutMs) || queueTimeoutMs <= 0) throw new Error('qu
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
+}
+// 대화 기록은 쌓일수록 커져(수천 개면 2MB) 폰에서 3초마다 받으면 다른 요청(보내기)까지 막힌다. 받을 수 있으면 gzip 으로 줄여 보낸다.
+function sendGzip(req, res, status, body) {
+  if (!/\bgzip\b/.test(req.headers?.['accept-encoding'] || '')) return send(res, status, body);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  res.end(zlib.gzipSync(JSON.stringify(body), { level: 6 }));
 }
 
 const chatFile = path.join(root, 'chat.json');
@@ -1245,7 +1252,7 @@ function inner(req, res, url) {
   }
 
   if (url.pathname === '/api/chat') {
-    if (req.method === 'GET') return send(res, 200, { ...readChat(), delivered: readDelivered() });
+    if (req.method === 'GET') return sendGzip(req, res, 200, { ...readChat(), delivered: readDelivered() });
     if (req.method === 'POST') {
       let body = '';
       req.on('data', (chunk) => {

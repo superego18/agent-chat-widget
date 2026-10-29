@@ -41,7 +41,8 @@ function forward(req, res, target, rewrite) {
   // 접속 확인은 이 프록시가 이미 했으므로 앱에는 같은 출처로 넘긴다.
   if (headers.origin) headers.origin = target.origin;
   if (headers.referer) headers.referer = headers.referer.replace(/^https?:\/\/[^/]+/, target.origin);
-  delete headers['accept-encoding'];
+  // 앱 HTML 에는 위젯을 끼워 넣어야 해서 압축을 풀린 채로 받는다. 대화창 API(rewrite)는 압축된 채로 그대로 넘긴다.
+  if (!rewrite) delete headers['accept-encoding'];
   const upstream = http.request(
     { hostname: target.hostname, port: target.port, path: rewrite ?? req.url, method: req.method, headers },
     (up) => {
