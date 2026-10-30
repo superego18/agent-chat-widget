@@ -209,9 +209,9 @@
   .pinbar > .msg.l1 .mbody { -webkit-line-clamp: 1; }
   .pinbar > .msg.l3 .mbody { -webkit-line-clamp: 3; }
   /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
-  /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩도 입력 글자와 같은 크기로 그려 커서와 칩 사이에 빈자리가 남지 않게 한다. */
+  /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 기존 Claude처럼 입력 글자의 78% 크기로 그린다. */
   #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
-  #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: inherit; color: #3730a3; background: transparent; }
+  #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: 0.78em; color: #3730a3; background: transparent; }
   #inback mark > span { display: inline-block; vertical-align: top; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 1px #c7c9f5; }
   #inback i.bul { font-style: normal; position: relative; color: transparent; }
   #inback i.bul::before { content: '•'; position: absolute; left: 50%; transform: translateX(-50%); color: #1c1b18; }
@@ -2456,7 +2456,7 @@
       const bullets = (t, at) => escH(t).replace(/(^|\n)( *)- /g, (m, nl, sp, off) => (off === 0 && v[at - 1] && v[at - 1] !== '\n' ? m : `${nl}${sp}<i class="bul">-</i> `));
       let html = '', i = 0;
       for (const x of v.matchAll(MARK)) {
-        // 칩과 입력 글자의 크기·폭을 함께 맞춰 커서 위치와 표시가 일치하게 한다.
+        // 실제 textarea의 입력 폭은 유지하고, 칩 글자만 기존 크기로 작게 그린다.
         measure.textContent = x[0];
         html += bullets(v.slice(i, x.index), i) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}"><span>${escH(x[0].replace(/^(↩|📎)(?:xq|\u2063)(\d+)/, '$1$2'))}</span></mark>`;
         i = x.index + x[0].length;

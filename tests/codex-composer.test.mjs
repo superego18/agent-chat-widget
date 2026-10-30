@@ -32,18 +32,19 @@ for (const width of [390, 1440]) {
         return painted.getBoundingClientRect().width - range.getBoundingClientRect().width;
       }));
       for (const padding of innerPadding) assert.ok(Math.abs(padding) < 1, 'the chip background fits the rendered text');
-      const outerGaps = await w.eval(r => [...r.querySelectorAll('#inback mark')].map(mark => mark.getBoundingClientRect().width - mark.querySelector('span').getBoundingClientRect().width));
-      for (const gap of outerGaps) assert.ok(Math.abs(gap) < 1, 'no reserved blank space remains outside the chip');
+      const fontSizes = await w.eval(r => [...r.querySelectorAll('#inback mark > span')].map(span => parseFloat(getComputedStyle(span).fontSize)));
+      for (const size of fontSizes) assert.ok(Math.abs(size - (width === 390 ? 12.48 : 10.14)) < 0.01, 'native chips retain the original Claude font size');
       assert.equal(await w.eval(r => getComputedStyle(r.querySelector('#inback mark')).backgroundColor), 'rgba(0, 0, 0, 0)', 'no browser-default mark background remains outside the chip');
       const value = await w.inputValue();
       await w.clickText('답장', '.msg[data-id="1"]');
       const padding = await w.eval(r => {
         const marks = [...r.querySelectorAll('#inback mark')];
         const painted = mark => (mark.querySelector('span') || mark).getBoundingClientRect().width;
-        return { native: painted(marks[0]), claude: painted(marks.at(-1)), nativeSlot: marks[0].getBoundingClientRect().width, claudeSlot: marks.at(-1).getBoundingClientRect().width };
+        return { native: painted(marks[0]), claude: painted(marks.at(-1)), nativeSlot: marks[0].getBoundingClientRect().width, claudeSlot: marks.at(-1).getBoundingClientRect().width, claudeFont: parseFloat(getComputedStyle(marks.at(-1)).fontSize) };
       });
+      assert.ok(Math.abs(padding.claudeFont - fontSizes[0]) < 0.01, 'Claude and Codex keep the same original font size');
       assert.ok(Math.abs(padding.native - padding.claude) < 1, 'the same visible label has the same painted chip width as Claude');
-      assert.ok(Math.abs(padding.nativeSlot - padding.claudeSlot) < 1, 'the chip occupies the same actual text width as Claude, with no hidden spacer');
+      assert.ok(Math.abs(padding.nativeSlot - padding.claudeSlot) < 1, 'native aliases add no width beyond the existing Claude input slot');
       await w.click('#reply .rref:last-child button:last-child');
       await w.type(value);
       await w.idle(600);
