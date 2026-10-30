@@ -178,7 +178,7 @@
     .msgs { padding-right: 18px; padding-left: 18px; }
     .msg { font-size: 15px; max-width: 92%; }
     /* iPhone 은 16px 보다 작은 입력칸을 누르면 화면을 확대하므로, 모든 입력칸·선택칸을 16px 로 둔다(아래 일반 규칙보다 앞에 있어 !important) */
-    textarea, input, select { font-size: 16px !important; }
+    textarea, input, select, #input { font-size: 16px !important; }
     .cats .newlb { width: 110px; }
   }
   .row { display: flex; gap: 4px; align-items: center; padding: 8px 10px 0; font-size: 12px; color: #8f8c84; flex-wrap: wrap; }
@@ -208,17 +208,16 @@
   .pinbar > .msg.l1 .mbody, .pinbar > .msg.l3 .mbody { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
   .pinbar > .msg.l1 .mbody { -webkit-line-clamp: 1; }
   .pinbar > .msg.l3 .mbody { -webkit-line-clamp: 3; }
-  /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
-  /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 기존 Claude처럼 입력 글자의 78% 크기로 그린다. */
-  #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
-  #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: 0.78em; color: #3730a3; background: transparent; }
+  /* Chips and text share one native editing surface, so small labels need no invisible input slot. */
+  #input { position: relative; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
+  #input mark { display: inline-block; vertical-align: baseline; white-space: pre; font-size: 0.78em; color: #3730a3; background: transparent; }
   #inback mark > span { display: inline-block; vertical-align: top; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 1px #c7c9f5; }
   #inback i.bul { font-style: normal; position: relative; color: transparent; }
   #inback i.bul::before { content: '•'; position: absolute; left: 50%; transform: translateX(-50%); color: #1c1b18; }
   #inback mark.f { color: #57534e; }
   #inback mark.f > span { background: #ecebe7; box-shadow: 0 0 0 1px #d6d3d1; }
-  form textarea#input { position: relative; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: #1c1b18; }
-  form textarea#input::placeholder { color: #8f8c84; -webkit-text-fill-color: #8f8c84; }
+  #input[data-empty="true"]::before { content: attr(data-placeholder); position: absolute; color: #8f8c84; pointer-events: none; }
+  #input[aria-disabled="true"] { opacity: .6; }
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
   .selreply { position: fixed; z-index: 2147483647; transform: translateX(-50%); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer; }
   .selreply[hidden] { display: none; }
@@ -236,8 +235,8 @@
   .where span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .where button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; }
   form { display: flex; gap: 6px; padding: 8px 10px 10px; align-items: flex-end; }
-  textarea { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
-  form textarea { resize: vertical; height: 80px; max-height: 50vh; }
+  textarea, #input { flex: 1; min-width: 0; resize: none; height: 40px; max-height: 110px; font-size: 13px; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(0,0,0,.15); background: #f6f5f1; color: #1c1b18; }
+  form textarea, form #input { resize: vertical; height: 80px; max-height: 50vh; }
   form button { height: 40px; flex-shrink: 0; border: 0; border-radius: 7px; padding: 0 12px; background: #1c1b18; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
   /* 보관함: 대화 목록을 바꾸지 않고 입력칸 위로 올라오는 시트(드롭업). 대화와 입력칸은 그대로 보인다. */
   .dsheet { position: absolute; left: 0; right: 0; z-index: 3; max-height: 62%; display: flex; flex-direction: column; background: #f6f5f1; border-top: 1px solid rgba(0,0,0,.12); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 24px rgba(0,0,0,.14); animation: sheetup .16s ease-out; }
@@ -321,7 +320,7 @@
   .inwrap { position: relative; flex: 1; min-width: 0; display: flex; }
   form .clr { position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; padding: 0; border-radius: 12px; background: rgba(0,0,0,.08); color: #5a5852; font-size: 14px; font-weight: 400; line-height: 24px; }
   form .clr[hidden] { display: none; }
-  .inwrap textarea { padding-right: 32px; }
+  .inwrap textarea, .inwrap #input { padding-right: 32px; }
   form .now { background: #b45309; padding: 0 9px; }
   form .now[hidden] { display: none; }
   .msg.user .tag.now { background: #fde68a; color: #78350f; }
@@ -451,7 +450,7 @@
   <div class="sidepop" id="sidepop" hidden role="dialog" aria-label="곁질문 묶음"></div>
   <div class="where sidebar" id="sidebar" hidden><span id="sideText"></span><button type="button" id="sideCut" title="이 묶음을 닫고, 다음 곁질문은 새 묶음으로">끊기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" class="adjbtn" id="adjBtn" hidden title="찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값을 함께 보내기">값 바꾸기</button><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap"><textarea id="input" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="글을 쓰고 누르면 세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 비어 있을 때 누르면 곁질문 묶음 목록">곁질문</button></span></form>
+  <form id="form"><span class="inwrap" id="inback"><div id="input" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메시지" data-placeholder="질문이나 요청 · Enter 보내기" data-empty="true"></div><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="글을 쓰고 누르면 세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 비어 있을 때 누르면 곁질문 묶음 목록">곁질문</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aclose" id="adjClose" aria-label="닫기" title="닫기">✕</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
@@ -734,11 +733,14 @@
   const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${refMessage(id)?.id || id}]`);
   function pairRefs(t) {
     const left = [...refs];
+    const chips = [...$('input').querySelectorAll('mark[data-token]')];
     return [...String(t).matchAll(MARK)].map((x) => {
       const ref = x[1] === '📎', token = x[2], m = refMessage(token);
       const i = left.findIndex((r) => (r.id === (m?.id || idOf(token)) || String(r.markId) === token) && r.ref === ref);
       const previous = i >= 0 ? left.splice(i, 1)[0] : null;
-      return { ...(previous || { ref, quote: null }), id: m?.id || previous?.id || idOf(token), markId: token, at: x.index, len: x[0].length };
+      const ci = chips.findIndex(chip => chip.dataset.token === x[0]);
+      const chip = ci < 0 ? null : chips.splice(ci, 1)[0];
+      return { ...(previous || { ref, quote: chip?.dataset.quote || null }), id: m?.id || previous?.id || idOf(token), markId: token, at: x.index, len: x[0].length };
     });
   }
   // 보낼 글: 표시는 짧게([↩#번호]) 줄이고, 붙인 것들을 quotes 로 함께 보낸다. 첫 것은 예전 한 개 답장 칸(replyTo)에도 적는다.
@@ -751,6 +753,11 @@
   function showReplyText() {
     const ps = pairRefs($('input').value);
     refs = ps.map(({ id, ref, quote, markId }) => ({ id, ref, quote, markId }));
+    const chips = [...$('input').querySelectorAll('mark[data-token]')];
+    for (const item of ps) {
+      const i = chips.findIndex(chip => chip.dataset.token === $('input').value.slice(item.at, item.at + item.len));
+      if (i >= 0) chips.splice(i, 1)[0].dataset.quote = item.quote || '';
+    }
     const last = refs.at(-1);
     replyTo = last?.id ?? null;
     replyQuote = last?.quote ?? null;
@@ -802,6 +809,7 @@
   // 입력칸 글을 s0~e0 자리에서 t 로 바꾼다. 브라우저 편집 명령으로 바꿔야 iPhone 한글 키보드가 바뀐 글을 알아,
   // 바로 다음에 친 글자가 앞 글자(칩 뒤 빈칸)를 덮어쓰지 않는다(#1986). 명령이 안 되면 직접 바꾼다.
   function editText(el, s0, e0, t) {
+    if (el.replaceText) { el.replaceText(s0, e0, t); return; }
     el.focus();
     el.setSelectionRange(s0, e0);
     let ok = false;
@@ -2432,79 +2440,180 @@
     if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
   }
   $('input').addEventListener('input', () => { autoGrow($('input')); showReplyText(); });
-  // 표시 칩: 입력칸 뒤 배경(#inback)에 표시 자리만 칠한다. 입력칸 글을 코드로 바꿔도(임시 저장 불러오기·비우기) 다시 칠하도록 value 를 가로챈다.
+  // Keep the existing plain-text value/selection interface while editing real atomic chip nodes.
   {
     const el = $('input');
-    const back = document.createElement('div');
-    back.id = 'inback';
-    back.setAttribute('aria-hidden', 'true');
-    el.before(back);
-    const measure = document.createElement('span');
-    measure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;left:0;top:0;';
-    const escH = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
-    const paint = () => {
-      const cs = getComputedStyle(el);
-      for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRadius']) back.style[k] = cs[k];
-      back.style.width = el.offsetWidth + 'px';
-      back.style.height = el.offsetHeight + 'px';
-      // 입력칸에 세로 스크롤 막대가 생기면 글 폭이 그만큼 줄어드니 뒤 배경도 오른쪽 여백을 늘려 줄바꿈을 맞춘다.
-      const bar = el.offsetWidth - el.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
-      back.style.paddingRight = parseFloat(cs.paddingRight) + Math.max(0, bar) + 'px';
-      const lh = cs.lineHeight === 'normal' ? '' : `line-height:${cs.lineHeight};height:${cs.lineHeight};`;
-      const v = el.value;
-      // 줄 머리 `- `의 -는 같은 폭 그대로 •로 그린다(글은 그대로, 보이는 것만 #2046).
-      const bullets = (t, at) => escH(t).replace(/(^|\n)( *)- /g, (m, nl, sp, off) => (off === 0 && v[at - 1] && v[at - 1] !== '\n' ? m : `${nl}${sp}<i class="bul">-</i> `));
-      let html = '', i = 0;
-      for (const x of v.matchAll(MARK)) {
-        // 실제 textarea의 입력 폭은 유지하고, 칩 글자만 기존 크기로 작게 그린다.
-        measure.textContent = x[0];
-        html += bullets(v.slice(i, x.index), i) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}"><span>${escH(x[0].replace(/^(↩|📎)(?:xq|\u2063)(\d+)/, '$1$2'))}</span></mark>`;
-        i = x.index + x[0].length;
-      }
-      back.innerHTML = html + bullets(v.slice(i), i) + '\n';
-      back.append(measure);
-      back.scrollTop = el.scrollTop;
-    };
-    const d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-    Object.defineProperty(el, 'value', { get() { return d.get.call(this); }, set(v) { d.set.call(this, v); paint(); }, configurable: true });
-    el.addEventListener('input', paint);
-    el.addEventListener('scroll', () => { back.scrollTop = el.scrollTop; });
-    new ResizeObserver(paint).observe(el);
-    const marks = () => [...el.value.matchAll(MARK)].map((x) => [x.index, x.index + x[0].length]);
-    // 칩을 지우거나 칩 뒤로 글을 옮겨 쓸 때도 브라우저 편집(editText)으로 바꾼다. value 를 직접 바꾸면 iPhone 키보드가 앞 글을 잘못 알아 다음 글자가 지워진다(#1986).
-    const edit = (s0, e0, t) => editText(el, s0, e0, t);
-    // 칩은 한 덩어리: 지우면 통째로 지워지고(#1977), 칩 가운데에 커서가 서면 칩 뒤로 옮긴다.
-    el.addEventListener('beforeinput', (e) => {
-      if (e.isComposing) return;
-      const a = el.selectionStart, b = el.selectionEnd, ms = marks();
-      if (/^delete/.test(e.inputType)) {
-        let s0 = a, e0 = b;
-        if (a === b) {
-          const fwd = /Forward/.test(e.inputType);
-          const hit = ms.find(([p, q]) => (fwd ? p <= a && a < q : p < a && a <= q));
-          if (!hit) return;
-          [s0, e0] = hit;
-        } else {
-          for (const [p, q] of ms) if (p < e0 && q > s0) { s0 = Math.min(s0, p); e0 = Math.max(e0, q); }
-          if (s0 === a && e0 === b) return;
+    const escape = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const selection = () => root.getSelection ? root.getSelection() : document.getSelection();
+    let savedStart = 0, savedEnd = 0, composing = false, shifted = false, replacing = false;
+    const block = node => node.nodeType === 1 && /^(DIV|P|LI)$/.test(node.tagName);
+    function scan(container = el) {
+      let text = '';
+      const parts = [];
+      const add = (value, before, after, node = null) => { const start = text.length; text += value; parts.push({ start, end: text.length, before, after, node }); };
+      const walk = parent => {
+        [...parent.childNodes].forEach((node, index) => {
+          const before = [parent, index], after = [parent, index + 1];
+          if (node.nodeType === 3) { add(node.data, [node, 0], [node, node.length], node); return; }
+          if (node.nodeType !== 1 || node.hasAttribute('data-filler')) return;
+          if (node.matches('mark[data-token]')) { add(node.dataset.token, before, after); return; }
+          if (node.tagName === 'BR') { add('\n', before, after); return; }
+          if (block(node) && text && !text.endsWith('\n')) add('\n', before, [node, 0]);
+          walk(node);
+          if (block(node) && node.nextSibling && !text.endsWith('\n')) add('\n', [node, node.childNodes.length], after);
+        });
+      };
+      walk(container);
+      // Browsers leave a final line-break placeholder in an otherwise empty last line.
+      if (container === el && el.lastChild?.nodeName === 'BR' && !el.lastChild.hasAttribute('data-filler') && text.endsWith('\n')) text = text.slice(0, -1);
+      return { text, parts };
+    }
+    const value = () => scan().text;
+    function offsets() {
+      const s = selection();
+      if (!s?.rangeCount) return [savedStart, savedEnd];
+      let range;
+      // WebKit's document selection can rescope shadow content to its host. Support both API signatures.
+      if (s.getComposedRanges) {
+        for (const options of [{ shadowRoots: [root] }, root]) {
+          try { const candidate = s.getComposedRanges(options)[0]; if (candidate && el.contains(candidate.startContainer) && el.contains(candidate.endContainer)) { range = candidate; break; } } catch {}
         }
-        e.preventDefault();
-        edit(s0, e0, '');
-      } else if (e.inputType === 'insertText' && e.data && a === b) {
-        const hit = ms.find(([p, q]) => p < a && a < q);
-        if (!hit) return;
-        e.preventDefault();
-        edit(hit[1], hit[1], e.data);
+      }
+      range ||= s.getRangeAt(0);
+      if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return [savedStart, savedEnd];
+      const collapsed = range.startContainer === range.endContainer && range.startOffset === range.endOffset;
+      const prefix = (node, offset, start) => {
+        const r = document.createRange(); r.selectNodeContents(el);
+        const chip = (node.nodeType === 1 ? node : node.parentElement)?.closest('mark[data-token]');
+        if (chip && el.contains(chip)) {
+          const local = document.createRange(); local.selectNodeContents(chip); local.setEnd(node, offset);
+          const length = local.toString().length;
+          const before = collapsed ? length === 0 : start ? length < chip.textContent.length : length === 0;
+          if (before) r.setEndBefore(chip); else r.setEndAfter(chip);
+        } else r.setEnd(node, offset);
+        return Math.min(value().length, scan(r.cloneContents()).text.length);
+      };
+      return [savedStart, savedEnd] = [prefix(range.startContainer, range.startOffset, true), prefix(range.endContainer, range.endOffset, false)];
+    }
+    function expand(start, end) {
+      const length = value().length;
+      start = Math.max(0, Math.min(length, Number(start) || 0)); end = Math.max(start, Math.min(length, Number(end) || 0));
+      for (const m of value().matchAll(MARK)) {
+        const a = m.index, b = a + m[0].length;
+        if (start === end && a < start && start < b) start = end = b;
+        else if (start !== end && a < end && b > start) { start = Math.min(start, a); end = Math.max(end, b); }
+      }
+      return [start, end];
+    }
+    function point(offset) {
+      const parts = scan().parts;
+      for (const part of parts) if (offset <= part.end) return part.node ? [part.node, Math.max(0, Math.min(part.node.length, offset - part.start))] : offset <= part.start ? part.before : part.after;
+      return [el, el.childNodes.length];
+    }
+    function rangeAt(start, end) { const r = document.createRange(); r.setStart(...point(start)); r.setEnd(...point(end)); return r; }
+    function select(start, end = start) {
+      [savedStart, savedEnd] = expand(start, end);
+      if (root.activeElement !== el) return;
+      const s = selection(), startPoint = point(savedStart), endPoint = point(savedEnd);
+      if (s.setBaseAndExtent) s.setBaseAndExtent(...startPoint, ...endPoint);
+      else { s.removeAllRanges(); s.addRange(rangeAt(savedStart, savedEnd)); }
+    }
+    function html(text, at = 0) {
+      const bullets = (part, offset) => escape(part).replace(/(^|\n)( *)- /g, (m, line, spaces, index) => !line && index === 0 && !/(?:^|\n) *$/.test(value().slice(0, offset)) ? m : `${line}${spaces}<i class="bul">-</i> `);
+      let result = '', offset = 0;
+      for (const m of text.matchAll(MARK)) {
+        result += bullets(text.slice(offset, m.index), at + offset);
+        const label = m[0].replace(/^(↩|📎)(?:xq|\u2063)(\d+)/, '$1$2');
+        const quote = refs.find(r => String(r.markId ?? r.id) === m[2] && r.ref === (m[1] === '📎'))?.quote || '';
+        result += `<mark class="${m[1] === '📎' ? 'f' : 'r'}" data-token="${escape(m[0])}" data-quote="${escape(quote)}" contenteditable="false"><span>${escape(label)}</span></mark>`;
+        offset = m.index + m[0].length;
+      }
+      return (result + bullets(text.slice(offset), at + offset)).replace(/\n/g, '<br>');
+    }
+    const empty = () => { el.dataset.empty = String(!value()); };
+    function repairChips() {
+      if (composing) return;
+      const caret = offsets(); let changed = false;
+      for (const mark of el.querySelectorAll('mark[data-token]')) {
+        // WebKit's insertHTML normalizer can remove editing boundaries and redundant spans.
+        if (mark.contentEditable !== 'false') { mark.contentEditable = 'false'; changed = true; }
+        if (mark.childNodes.length !== 1 || mark.firstChild?.nodeName !== 'SPAN') {
+          const span = document.createElement('span');
+          span.textContent = mark.dataset.token.replace(/^(↩|📎)(?:xq|\u2063)(\d+)/, '$1$2');
+          mark.replaceChildren(span); changed = true;
+        }
+      }
+      for (const bullet of el.querySelectorAll('i.bul')) {
+        if (bullet.childNodes.length === 1 && bullet.firstChild.nodeType === 3 && bullet.textContent === '-') continue;
+        bullet.replaceWith(...bullet.childNodes); changed = true;
+      }
+      const snapshot = scan();
+      for (const match of [...snapshot.text.matchAll(/(^|\n)( *)- /g)].reverse()) {
+        const offset = match.index + match[1].length + match[2].length;
+        const part = snapshot.parts.find(p => p.node && p.start <= offset && offset < p.end);
+        if (!part || part.node.parentElement.closest('i.bul')) continue;
+        const hyphen = part.node.splitText(offset - part.start); hyphen.splitText(1);
+        const bullet = document.createElement('i'); bullet.className = 'bul'; hyphen.replaceWith(bullet); bullet.append(hyphen); changed = true;
+      }
+      if (changed) select(...caret);
+    }
+    function replace(start, end, text) {
+      text = String(text).replace(/\r\n?/g, '\n');
+      el.focus(); [start, end] = expand(start, end); select(start, end);
+      const before = value(), expected = before.slice(0, start) + text + before.slice(end);
+      const trailing = end === before.length && text.endsWith('\n') ? '<br data-filler>' : '';
+      replacing = true;
+      try { document.execCommand(text ? 'insertHTML' : 'delete', false, text ? html(text, start) + trailing : null); }
+      finally { replacing = false; }
+      // Some engines return false after applying an edit; verify the result before falling back.
+      if (value() !== expected) {
+        if (value() === before) {
+          select(start, end);
+          const range = rangeAt(start, end); range.deleteContents();
+          const fragment = range.createContextualFragment(html(text, start) + trailing); range.insertNode(fragment);
+        } else el.value = expected;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      repairChips(); empty(); select(start + text.length);
+    }
+    Object.defineProperties(el, {
+      value: { get: value, set(text) { text = String(text ?? '').replace(/\r\n?/g, '\n'); el.innerHTML = html(text) + (text.endsWith('\n') ? '<br data-filler>' : ''); empty(); select(text.length); } },
+      selectionStart: { get: () => offsets()[0], set: n => select(n, Math.max(n, offsets()[1])) },
+      selectionEnd: { get: () => offsets()[1], set: n => select(Math.min(n, offsets()[0]), n) },
+      placeholder: { get: () => el.dataset.placeholder, set: text => { el.dataset.placeholder = text; el.setAttribute('aria-placeholder', text); } },
+      disabled: { get: () => el.getAttribute('aria-disabled') === 'true', set: disabled => { if (el.getAttribute('aria-disabled') === String(!!disabled)) return; el.setAttribute('aria-disabled', String(!!disabled)); el.contentEditable = String(!disabled); el.tabIndex = disabled ? -1 : 0; } }
+    });
+    el.setSelectionRange = select;
+    el.setRangeText = replace;
+    el.replaceText = replace;
+    el.addEventListener('focus', () => { if (!el.contains(selection()?.anchorNode)) select(savedStart, savedEnd); });
+    el.addEventListener('keyup', offsets);
+    el.addEventListener('pointerup', offsets);
+    el.addEventListener('blur', offsets);
+    document.addEventListener('selectionchange', () => { if (root.activeElement === el) offsets(); });
+    el.addEventListener('input', () => { repairChips(); empty(); });
+    el.addEventListener('compositionstart', () => { composing = true; });
+    el.addEventListener('compositionend', () => { composing = false; repairChips(); empty(); });
+    el.addEventListener('keydown', e => { shifted = e.shiftKey; });
+    el.addEventListener('paste', e => { e.preventDefault(); replace(el.selectionStart, el.selectionEnd, e.clipboardData.getData('text/plain')); });
+    el.addEventListener('drop', e => { e.preventDefault(); const text = e.dataTransfer.getData('text/plain'); if (text) replace(el.selectionStart, el.selectionEnd, text); });
+    el.addEventListener('copy', e => { const [start, end] = expand(...offsets()); if (start !== end) { e.preventDefault(); e.clipboardData.setData('text/plain', value().slice(start, end)); } });
+    el.addEventListener('cut', e => { const [start, end] = expand(...offsets()); if (start !== end) { e.preventDefault(); e.clipboardData.setData('text/plain', value().slice(start, end)); replace(start, end, ''); } });
+    el.addEventListener('beforeinput', e => {
+      if (e.isComposing || composing || replacing) return;
+      let [start, end] = offsets();
+      const marks = [...value().matchAll(MARK)].map(m => [m.index, m.index + m[0].length]);
+      if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+        if (e.inputType === 'insertParagraph' && !shifted) { e.preventDefault(); $('form').requestSubmit(); }
+      } else if (/^delete/.test(e.inputType)) {
+        if (start === end) { const hit = marks.find(([a, b]) => /Forward/.test(e.inputType) ? a <= start && start < b : a < start && start <= b); if (!hit) return; [start, end] = hit; }
+        const expanded = expand(start, end);
+        if (marks.some(([a, b]) => a < expanded[1] && b > expanded[0])) select(...expanded);
+      } else if (e.inputType === 'insertText' || e.inputType === 'insertReplacementText') {
+        if (marks.some(([a, b]) => a < end && b > start)) select(...expand(start, end));
+        else if (start === end && e.data === ' ' && /(?:^|\n) *-$/.test(value().slice(0, start))) { e.preventDefault(); replace(start - 1, end, '- '); }
       }
     });
-    const snap = () => {
-      const a = el.selectionStart;
-      if (a !== el.selectionEnd) return;
-      const hit = marks().find(([p, q]) => p < a && a < q);
-      if (hit) el.setSelectionRange(hit[1], hit[1]);
-    };
-    el.addEventListener('click', snap);
-    el.addEventListener('keyup', snap);
   }
   // 진단(임시): 고치기를 시작한 뒤 3초 동안의 터치·클릭·초점 순서를 모아 서버(.ui-feedback/diag.jsonl)에 남긴다.
   // 폰에서 "다시 보내기"를 누르면 아래 입력칸으로 초점이 가는 원인을 보려는 것이다. 원인을 찾으면 지운다.

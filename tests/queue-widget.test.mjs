@@ -114,7 +114,7 @@ test('stored queue failure clears the composer and exposes retry; explicit resen
   await page.locator('#form button[type="submit"]').click();
   const bubble = page.locator('.msg[data-id="1"]');
   await bubble.getByRole('button', { name: '전달 재시도', exact: true }).waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#input').inputValue(), '');
+  assert.equal(await page.locator('#input').evaluate(el => el.value), '');
   assert.match(await page.locator('#toast').textContent(), /저장됐지만 전달하지 못했습니다/);
   assert.equal(store.messages.length, 1);
   await bubble.getByRole('button', { name: '전달 재시도', exact: true }).click();
