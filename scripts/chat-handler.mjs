@@ -735,7 +735,10 @@ function queueToCodex(session, entry) {
   const receipt = entry.queue?.receipt || randomUUID();
   saveQueue(entry, { state: 'pending', attempt, receipt });
   // 답장·참고로 붙인 원문도 함께 넣는다(Claude 세션이 받는 글과 같게). Codex 답은 대화 기록에서 찾는다.
-  const quotes = quoteLines(entry, [...readChat().messages, ...readTranscript(session.sessionId).items]);
+  // Outgoing native peer messages are stored in the recipient's transcript but shown in both tabs.
+  const outgoing = listSessions().filter(s => s.id !== session.sessionId)
+    .flatMap(s => readTranscript(s.id).items.filter(m => m.from === 'peer' && m.session === session.sessionId));
+  const quotes = quoteLines(entry, [...readChat().messages, ...readTranscript(session.sessionId).items, ...outgoing]);
   const request = queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`)
     .then((outcome) => {
       saveQueue(entry, { ...outcome, attempt, receipt }, attempt);

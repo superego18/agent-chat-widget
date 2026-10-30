@@ -209,12 +209,14 @@
   .pinbar > .msg.l1 .mbody { -webkit-line-clamp: 1; }
   .pinbar > .msg.l3 .mbody { -webkit-line-clamp: 3; }
   /* 입력칸 뒤에 같은 글을 투명하게 깔고 표시 자리에만 색을 칠해, 표시가 칩처럼 보이게 한다(#1973) */
-  /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩은 입력칸 글과 같은 폭을 차지하되 글자를 작게 그린다(#1994). */
+  /* 글자는 뒤 배경이 그리고 입력칸 글은 투명하게 둔다(커서·선택만 입력칸). 칩도 입력 글자와 같은 크기로 그려 커서와 칩 사이에 빈자리가 남지 않게 한다. */
   #inback { position: absolute; left: 0; top: 0; box-sizing: border-box; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; overflow: hidden; color: #1c1b18; pointer-events: none; background: #f6f5f1; margin: 0; }
-  #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: 0.78em; color: #3730a3; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 1px #c7c9f5; }
+  #inback mark { display: inline-block; vertical-align: top; text-align: center; white-space: pre; overflow: hidden; font-size: inherit; color: #3730a3; background: transparent; }
+  #inback mark > span { display: inline-block; vertical-align: top; background: #e0e7ff; border-radius: 5px; box-shadow: 0 0 0 1px #c7c9f5; }
   #inback i.bul { font-style: normal; position: relative; color: transparent; }
   #inback i.bul::before { content: '•'; position: absolute; left: 50%; transform: translateX(-50%); color: #1c1b18; }
-  #inback mark.f { color: #57534e; background: #ecebe7; box-shadow: 0 0 0 1px #d6d3d1; }
+  #inback mark.f { color: #57534e; }
+  #inback mark.f > span { background: #ecebe7; box-shadow: 0 0 0 1px #d6d3d1; }
   form textarea#input { position: relative; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: #1c1b18; }
   form textarea#input::placeholder { color: #8f8c84; -webkit-text-fill-color: #8f8c84; }
   /* 일부만 인용: 메시지 글을 고르면 "고른 부분에 답장" 버튼이 뜨고, 답장할 부분은 원문에 노란 음영으로 표시된다. */
@@ -522,6 +524,13 @@
   // 메시지 번호: 대화창 기록은 숫자, Codex 대화 기록에서 읽은 메시지는 x 로 시작하는 글자(#2113). 둘 다 답장·참고·고정·곁질문할 수 있다.
   const idOf = (v) => (/^x[\w-]+$/.test(String(v)) ? String(v) : Number(v));
   const canRef = (m) => typeof m.id === 'number' || /^x[\w-]+$/.test(String(m.id));
+  function refMessage(id) {
+    const key = String(id).startsWith('\u2063') ? 'xq' + String(id).slice(1) : idOf(id);
+    const all = [...messages, ...Object.values(transcripts).flat()];
+    return all.find(m => m.id === key) || all.find(m => m.refId === key);
+  }
+  // Keep the native namespace distinct from numbered chat messages without adding visible text width.
+  const markIdOf = m => m.refId ? m.refId.replace(/^xq/, '\u2063') : m.id;
   // 곁질문 묶음(#2083): 평소에는 숨기고, 고른 묶음 하나만 대화 속에 보인다. 묶음 번호는 첫 질문 번호(옛 곁질문은 질문 번호·답의 re).
   const groupOf = (m) => m.sideGroup ?? (m.from === 'user' ? m.id : m.re?.[0]);
   const sideOpen = {}; // 세션별로 펼친 묶음. 펼친 채 곁질문을 보내면 그 묶음에 이어 묻는다.
@@ -698,7 +707,7 @@
   // 글을 고르면(이 탭의 메시지 안 글일 때만) 입력칸 위에 "고른 부분에 답장" 버튼을 띄운다.
   const msgOfSel = (t) => (t ? timeline(activeTab).filter((m) => canRef(m) && !isHeld(m)).reverse().find((m) => plain(m.draft ? m.draft.items.map((it) => it.text).join(' ') : m.text).includes(t)) : null);
   document.addEventListener('selectionchange', () => {
-    const m = lastSel && Date.now() - lastSel.at < 300 ? (lastSel.id ? messages.find((x) => String(x.id) === lastSel.id) : msgOfSel(lastSel.text)) : null;
+    const m = lastSel && Date.now() - lastSel.at < 300 ? (lastSel.id ? refMessage(lastSel.id) : msgOfSel(lastSel.text)) : null;
     const b = $('selReply');
     if (!m) { if (!b.matches(':hover')) setTimeout(() => { if (!lastSel || Date.now() - lastSel.at > 300) b.hidden = true; }, 400); return; }
     const p = $('panel').getBoundingClientRect();
@@ -721,14 +730,15 @@
   const openRefs = new Set(); // 입력칸 아래 목록에서 펼친 줄
   let refs = []; // 붙인 것들 {id, ref, quote}. 글 속 표시와 번호·종류로 짝짓는다
   // 입력칸 속 표시는 짧게 ↩1940「자동으…」 처럼 번호와 붙인 글 앞 3글자로 두고 칩처럼 칠한다(#1973, #1993). 보낼 때는 [↩#1940] 으로 바꿔 적는다.
-  const MARK = /\[?(↩|📎)#?(\d+|x[\w-]+)(?:「[^」\n]*」)?\]?/g;
-  const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${id}]`);
+  const MARK = /\[?(↩|📎)#?(\u2063\d+|\d+|x[\w-]+)(?:「[^」\n]*」)?\]?/g;
+  const shortMarks = (t) => String(t).replace(MARK, (_, k, id) => `[${k}#${refMessage(id)?.id || id}]`);
   function pairRefs(t) {
     const left = [...refs];
     return [...String(t).matchAll(MARK)].map((x) => {
-      const ref = x[1] === '📎', id = idOf(x[2]);
-      const i = left.findIndex((r) => r.id === id && r.ref === ref);
-      return { ...(i >= 0 ? left.splice(i, 1)[0] : { id, ref, quote: null }), at: x.index, len: x[0].length };
+      const ref = x[1] === '📎', token = x[2], m = refMessage(token);
+      const i = left.findIndex((r) => (r.id === (m?.id || idOf(token)) || String(r.markId) === token) && r.ref === ref);
+      const previous = i >= 0 ? left.splice(i, 1)[0] : null;
+      return { ...(previous || { ref, quote: null }), id: m?.id || previous?.id || idOf(token), markId: token, at: x.index, len: x[0].length };
     });
   }
   // 보낼 글: 표시는 짧게([↩#번호]) 줄이고, 붙인 것들을 quotes 로 함께 보낸다. 첫 것은 예전 한 개 답장 칸(replyTo)에도 적는다.
@@ -740,7 +750,7 @@
   }
   function showReplyText() {
     const ps = pairRefs($('input').value);
-    refs = ps.map(({ id, ref, quote }) => ({ id, ref, quote }));
+    refs = ps.map(({ id, ref, quote, markId }) => ({ id, ref, quote, markId }));
     const last = refs.at(-1);
     replyTo = last?.id ?? null;
     replyQuote = last?.quote ?? null;
@@ -748,7 +758,7 @@
     $('reply').hidden = !refs.length;
     $('reply').classList.toggle('ref', !!refs.length && refs.every((r) => r.ref));
     $('reply').replaceChildren(...ps.map((r) => {
-      const m = messages.find((x) => x.id === r.id);
+      const m = refMessage(r.id);
       const who = m ? quoteOf(m).split(':')[0] : `#${r.id}`;
       const row = document.createElement('div');
       const key = `${r.ref ? 'f' : 'r'}${r.id}:${r.quote || ''}`;
@@ -757,7 +767,7 @@
       // 눌러 펼치면 붙인 원문을 다 보이고(#1971), "원문으로"는 대화에서 그 메시지로 가서 붙인 부분을 칠한다.
       const full = m ? (m.draft ? m.draft.items.map((it) => it.text).join(' / ') : m.text) : '';
       const t = document.createElement('span');
-      t.textContent = `${r.ref ? '📎' : '↩'}#${r.id} ${r.ref ? '참고' : '답장'} · ` + (r.quote ? `${who}의 일부: "${r.quote}"` : m ? (open ? `${who}: ${full}` : quoteOf(m)) : who);
+      t.textContent = `${r.ref ? '📎' : '↩'}#${m?.refId?.replace(/^xq/, '') || r.id} ${r.ref ? '참고' : '답장'} · ` + (r.quote ? `${who}의 일부: "${r.quote}"` : m ? (open ? `${who}: ${full}` : quoteOf(m)) : who);
       t.title = '눌러서 원문 펼치기·접기';
       t.onclick = () => { open ? openRefs.delete(key) : openRefs.add(key); showReplyText(); };
       const go = document.createElement('button');
@@ -817,11 +827,11 @@
     const inp = $('input'), v = inp.value;
     const s0 = inp.selectionStart ?? v.length, e0 = inp.selectionEnd ?? s0;
     const head = [...(quote || body).replace(/[「」\n]/g, '').trim()];
-    const mark = `${ref ? '📎' : '↩'}${m.id}「${head.slice(0, 3).join('').trim().replace(/\s/g, '\u00a0')}${head.length > 3 ? '…' : ''}」`; // 칩 안 빈칸은 줄바꿈 안 되는 빈칸
+    const mark = `${ref ? '📎' : '↩'}${markIdOf(m)}「${head.slice(0, 3).join('').trim().replace(/\s/g, '\u00a0')}${head.length > 3 ? '…' : ''}」`; // 칩 안 빈칸은 줄바꿈 안 되는 빈칸
     // 줄을 바꾸지 않고 커서 자리에 그대로 넣는다(#1964). 앞 글자에 붙으면 띄어 쓰고, 뒤에는 이어 쓸 빈칸을 둔다.
     const pre = s0 && !/\s/.test(v[s0 - 1]) ? ' ' : '';
     const post = /\s/.test(v[e0] || '') ? '' : ' ';
-    refs.push({ id: m.id, ref, quote }); // 먼저 넣어 둬야 바뀐 글을 보고 목록을 다시 짤 때 고른 부분이 남는다
+    refs.push({ id: m.id, ref, quote, markId: String(markIdOf(m)) }); // 먼저 넣어 둬야 바뀐 글을 보고 목록을 다시 짤 때 고른 부분이 남는다
     editText(inp, s0, e0, pre + mark + post); // 입력칸 저장·높이·아래 목록은 input 이벤트로 함께 맞춰진다
     if (!post && v[e0] === ' ') { const c = s0 + pre.length + mark.length + 1; inp.setSelectionRange(c, c); } // 뒤에 빈칸이 이미 있으면 커서를 그 뒤로
     markQuote(m.id, quote);
@@ -841,7 +851,7 @@
   // 인용 상자: 길면 4줄로 줄여 보이고 "펼치기"로 전체를 본다. "원문으로"는 원래 메시지로 가서 인용한 부분을 칠한다.
   // 골라서 답장(일부)은 노란 바탕에 "고른 부분", 메시지 전체에 답장은 회색 바탕에 "전체에 답장", 참고는 점선으로 나눠 보인다.
   function quoteEl(q, key) {
-    const orig = messages.find((x) => x.id === q.id);
+    const orig = refMessage(q.id);
     if (!orig) return null;
     const box = $('msgs');
     const el = document.createElement('span');
@@ -1872,6 +1882,16 @@
       for (const x of sessions) {
         transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
       }
+      if (!refs.length) restoreReplyState();
+      const input = $('input');
+      const compact = input.value.replace(MARK, (whole, kind, id) => {
+        const m = refMessage(id);
+        return m?.refId ? whole.replace(id, String(markIdOf(m))) : whole;
+      });
+      if (compact !== input.value && root.activeElement !== input) {
+        input.value = compact;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      } else if (refs.length || input.value.match(MARK)) showReplyText();
       const fresh = [];
       for (const x of sessions) {
         if (seen[x.id] === undefined) {
@@ -1883,7 +1903,7 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(delivered) + ':' + messages.filter((m) => m.queue).map((m) => m.id + m.queue.state).join() + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + messages.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      const k = JSON.stringify(delivered) + ':' + messages.filter((m) => m.queue).map((m) => m.id + m.queue.state).join() + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + all.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.session || '') + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
       const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
@@ -2436,9 +2456,9 @@
       const bullets = (t, at) => escH(t).replace(/(^|\n)( *)- /g, (m, nl, sp, off) => (off === 0 && v[at - 1] && v[at - 1] !== '\n' ? m : `${nl}${sp}<i class="bul">-</i> `));
       let html = '', i = 0;
       for (const x of v.matchAll(MARK)) {
-        // 칩 폭은 입력칸이 그 글을 그리는 폭과 같게(커서 자리가 어긋나지 않게) 재고, 그 안에 작은 글자로 그린다.
+        // 칩과 입력 글자의 크기·폭을 함께 맞춰 커서 위치와 표시가 일치하게 한다.
         measure.textContent = x[0];
-        html += bullets(v.slice(i, x.index), i) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}">${escH(x[0])}</mark>`;
+        html += bullets(v.slice(i, x.index), i) + `<mark class="${x[1] === '📎' ? 'f' : 'r'}" style="width:${measure.getBoundingClientRect().width}px;${lh}"><span>${escH(x[0].replace(/^(↩|📎)(?:xq|\u2063)(\d+)/, '$1$2'))}</span></mark>`;
         i = x.index + x[0].length;
       }
       back.innerHTML = html + bullets(v.slice(i), i) + '\n';

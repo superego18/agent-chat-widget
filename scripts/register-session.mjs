@@ -9,6 +9,7 @@
 //   Claude: hook-relay.mjs 훅이 이 sessionId 의 대화만 대화창 서버로 보낸다. Codex: 대화창 서버가 path 의 기록을 읽어 보여 준다.
 
 import fs from 'node:fs';
+import { nextOrcaBinding } from './codex-peers.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { replaceSessionState } from './session-state.mjs';
@@ -24,6 +25,8 @@ const dir = path.resolve(arg('dir', '.ui-feedback'));
 const name = arg('name', '작업 세션');
 const agent = arg('agent', name);
 const port = Number(arg('port', '4799'));
+const orcaTerminal = arg('orca-terminal', '');
+if (orcaTerminal && !/^term_[\w-]+$/.test(orcaTerminal)) throw new Error('Invalid --orca-terminal handle');
 if (marker.length < 8) {
   console.error('--marker 에 8자 이상의 고유한 글자를 직접 적어 주세요(예: uifb-k3x9q2m7).');
   process.exit(2);
@@ -118,8 +121,13 @@ for (const { file, session } of previous) {
   fs.rmSync(file);
 }
 fs.rmSync(path.join(dir, 'session.json'), { force: true });
+const registrationFile = path.join(sessionsDir, `${sessionId}.json`);
+let existing;
+try { existing = JSON.parse(fs.readFileSync(registrationFile, 'utf8')); } catch {}
+const registeredAt = new Date().toISOString();
+const orca = nextOrcaBinding(existing?.orca, orcaTerminal, registeredAt);
 fs.writeFileSync(
-  path.join(sessionsDir, `${sessionId}.json`),
-  JSON.stringify({ name, tool, sessionId, path: found, agent, port, registeredAt: new Date().toISOString(), ...cmuxOf() }, null, 2) + '\n',
+  registrationFile,
+  JSON.stringify({ name, tool, sessionId, path: found, agent, port, registeredAt, ...cmuxOf(), ...(orca ? { orca } : {}) }, null, 2) + '\n',
 );
 console.log(`등록함: ${name} · ${tool} · ${sessionId}`);

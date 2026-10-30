@@ -30,7 +30,9 @@ export function replaceSessionState(root, replacements) {
     return out;
   }
   // Parse every file before any write. A malformed store must not cause a partial migration.
-  const changes = files.filter(file => fs.existsSync(path.join(root, file))).map(file => {
+  const historyDir = path.join(root, 'transcript-history');
+  const histories = fs.existsSync(historyDir) ? fs.readdirSync(historyDir).filter(file => file.endsWith('.json')).map(file => path.join('transcript-history', file)) : [];
+  const changes = [...files, ...histories].filter(file => fs.existsSync(path.join(root, file))).map(file => {
     const before = fs.readFileSync(path.join(root, file), 'utf8');
     const data = rewrite(JSON.parse(before), file);
     return { file, before, data };
@@ -45,7 +47,10 @@ export function replaceSessionState(root, replacements) {
   }
   const backup = path.join(root, 'session-migrations', `${Date.now()}-${randomUUID()}`);
   fs.mkdirSync(backup, { recursive: true });
-  for (const { file, before } of changes) fs.writeFileSync(path.join(backup, file), before);
+  for (const { file, before } of changes) {
+    fs.mkdirSync(path.dirname(path.join(backup, file)), { recursive: true });
+    fs.writeFileSync(path.join(backup, file), before);
+  }
   if (fs.existsSync(path.join(root, 'sessions'))) fs.cpSync(path.join(root, 'sessions'), path.join(backup, 'sessions'), { recursive: true });
   fs.writeFileSync(path.join(backup, 'manifest.json'), JSON.stringify({ replacements, files: changes.map(x => x.file) }, null, 2));
   for (const { file, data } of changes) writeJsonAtomic(path.join(root, file), data);

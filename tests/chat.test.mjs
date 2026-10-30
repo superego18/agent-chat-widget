@@ -238,7 +238,7 @@ test('Codex 답에도 답장 단추가 있고, 답장하면 원문이 Codex 에 
     assert.deepEqual(await w.eval((r) => [...r.querySelectorAll('.msg[data-id="xmsg_1"] .rp')].map((b) => b.textContent)).then((l) => l.slice(0, 4)), ['답장', '참고', '복사', '고정']);
     await w.eval((r) => r.querySelector('.msg[data-id="xmsg_1"] .rp').click());
     const v = await w.inputValue();
-    assert.match(v, /↩xmsg_1「/, '입력칸에 답장 칩이 들어간다');
+    assert.match(v, /↩\u2063\d+「/, '입력칸에는 긴 원본 ID 대신 짧은 답장 칩이 들어간다');
     await w.type(v + '이거 다시');
     await w.click('#form button[type="submit"]');
     for (let i = 0; i < 40 && !fs.existsSync(log); i++) await new Promise((r) => setTimeout(r, 100));

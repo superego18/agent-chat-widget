@@ -52,6 +52,47 @@ function fixture(t, spawnImpl, extra = {}) {
   return { root, bin, cli, handler, makeHandler, calls, read, api };
 }
 
+test('Codex receives native replies, references, partial quotes and mixed quote context', async t => {
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; });
+  const native = path.join(f.root, 'native.jsonl');
+  const records = ['First native answer', 'Second native answer'].map((text, i) => ({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', id: `answer-${i}`, role: 'assistant', content: [{ type: 'output_text', text }] } }));
+  fs.writeFileSync(native, records.map(JSON.stringify).join('\n'));
+  fs.writeFileSync(path.join(f.root, 'sessions', session.sessionId + '.json'), JSON.stringify({ ...session, path: native }));
+  const cases = [
+    { replyTo: 'xanswer-0' },
+    { replyTo: 'xanswer-0', refer: true, replyQuote: 'native answer' },
+    { quotes: [{ id: 'xanswer-0', quote: 'First native' }, { id: 'xanswer-1', refer: true }] },
+  ];
+  for (const [i, extra] of cases.entries()) {
+    const r = await f.api('/api/chat', { ...message, cid: `quote-${i}`, ...extra });
+    assert.equal(r.status, 200);
+    const input = f.calls.at(-1).args[1].at(-1);
+    if (i === 0) assert.match(input, /답장 대상 \[xanswer-0\] 에이전트: First native answer/);
+    if (i === 1) {
+      assert.match(input, /참고로 붙인 메시지\(답장 아님\) \[xanswer-0\].*"native answer"/);
+      assert.doesNotMatch(input, /답장 대상/);
+      assert.equal(r.body.replyQuote, extra.replyQuote);
+      assert.equal(r.body.refer, true);
+    }
+    if (i === 2) {
+      assert.match(input, /답장 대상 \[xanswer-0\].*"First native"/);
+      assert.match(input, /참고로 붙인 메시지\(답장 아님\) \[xanswer-1\] 에이전트: Second native answer/);
+      assert.deepEqual(r.body.quotes, extra.quotes);
+    }
+  }
+});
+
+test('Codex reply and reference resolve peer messages displayed from another registered transcript', async t => {
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; });
+  fs.mkdirSync(path.join(f.root, 'transcript-history'));
+  fs.writeFileSync(path.join(f.root, 'sessions/receiver.json'), JSON.stringify({ sessionId: 'receiver', tool: 'codex', path: path.join(f.root, 'missing-native.jsonl') }));
+  fs.writeFileSync(path.join(f.root, 'transcript-history/receiver.json'), JSON.stringify({ items: [{ id: 'xpeer', from: 'peer', session: session.sessionId, to: 'receiver', text: 'Peer original', at: new Date().toISOString() }] }));
+  for (const refer of [false, true]) {
+    await f.api('/api/chat', { ...message, cid: `peer-quote-${refer}`, replyTo: 'xpeer', refer });
+    assert.match(f.calls.at(-1).args[1].at(-1), /\[xpeer\] 세션끼리: Peer original/);
+  }
+});
+
 test('queue acceptance waits for successful CLI completion and never marks read or live', async (t) => {
   const f = fixture(t);
   const posted = f.api('/api/chat', message);
