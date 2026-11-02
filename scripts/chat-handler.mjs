@@ -31,6 +31,19 @@ const NOT_MINE = Symbol('not mine');
 
 export function createChatHandler({ root, auth = { key: null }, queueSpawn = spawn, queueTimeoutMs = 15000 }) {
 if (!Number.isFinite(queueTimeoutMs) || queueTimeoutMs <= 0) throw new Error('queueTimeoutMs must be positive');
+let closing = false, shutdownPromise = null, reviewWatcher = null;
+const notificationTimers = new Set(), ownedCloses = new Set();
+function trackClose(child) {
+  const closed = new Promise(resolve => child.once('close', resolve));
+  ownedCloses.add(closed);
+  closed.then(() => ownedCloses.delete(closed));
+  return child;
+}
+function notificationTimeout(fn, ms) {
+  const timer = setTimeout(() => { notificationTimers.delete(timer); if (!closing) fn(); }, ms);
+  notificationTimers.add(timer);
+  return timer;
+}
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -214,7 +227,7 @@ function notifyStatus(s, prev) {
   if (s.state === 'permission' && prev.state !== 'permission') pushAll({ title: `${name} 승인 필요`, body: s.detail || '터미널에서 승인을 기다리는 중', tag: `uifb-perm-${s.session}`, session: s.session }, 'permission');
   if (s.state === 'idle' && busy(prev.state)) {
     // 마지막 답은 작업이 끝나는 것과 거의 같은 때 기록되므로 잠깐 기다렸다가 그 답을 알림 본문에 담는다.
-    setTimeout(() => {
+    notificationTimeout(() => {
       const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
       // 마지막 답을 이미 답장 알림으로 보냈으면, 답장 알림을 켠 기기에는 작업 끝 알림을 또 보내지 않는다(같은 글이 두 번 오지 않게).
       const dup = s.lastPushed || (!s.last && last && answerPushed.has(last.id));
@@ -256,7 +269,7 @@ function codexStatus(file) {
 }
 const codexSeen = new Map(); // 세션마다 마지막으로 본 대화 기록 상태(처음 본 상태는 알리지 않는다)
 const codexAnswered = new Map(); // 세션마다 답장 알림을 보낸 마지막 Codex 답 번호
-setInterval(() => {
+const answerPoll = setInterval(() => {
   let files = [];
   try { files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith('.json')); } catch {}
   for (const f of files) {
@@ -287,7 +300,7 @@ setInterval(() => {
 }, 2000).unref();
 // 오래 멈춤: "작업 중"이 5분 넘게 그대로면 그 상태에 한 번 알린다.
 const staleSent = new Map();
-setInterval(() => {
+const stalePoll = setInterval(() => {
   for (const x of listSessions()) {
     const st = x.status;
     if (st?.state !== 'working' || !st.at || Date.now() - Date.parse(st.at) < 5 * 60_000 || staleSent.get(x.id) === st.at) continue;
@@ -298,10 +311,10 @@ setInterval(() => {
 // 비교 페이지 준비: .ui-feedback 에 review*.html 이 새로 생기면 알린다.
 try {
   const known = new Set(fs.readdirSync(root).filter((f) => /^review.*\.html$/.test(f)));
-  fs.watch(root, (ev, f) => {
+  reviewWatcher = fs.watch(root, (ev, f) => {
     if (!f || !/^review.*\.html$/.test(f) || known.has(f) || !fs.existsSync(path.join(root, f))) return;
     known.add(f);
-    setTimeout(() => {
+    notificationTimeout(() => {
       const title = /<title>([^<]*)<\/title>/.exec(fs.readFileSync(path.join(root, f), 'utf8'))?.[1] || f;
       pushAll({ title: '비교 페이지 준비', body: `${title} — 평가할 차례예요`, tag: `uifb-review-${f}` }, 'review');
     }, 1500);
@@ -381,6 +394,7 @@ function cleanQuotes(q, below = Infinity) {
 
 // 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
 function addChat(msg) {
+  if (closing && msg.from === 'user') return null;
   const draft = msg.from === 'user' ? cleanDraft(msg.draft) : undefined;
   const text = draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
   if (text && msg.from === 'peer') return addPeer(msg, text);
@@ -434,7 +448,7 @@ function addChat(msg) {
   // keepUnread: 사용자가 직접 쓴 글이 아니라 서버가 대신 남기는 글(평가 완료 요약)은 읽음으로 치지 않는다(#1874).
   const talkedTo = entry.from === 'user' && !msg.keepUnread ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
-  if (entry.from === 'user' && entry.to && !msg.keepUnread) setTimeout(() => nudge(entry.to), 2000);
+  if (entry.from === 'user' && entry.to && !msg.keepUnread) notificationTimeout(() => nudge(entry.to), 2000);
   return entry;
 }
 
@@ -762,6 +776,7 @@ function windowsQueueCommand() {
 }
 
 function queueText(session, message) {
+  if (closing) return Promise.resolve({ ok: false, state: 'failed', error: 'chat_stopping' });
   const args = ['queue', '--thread', session.sessionId, '--message', message];
   // Resolve once. Return only diagnostic categories, never raw stderr or prompt fragments.
   return new Promise((resolve) => {
@@ -771,7 +786,7 @@ function queueText(session, message) {
     try {
       const command = process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] };
       if (!command) { finish({ ok: false, state: 'failed', error: 'spawn_failed', diagnostic: 'cli_not_found' }); return; }
-      const child = queueSpawn(command.file, [...command.prefix, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      const child = trackClose(queueSpawn(command.file, [...command.prefix, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }));
       timer = setTimeout(() => {
         finish({ ok: false, state: 'unknown', error: 'queue_timeout' });
         try { child.kill?.(); } catch {}
@@ -827,6 +842,7 @@ function runSide(s, q, done) {
   let replied = false;
   const reply = (text) => { if (replied) return; replied = true; addChat({ from: 'agent', session: s.sessionId, context: 'side', sideGroup: q.sideGroup, agent: s.agent || s.name, text: `<re ${q.id}> ${text}` }); done(); };
   child.on('error', (e) => { clearTimeout(timer); reply(`곁질문을 실행하지 못했습니다: ${e.message}`); });
+  trackClose(child);
   child.on('close', (code) => {
     clearTimeout(timer);
     if (replied) return;
@@ -1241,7 +1257,20 @@ function inner(req, res, url) {
 }
 
   return {
-    handle: (req, res, url) => inner(req, res, url) !== NOT_MINE,
+    handle: (req, res, url) => closing ? (send(res, 503, { error: 'Chat is draining' }), true) : inner(req, res, url) !== NOT_MINE,
+    shutdown() {
+      if (shutdownPromise) return shutdownPromise;
+      closing = true;
+      clearInterval(answerPoll); clearInterval(stalePoll); reviewWatcher?.close();
+      for (const timer of notificationTimers) clearTimeout(timer);
+      notificationTimers.clear();
+      shutdownPromise = (async () => {
+        while (queueRequests.size) await Promise.allSettled([...queueRequests.values()]);
+        await Promise.allSettled([...sideQueue.values()]);
+        while (ownedCloses.size) await Promise.allSettled([...ownedCloses]);
+      })();
+      return shutdownPromise;
+    },
     // 비교 페이지와 함께 쓸 때 평가 완료를 대화에 남기고 그 세션을 깨우는 데 쓴다.
     addChat,
     findSessionByKey,
