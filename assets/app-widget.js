@@ -460,17 +460,25 @@
   $('heading').textContent = `대화/피드백 · ${CFG.label}`;
   if (!CFG.pick) $('pick').classList.add('off');
   let messages = [];
+  const pendingCids = new Set();
+  const pendingComposers = new Set();
+  const savedMessages = new Map();
+  function rememberMessages(items) {
+    for (const m of items) {
+      if (!m?.id) continue;
+      savedMessages.set(m.id, m);
+      messages = [...messages.filter(old => old.id !== m.id), m];
+    }
+  }
   const sentTexts = new Map(); // 보낸 글 → 보낸 시각(입력칸에 다시 채우지 않게)
-  // 단추를 누르면 서버가 받을 때까지 그 단추를 돌린다. 8초 넘게 답이 없으면 다시 누를 수 있게 풀고,
-  // 같은 글을 다시 보내도 같은 cid 를 붙여 서버가 한 번만 받는다(먼저 보낸 것이 늦게 도착해도 두 번 생기지 않게).
+  // 실제 요청이 끝날 때까지 로딩을 유지한다. 같은 글의 재시도는 같은 cid로 중복 저장을 막는다.
   const cids = new Map(); // 종류+글 → cid
   const cidFor = (kind, text) => { const k = kind + '\n' + text; if (!cids.has(k)) cids.set(k, kind + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)); return cids.get(k); };
   const doneCid = (kind, text) => cids.delete(kind + '\n' + text);
   async function withBusy(btn, fn) {
     if (!btn || btn.classList.contains('busy')) return;
     btn.classList.add('busy');
-    const t = setTimeout(() => btn.classList.remove('busy'), 8000);
-    try { return await fn(); } catch { toast('처리하지 못했어요. 다시 눌러 주세요'); } finally { clearTimeout(t); btn.classList.remove('busy'); }
+    try { return await fn(); } catch { toast('처리하지 못했어요. 다시 눌러 주세요'); } finally { btn.classList.remove('busy'); }
   }
   let sessions = [];
   const transcripts = {};
@@ -494,16 +502,24 @@
     const draft = m.draft && editing?.items ? { label: m.draft.label, items: m.draft.items.map((it, i) => ({ ...it, text: (editing.items[i] || '').trim() })).filter((it) => it.text) } : null;
     const text = draft ? draft.items.map((it) => it.text).join('\n') : (editing?.text || '').trim();
     if (!text) return;
+    if (sessionById(m.to)?.tool === 'codex' && m.queue?.state === 'accepted' && !got(m) &&
+      !confirm('원래 메시지는 이미 전달 요청되어 아직 실행될 수 있습니다. 수정한 글은 새 메시지로 보내므로 작업이 중복될 수 있습니다. 그래도 보낼까요?')) return;
     const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, cid: cidFor('resend:' + m.id, text), ...(m.quotes ? { quotes: m.quotes } : {}), ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
-    const r = await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const saved = await r.json();
-    const failed = r.status === 502 && saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
-    if (!r.ok && !failed) throw new Error('resend');
-    doneCid('resend:' + m.id, text);
-    editing = null;
-    await poll();
-    render();
-    if (failed) toast(saved.queue.state === 'unknown' ? '메시지는 저장됐지만 전달 결과를 확인하지 못했습니다. 재시도하면 중복될 수 있습니다.' : '메시지는 저장됐지만 전달하지 못했습니다. 전달 재시도를 눌러 주세요.');
+    body.ack = 'stored';
+    pendingCids.add(body.cid);
+    try {
+      const r = await fetch('/__uifb/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const saved = await r.json();
+      const failed = saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
+      if (!r.ok && !failed) throw new Error('resend');
+      doneCid('resend:' + m.id, text);
+      rememberMessages([saved]);
+      pendingCids.delete(body.cid);
+      if (editing?.id === m.id) editing = null;
+      render();
+      poll();
+      if (failed) toast(saved.queue.state === 'unknown' ? '메시지는 저장됐지만 전달 결과를 확인하지 못했습니다. 재시도하면 중복될 수 있습니다.' : '메시지는 저장됐지만 전달하지 못했습니다. 전달 재시도를 눌러 주세요.');
+    } finally { pendingCids.delete(body.cid); }
   }
   const WIDGET_PREFIX = '대화창 › '; // 대화창 안을 찍은 위치의 선택자 앞에 붙인다
   // 세션마다 마지막으로 읽은 시각. 탭을 열고 맨 아래까지 봐야 그 세션이 읽음으로 바뀐다.
@@ -1060,7 +1076,7 @@
     const drawn = new Set();
     // 잇는 쌍: 질문 → 그에 대한 답들(남보라), 원문 → 그 원문에 단 답장(주황). 위에서부터 차례로 그려 겹치면 안쪽 줄로 비킨다.
     // 선은 받는 쪽 가장자리에 둔다: 내 메시지에서 세션 답으로 가는 연결은 왼쪽(세션 답 쪽), 세션 답에 단 내 답장 연결은 오른쪽(내 쪽).
-    const sideOf = (id) => { const m = messages.find((x) => x.id === id); return m?.from === 'user' || (m?.from === 'peer' && m.to === activeTab) ? 'left' : 'right'; };
+    const sideOf = (id) => { const m = refMessage(id); return m?.from === 'user' || (m?.from === 'peer' && m.to === activeTab) ? 'left' : 'right'; };
     const pairs = [...links.by].map(([from, tos]) => ({ from, tos, kind: 'answer' }));
     for (const m of messages) if (m.from === 'user' && (m.to === activeTab || m.session === activeTab)) for (const q of m.quotes || (m.replyTo ? [{ id: m.replyTo, refer: m.refer }] : [])) if (!q.refer) pairs.push({ from: q.id, tos: [m.id], kind: 'reply' });
     for (const p of links.peer || []) pairs.push({ ...p, kind: 'peer' }); // 세션끼리 주고받은 것은 따로 묶는다(같은 답 줄기와 섞이지 않게)
@@ -1121,6 +1137,7 @@
 
   function timeline(tab) {
     return [...messages, ...Object.values(transcripts).flat()]
+      .filter(m => !m.hiddenFailure && !pendingCids.has(m.cid))
       .filter((m) => tab === 'all' || ownerOf(m) === tab || (m.from === 'peer' && m.session === tab))
       .sort((a, b) => orderAt(a).localeCompare(orderAt(b)));
   }
@@ -1198,13 +1215,20 @@
   }
 
   let lastTab = null;
-  // 작업 중 표시의 글. 상태가 5분 넘게 그대로면 멈췄을 수 있다(긴 명령이거나, 답이 대화창으로 안 넘어왔거나). 사용자가 알 수 있게 적는다.
+  function typingClock(tab, st) {
+    const lastMessage = [...messages, ...Object.values(transcripts).flat()]
+      .filter(m => m.from === 'agent' && ownerOf(m) === tab && m.context !== 'side')
+      .reduce((latest, m) => Math.max(latest, Date.parse(m.at) || 0), 0);
+    const since = lastMessage || Date.parse(st.startedAt);
+    return { lastMessage, minutes: Number.isFinite(since) ? Math.max(0, Math.floor((Date.now() - since) / 60_000)) : 0 };
+  }
+  // 마지막 본 대화의 답변·중간 안내 이후 경과 시간. 도구 로그나 곁질문은 이 시간을 초기화하지 않는다.
   function fillTyping(ty, st) {
     const label = ty.querySelector('.tylabel');
     label.textContent = st.state === 'permission' ? st.detail || '터미널에서 승인을 기다리는 중' : `작업 중 · ${st.detail || '생각하는 중'}`;
-    const still = Math.floor((Date.now() - Date.parse(st.at)) / 60_000);
+    const { lastMessage, minutes: still } = typingClock(activeTab, st);
     ty.classList.toggle('stale', st.state === 'working' && still >= 5);
-    if (st.state === 'working' && still >= 5) label.textContent += ` · ${still}분째 그대로예요. 답이 안 오면 터미널을 확인해 주세요`;
+    if (st.state === 'working' && still >= 5) label.textContent += ` · ${lastMessage ? '마지막 메시지' : '작업 시작'} 후 ${still}분. 답이 안 오면 터미널을 확인해 주세요`;
   }
   function updateTyping() {
     const ty = $('msgs').querySelector('.typing');
@@ -1351,6 +1375,11 @@
       box.append(p);
     }
     if (showTab !== activeTab) { showCount = PAGE; showTab = activeTab; }
+    if (scrollToUnread) {
+      const posId = (readingPositions[activeTab] ?? prefs.pos?.[activeTab] ?? '').split('@')[0];
+      const index = items.findIndex(m => String(m.id) === posId);
+      if (index >= 0) showCount = Math.max(showCount, items.length - index);
+    }
     const oldestPin = Math.min(...pinsNow().map((id) => items.findIndex((m) => m.id === id)).filter((i) => i >= 0));
     if (Number.isFinite(oldestPin) && items.length - oldestPin > showCount) showCount = items.length - oldestPin; // 고정한 메시지는 대화 속에도 그려져 있어야 단추를 대신 누를 수 있다
     const shown = items.slice(-showCount);
@@ -1487,7 +1516,7 @@
         }
         // 아직 안 받아 간 메시지는 끼워넣기로 바꾸거나(세션이 작업 중일 때) 끼워넣기를 되돌릴 수 있다.
         const tgt = sessionById(m.to);
-        if (isHeld(m) && tgt && tgt.tool !== 'codex' && (m.interject || ['working', 'permission'].includes(tgt.status?.state))) {
+        if (isHeld(m) && tgt && (tgt.tool !== 'codex' || (tgt.watch?.steer && m.queue?.receipt && (m.queue.mode !== 'steer' || m.queue.state === 'failed'))) && (m.interject || ['working', 'permission'].includes(tgt.status?.state))) {
           const ij = document.createElement('button');
           ij.type = 'button';
           ij.className = 'rp';
@@ -1501,11 +1530,14 @@
           small.append(ij);
         }
         // 세션이 아직 안 받아 간 메시지는 보내기를 취소할 수 있다.
-        if (isHeld(m) && sessionById(m.to)?.tool !== 'codex') {
+        if (isHeld(m) && (tgt?.tool !== 'codex' || (tgt.watch?.cancel && m.queue?.receipt))) {
+          const recallBlocked = tgt?.tool === 'codex' && m.queue?.mode === 'steer' && m.queue.state !== 'failed';
+          const recallReason = !recallBlocked ? '' : m.queue.state === 'unknown' ? '전달 결과가 미확인이라 회수를 보장할 수 없습니다.' : m.queue.state === 'pending' ? '끼워넣기를 전달 처리 중입니다. 완료 후 상태를 확인해 주세요.' : '실행 중인 턴에 전달된 끼워넣기는 회수할 수 없습니다. 읽음 확인은 별도입니다.';
           const cx = document.createElement('button');
           cx.type = 'button';
           cx.className = 'rp';
           cx.textContent = '보내기 취소';
+          cx.disabled = recallBlocked; cx.title = recallReason;
           cx.onclick = () => withBusy(cx, async () => {
             const r = await fetch('/__uifb/api/chat-cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) }).catch(() => null);
             if (r && !r.ok) alert((await r.json().catch(() => ({}))).error || '취소하지 못했습니다.');
@@ -1518,6 +1550,7 @@
           bh.type = 'button';
           bh.className = 'rp';
           bh.textContent = '보류로';
+          bh.disabled = recallBlocked; bh.title = recallReason;
           bh.onclick = () => withBusy(bh, async () => {
             const r = await fetch('/__uifb/api/chat-cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) }).catch(() => null);
             if (!r?.ok) { alert((await r?.json().catch(() => ({})))?.error || '이미 읽혀서 보류로 돌리지 못했습니다.'); await poll(); render(); return; }
@@ -1526,18 +1559,32 @@
           small.append(bh);
         }
         if (['failed', 'unknown'].includes(m.queue?.state) && !got(m)) {
-          const retry = document.createElement('button');
-          retry.type = 'button';
-          retry.className = 'rp';
-          retry.textContent = m.queue.state === 'unknown' ? '중복 가능성 확인 후 재시도' : '전달 재시도';
-          retry.onclick = () => withBusy(retry, async () => {
-            const uncertain = m.queue.state === 'unknown';
-            if (uncertain && !confirm('이미 세션에 전달됐을 수 있습니다. 같은 작업이 중복될 수 있음을 확인하고 다시 보낼까요?')) return;
-            const r = await fetch('/__uifb/api/chat-retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, ...(uncertain ? { confirmUnknown: true } : {}) }) });
-            if (!r.ok) toast('전달하지 못했습니다. 메시지 상태를 확인해 주세요.');
-            await poll();
-          });
-          small.append(retry);
+          if (!m.cancelled) {
+            const retry = document.createElement('button');
+            retry.type = 'button';
+            retry.className = 'rp';
+            const ordinaryRetry = m.queue.state === 'failed' && m.queue.mode === 'steer';
+            retry.textContent = ordinaryRetry ? '일반 전송으로 재시도' : m.queue.state === 'unknown' ? '중복 가능성 확인 후 재시도' : '전달 재시도';
+            retry.onclick = () => withBusy(retry, async () => {
+              const uncertain = m.queue.state === 'unknown';
+              if (uncertain && !confirm('이미 세션에 전달됐을 수 있습니다. 같은 작업이 중복될 수 있음을 확인하고 다시 보낼까요?')) return;
+              const r = await fetch(ordinaryRetry ? '/__uifb/api/chat-interject' : '/__uifb/api/chat-retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, ...(ordinaryRetry ? { on: false } : {}), ...(uncertain ? { confirmUnknown: true } : {}) }) });
+              if (!r.ok) toast('전달하지 못했습니다. 메시지 상태를 확인해 주세요.');
+              await poll();
+            });
+            small.append(retry);
+          }
+          if (m.queue.state === 'failed') {
+            const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'rp'; remove.textContent = '실패 기록 삭제';
+            remove.title = '실패 기록만 숨깁니다. 요청을 다시 보내지 않습니다.';
+            const hide = async hidden => {
+              const response = await fetch('/__uifb/api/chat-hide-failed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id, hidden }) });
+              if (!response.ok) { toast('실패 기록을 변경하지 못했습니다.'); return false; }
+              await poll(); render(); return true;
+            };
+            remove.onclick = () => withBusy(remove, async () => { if (await hide(true)) toast('실패 기록을 삭제했습니다.', { label: '되돌리기', fn: () => hide(false) }); });
+            small.append(remove);
+          }
         }
         if (m.interject) { tag.textContent += ' · 끼워넣기'; tag.classList.add('now'); }
         if (editing?.id === m.id) {
@@ -1646,7 +1693,7 @@
       if (d.quotes?.length) fillWithQuotes(t, d.text, d.quotes, 'd' + d.id);
       else t.innerHTML = mdLite(d.text);
       // 답장·참고를 붙여 담았으면 보낸 말풍선과 같은 인용을 보인다(보내면 함께 간다).
-      const orig = !d.quotes?.length && d.replyTo && messages.find((x) => x.id === d.replyTo);
+      const orig = !d.quotes?.length && d.replyTo && refMessage(d.replyTo);
       const qb = orig ? document.createElement('span') : null;
       if (qb) {
         const who = quoteOf(orig).split(':')[0];
@@ -1688,7 +1735,7 @@
       mk('보관함', 'tostash', async () => { if (!(await saveEdit())) return; const to = draftLabel || null; await draftsApi({ action: 'update', id: d.id, hold: false, label: to }); toast('✓ 보관함으로 옮김', { label: `${to || '미분류'} 열기`, fn: () => openSheet(to || '') }); render(); });
       // 세션이 작업 중이면(Claude 세션) 지금 하던 일에 끼워 넣어 보낼 수도 있다.
       const tgt = sessionById(d.to);
-      if (tgt && tgt.tool !== 'codex' && ['working', 'permission'].includes(tgt.status?.state)) {
+      if (canInterject(tgt)) {
         mk('끼워넣기', 'now', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'send', ids: [d.id], plain: true, interject: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
       }
       mk('보내기', 'go', async () => { if (!(await saveEdit())) return; await draftsApi({ action: 'send', ids: [d.id], plain: true, device: deviceNow() }); render(); for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500); });
@@ -1701,13 +1748,13 @@
       moreClicked = false;
       keepPlace(); // 위에 붙은 만큼 내려 보던 메시지를 그 자리에 둔다
     } else if (scrollToUnread && !$('panel').hidden) {
-      // 안 읽은 답이 있으면 그 처음으로, 없으면 지난번(다른 화면 포함) 보던 메시지로, 그것도 없으면 맨 아래로.
-      const pos = prefs.pos?.[activeTab];
+      // Restore the reading anchor first; otherwise show unread messages or the bottom.
+      const pos = readingPositions[activeTab] ?? prefs.pos?.[activeTab];
       const [posId, posOff] = (pos || '').split('@');
-      const anchor = !newLine && posId && posId !== 'bottom' ? box.querySelector(`.msg[data-id="${CSS.escape(posId)}"]`) : null;
+      const anchor = posId && posId !== 'bottom' ? box.querySelector(`.msg[data-id="${CSS.escape(posId)}"]`) : null;
       // offsetTop 은 창 기준이라 머리말 높이만큼 어긋난다. 목록 기준 위치로 바꿔 계산한다.
       const topOf = (el) => el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-      box.scrollTop = newLine ? Math.max(0, topOf(newLine) - 8) : anchor ? Math.max(0, topOf(anchor) - (posOff === undefined ? 8 : Number(posOff) || 0)) : box.scrollHeight;
+      box.scrollTop = anchor ? Math.max(0, topOf(anchor) - (posOff === undefined ? 8 : Number(posOff) || 0)) : newLine ? Math.max(0, topOf(newLine) - 8) : box.scrollHeight;
       scrollToUnread = false;
     } else if (nearBottom) {
       // 새 답이 왔으면 그 답의 처음이 보이게 둔다(긴 답이면 끝부터 보이지 않게). 짧으면 어차피 맨 아래까지 내려간다.
@@ -1724,7 +1771,7 @@
     placeToBottom();
     const target = sessionById(activeTab);
     // 세션이 일하는 중이고 Claude 세션(중계 훅이 끼워 넣음)일 때만 "끼워넣기"를 보인다.
-    $('now').hidden = !(target && target.tool !== 'codex' && ['working', 'permission'].includes(target.status?.state));
+    $('now').hidden = !canInterject(target);
     $('mode').className = target?.watch?.active ? 'on' : 'off';
     $('mode').textContent = !target
       ? '등록된 세션이 없습니다.'
@@ -1795,23 +1842,32 @@
   $('msgs').addEventListener('scroll', placeToBottom);
   new ResizeObserver(placeToBottom).observe($('msgs'));
   $('toBottom').onclick = () => { const b = $('msgs'); b.scrollTo({ top: b.scrollHeight, behavior: 'smooth' }); };
-  // 보고 있던 위치(맨 위에 보이는 메시지)를 세션마다 기억한다. 스크롤을 멈추고 0.8초 뒤에 저장한다.
+  // Save after scrolling stops, and flush before closing or leaving the page.
   let posT = null;
+  let messageGap = 0;
+  let readingPositions = {};
+  try { readingPositions = JSON.parse(sessionStorage.getItem('__uifb_positions') || '{}') || {}; } catch {}
+  function rememberPosition() {
+    const box = $('msgs');
+    if ($('panel').hidden || !activeTab || !box.clientHeight || showDrafts) return;
+    messageGap = box.scrollHeight - box.scrollTop - box.clientHeight;
+    let id = 'bottom';
+    if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) {
+      const top = box.getBoundingClientRect().top;
+      const first = [...box.querySelectorAll('.msg[data-id]')].find(el => el.getBoundingClientRect().bottom > top + 4);
+      if (!first) return;
+      id = first.dataset.id + '@' + Math.round(first.getBoundingClientRect().top - top);
+    }
+    readingPositions[activeTab] = id;
+    try { sessionStorage.setItem('__uifb_positions', JSON.stringify(readingPositions)); } catch {}
+    if (prefs.pos?.[activeTab] !== id) { prefs.pos = { ...(prefs.pos || {}), [activeTab]: id }; savePrefs({ pos: { session: activeTab, id } }, true); }
+  }
   $('msgs').addEventListener('scroll', () => {
     clearTimeout(posT);
-    posT = setTimeout(() => {
-      const box = $('msgs');
-      if ($('panel').hidden || !activeTab) return;
-      let id = 'bottom';
-      if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) {
-        const top = box.getBoundingClientRect().top;
-        const first = [...box.querySelectorAll('.msg')].find((el) => el.getBoundingClientRect().bottom > top + 4);
-        // 메시지 번호와 그 메시지가 화면 맨 위에서 얼마나 위/아래에 있었는지 함께 저장한다(새로고침해도 같은 자리로).
-        if (first) id = first.dataset.id + '@' + Math.round(first.getBoundingClientRect().top - top);
-      }
-      if (prefs.pos?.[activeTab] !== id) { prefs.pos = { ...(prefs.pos || {}), [activeTab]: id }; savePrefs({ pos: { session: activeTab, id } }); }
-    }, 800);
+    posT = setTimeout(rememberPosition, 800);
   });
+  addEventListener('pagehide', rememberPosition);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) rememberPosition(); });
   document.addEventListener('visibilitychange', markSeenVisible);
 
   // 창이 닫혀 있을 때 새 답이 오면 버튼 위에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
@@ -1878,7 +1934,16 @@
         if (typeof at === 'string' && (!seen[id] || at > seen[id])) { seen[id] = at; seenFromServer = true; }
       }
       messages = c.messages || [];
+      for (const [id, saved] of savedMessages) {
+        if (messages.some(m => m.id === id)) savedMessages.delete(id);
+        else messages.push(saved);
+      }
       delivered = c.delivered || {};
+      dd.drafts ||= [];
+      for (const [id, saved] of savedDrafts) {
+        if (dd.drafts.some(d => d.id === id) || dd.trash?.some(d => d.id === id)) savedDrafts.delete(id);
+        else dd.drafts.push(saved);
+      }
       const dk = JSON.stringify(dd.drafts || []) + JSON.stringify(dd.trash || []);
       if (dk !== draftsKey) {
         draftsKey = dk;
@@ -1913,7 +1978,7 @@
       const all = timeline('all');
       const k = JSON.stringify(delivered) + ':' + messages.filter((m) => m.queue).map((m) => m.id + m.queue.state).join() + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + all.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.session || '') + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
-      const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? Math.floor((Date.now() - Date.parse(x.status.at)) / 60_000) : '')).join(',');
+      const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? typingClock(x.id, x.status).minutes : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
       // 읽음(seen)만 바뀐 것은 다시 그리지 않고 표시만 고친다(스크롤하며 읽을 때마다 전체를 다시 그리면 화면이 얼고 스크롤이 튄다).
       const seenK = JSON.stringify(seen);
@@ -1929,6 +1994,7 @@
 
   $('btn').onclick = () => {
     const open = $('panel').hidden;
+    if (!open) { clearTimeout(posT); rememberPosition(); }
     if (open) { scrollToUnread = true; showCount = PAGE; }
     $('panel').hidden = !open;
     $('btn').setAttribute('aria-expanded', String(open));
@@ -2381,6 +2447,7 @@
     if (st?.where) { where = st.where; setWhereLabel(); $('where').hidden = false; }
   } catch {}
 
+  function canInterject(session) { return !!session && (session.tool !== 'codex' || session.watch?.steer === true) && ['working', 'permission'].includes(session.status?.state); }
   let interjectNext = false, sideNext = false;
   $('now').onclick = () => { interjectNext = true; $('form').requestSubmit(); };
   // 입력칸이 비었으면 곁질문 묶음 목록을 열고 닫는다(#2097).
@@ -2395,36 +2462,47 @@
     interjectNext = sideNext = false;
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
-    const kind = (side ? 'side:' : 'chat:') + activeTab;
-    const body = { from: 'user', text, cid: cidFor(kind, text), to: activeTab, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...withQuotes(text), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const target = activeTab;
+    if (pendingComposers.has(target)) return;
+    const kind = (side ? 'side:' : 'chat:') + target;
+    const body = { from: 'user', text, cid: cidFor(kind, text), to: target, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...withQuotes(text), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    if (pendingCids.has(body.cid)) return;
+    if (!side) body.ack = 'stored';
     // 서버가 받은 뒤에 입력칸을 비운다. 못 보내면 글은 입력칸에 남고, 단추를 다시 누르면 된다.
     // 곁질문(#2055)은 세션에 보내지 않고 서버가 세션 사본에게 묻는다. 답은 10초쯤 뒤 이 칸에 온다.
     await withBusy(side ? $('side') : interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
+      pendingCids.add(body.cid);
+      pendingComposers.add(target);
+      let abortT;
       try {
-        // 단추가 8초 뒤 풀릴 때 요청도 끊어, 답 없이 멈춘 요청이 알림 없이 묻히지 않게 한다(같은 cid 라 다시 눌러도 한 번만 받는다).
+        // 저장 확인이 8초 안에 오지 않으면 요청을 끝내고 글을 보존한다. 전달 결과는 별도 상태로 확인한다.
         const ac = new AbortController();
-        const abortT = side ? 0 : setTimeout(() => ac.abort(), 8000); // 곁질문은 서버가 사본 답을 기다려 10초 넘게 걸린다
-        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', signal: ac.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: activeTab, sideGroup: sideOpen[activeTab], sideOn: sideOpen[activeTab] ? undefined : sideNew[activeTab] } : body) });
+        abortT = side ? 0 : setTimeout(() => ac.abort(), 8000); // 곁질문은 서버가 사본 답을 기다려 10초 넘게 걸린다
+        const r = await fetch(side ? '/__uifb/api/side' : '/__uifb/api/chat', { method: 'POST', signal: ac.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(side ? { ...body, session: target, sideGroup: sideOpen[target], sideOn: sideOpen[target] ? undefined : sideNew[target] } : body) });
         const saved = await r.json();
         clearTimeout(abortT);
-        const failed = r.status === 502 && saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
+        const failed = saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
         if (!r.ok && !failed) throw new Error('send');
-        if (side) { sideOpen[activeTab] = saved.sideGroup; delete sideNew[activeTab]; } // 새 묶음이면 그 묶음을 펼친다
+        if (side) { sideOpen[target] = saved.sideGroup; delete sideNew[target]; } // 새 묶음이면 그 묶음을 펼친다
+        rememberMessages([saved]);
+        pendingCids.delete(body.cid);
         doneCid(kind, text);
-        sentTexts.set(text, Date.now());
-        if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
-        revertAdjust();
-        where = null;
-        $('where').hidden = true;
-        saveWhere();
-        setReply(null);
-        await poll();
+        sentTexts.set(target + '\n' + text, Date.now());
+        if (activeTab === target && $('input').value.trim() === text) {
+          $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(target, '');
+          revertAdjust(); where = null; $('where').hidden = true; saveWhere(); setReply(null);
+        } else if (activeTab !== target && composed[target]?.text?.trim() === text) saveCompose(target, '');
         // 세션이 쉬는 중이면 감시 명령이 1초 안에 받아 간다. 3초마다 확인하면 그동안 "안 읽음"으로 보여서, 보낸 직후 몇 초는 자주 확인한다.
         for (let i = 1; i <= 8; i++) setTimeout(poll, i * 500);
         render();
+        poll();
         if (failed) toast(saved.queue.state === 'unknown' ? '메시지는 저장됐지만 전달 결과를 확인하지 못했습니다. 재시도하면 중복될 수 있습니다.' : '메시지는 저장됐지만 전달하지 못했습니다. 전달 재시도를 눌러 주세요.');
       } catch {
         toast('보내지 못했어요. 글은 입력칸에 남겨 뒀어요');
+      } finally {
+        clearTimeout(abortT);
+        pendingCids.delete(body.cid);
+        pendingComposers.delete(target);
       }
     });
   };
@@ -2648,14 +2726,14 @@
     }, { once: true });
   });
   {
-    let gap = 0;
-    $('msgs').addEventListener('scroll', () => { const b = $('msgs'); gap = b.scrollHeight - b.scrollTop - b.clientHeight; });
+    $('msgs').addEventListener('scroll', () => { const b = $('msgs'); if (!$('panel').hidden) messageGap = b.scrollHeight - b.scrollTop - b.clientHeight; });
     new ResizeObserver(() => {
       const b = $('msgs');
+      if ($('panel').hidden) return;
       // 말풍선 안에서 고치는 중이면(키보드가 올라와 목록이 줄어듦) 맨 아래로 끌어내리지 않고 고치는 칸이 보이게 둔다.
       const a = root.activeElement;
       if (a?.classList?.contains('edit') && b.contains(a)) { a.scrollIntoView({ block: 'nearest' }); return; }
-      if (gap < 40) b.scrollTop = b.scrollHeight;
+      if (messageGap < 40) b.scrollTop = b.scrollHeight;
     }).observe($('msgs'));
   }
   $('input').addEventListener('keydown', (e) => {
@@ -2750,23 +2828,40 @@
   let showDrafts = false;
   let pickFor = null;
   const checked = new Set();
+  const savedDrafts = new Map();
   const draftsApi = async (body) => {
     const r = await fetch('/__uifb/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const saved = await r.json();
+    if (!r.ok) throw new Error('drafts');
+    if (body.action === 'add' && saved.id) {
+      savedDrafts.set(saved.id, saved);
+      drafts = [...drafts.filter(d => d.id !== saved.id), saved];
+      poll();
+      return saved;
+    }
     await poll();
-    return r.json();
+    return saved;
   };
   const mine = () => drafts.filter((d) => d.to === activeTab && !d.hold); // 보관함(완전 나중)
   const holds = () => drafts.filter((d) => d.to === activeTab && d.hold); // 보류(대화창 맨 아래에 잠깐 대기)
   // 사용자 메시지에 붙는 읽음 표시. 세션이 받아 갔으면(delivered) "읽음", 아직이면 세션 상태에 따라 언제 읽는지 적는다.
   let delivered = {};
   function readMark(m) {
-    if (m.from !== 'user' || m.context === 'terminal' || !m.to) return '';
+    if (m.from !== 'user') return '';
+    // Native Codex user records are already part of the session input, independent of the widget queue.
+    if (m.context === 'terminal') return /^x[\w-]+$/.test(String(m.id)) && sessionById(m.session)?.tool === 'codex' ? ' · 읽음' : '';
+    if (!m.to) return '';
     if (m.cancelled) return ' · 보내기 취소함';
     if (got(m)) return ' · 읽음';
-    if (m.queue?.state === 'failed') return ' · 전달 실패 · 전달 재시도 가능';
-    if (m.queue?.state === 'unknown') return ' · 전달 결과 미확인 · 재전송 시 중복 가능';
-    if (m.queue?.state === 'pending') return ' · 전달 요청 중';
-    if (m.queue?.state === 'accepted') return ' · 전달 요청됨 · 읽음 확인 전';
+    if (m.queue?.state === 'failed') {
+      if (m.queue.mode !== 'steer') return ' · 전달 실패 · 전달 재시도 가능';
+      const reason = { thread_not_loaded: '대상 세션이 현재 서버에 연결되어 있지 않음', no_active_turn: '실행 중인 턴이 없음', steer_unavailable: '현재 환경에서 끼워넣기 연결 불가', steer_rejected: '끼워넣기 요청 거절됨', connection_lost: '끼워넣기 서버 연결 끊김' }[m.queue.diagnostic];
+      return ` · 끼워넣기 실패${reason ? `(${reason})` : ''} · 일반 전송으로 재시도 가능`;
+    }
+    if (m.queue?.state === 'unknown') return m.queue.mode === 'steer' ? ' · 끼워넣기 전달 결과 미확인 · 회수 확인 불가 · 재전송 시 중복 가능' : ' · 전달 결과 미확인 · 재전송 시 중복 가능';
+    if (m.queue?.changingTo === 'steer') return ' · 끼워넣기로 변경 중';
+    if (m.queue?.state === 'pending') return m.queue.mode === 'steer' ? ' · 끼워넣기 요청 중' : ' · 전달 요청 중';
+    if (m.queue?.state === 'accepted') return m.queue.mode === 'steer' ? ' · 실행 중인 턴에 전달됨 · 읽음 확인 전 · 회수 불가' : ' · 전달 요청됨 · 읽음 확인 전';
     const s = sessionById(m.to);
     if (s?.status?.state === 'working' || s?.status?.state === 'permission') return m.interject ? ' · 안 읽음(다음 단계에서 바로 읽음)' : ' · 안 읽음(작업 중이라 끝나면 읽음)';
     return s?.watch?.active ? ' · 안 읽음(곧 읽음)' : ' · 안 읽음';
@@ -3259,7 +3354,7 @@
   let swipe = null;
   $('msgs').addEventListener('touchstart', (e) => {
     const el = e.target.closest?.('.msg[data-id]');
-    const m = el && messages.find((x) => x.id === idOf(el.dataset.id));
+    const m = el && refMessage(idOf(el.dataset.id));
     swipe = e.touches.length === 1 && m && m.context !== 'side' && !isHeld(m) && !e.target.closest('.tbl, textarea, button')
       ? { el, m, x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now(), on: false } : null;
   }, { passive: true });
@@ -3341,27 +3436,28 @@
   async function saveLater(toDrafts) {
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
-    const kind = 'draft:' + activeTab;
+    const target = activeTab, label = draftLabel;
+    if (pendingComposers.has(target)) return;
+    const kind = 'draft:' + target;
     await withBusy($(toDrafts ? 'stash' : 'later'), async () => {
+    pendingComposers.add(target);
     try {
-      const r = await draftsApi({ action: 'add', cid: cidFor(kind, text), ...(toDrafts ? {} : { hold: true }), to: activeTab, ...withQuotes(text), label: draftLabel, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
+      const r = await draftsApi({ action: 'add', cid: cidFor(kind, text), ...(toDrafts ? {} : { hold: true }), to: target, ...withQuotes(text), label, context: CFG.context, round: CFG.round, device: deviceNow(), ...(CFG.pick ? { where: where || { url: here() } } : {}) });
       if (!r?.id) throw new Error('add');
       doneCid(kind, text);
-      sentTexts.set(text, Date.now());
+      sentTexts.set(target + '\n' + text, Date.now());
       flyToDrafts(text, toDrafts ? () => $('draftsBtn') : () => (folded.has(HOLD_FOLD) && $('msgs').querySelector('.holdhead')) || [...$('msgs').querySelectorAll('.msg.hold')].at(-1) || $('msgs'));
-      if ($('input').value.trim() === text) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(activeTab, ''); }
+      const clear = activeTab === target && $('input').value.trim() === text;
+      if (clear) { $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(target, ''); }
+      else if (activeTab !== target && composed[target]?.text?.trim() === text) saveCompose(target, '');
       render();
       $('msgs').scrollTop = $('msgs').scrollHeight;
-      revertAdjust();
-      where = null;
-      $('where').hidden = true;
-      saveWhere();
-      setReply(null);
+      if (clear) { revertAdjust(); where = null; $('where').hidden = true; saveWhere(); setReply(null); }
       updateDraftsBtn();
-      if (toDrafts) toast('✓ 보관함에 담음', { label: `${draftLabel || '미분류'} 열기`, fn: () => openSheet(draftLabel || '') });
+      if (toDrafts) toast('✓ 보관함에 담음', { label: `${label || '미분류'} 열기`, fn: () => { if (activeTab !== target) switchTab(target); openSheet(label || ''); } });
     } catch {
       toast('담지 못했어요. 글은 입력칸에 남겨 뒀어요');
-    }
+    } finally { pendingComposers.delete(target); }
     });
   }
   $('later').onclick = () => saveLater(false);
@@ -3381,7 +3477,7 @@
   let dragging = false;
   let tabSetAt = 0; // 이 화면에서 방금 탭을 바꿨으면 서버의 옛 값으로 되돌리지 않는다
   const device = () => (innerWidth < 768 ? 'mobile' : 'desktop');
-  const savePrefs = (patch) => fetch('/__uifb/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device(), ...patch }) }).then((r) => r.json()).then((p) => { prefs = p; }).catch(() => {});
+  const savePrefs = (patch, keepalive = false) => fetch('/__uifb/api/prefs', { method: 'POST', keepalive, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device(), ...patch }) }).then((r) => r.json()).then((p) => { prefs = p; }).catch(() => {});
   function applyPrefs(p) {
     prefs = p || {};
     // 처음 받을 때와, 이 화면에서 방금 고르지 않았을 때는 서버에 저장된 담을 분류를 바로 따른다.
@@ -3396,6 +3492,7 @@
     size = mine.panel || null;
     if (size) applySize(size);
     else { $('panel').style.width = ''; $('panel').style.height = ''; }
+    fitPanel(); // 위에서 height 를 비우면 모바일 키보드에 맞춘 높이도 지워져 입력칸이 키보드 뒤로 내려간다. 다시 맞춘다.
     inputBase = mine.inputH || null;
     if (!$('input').value) autoGrow($('input'));
     // 다른 화면에서 고른 세션 탭을 따른다(지금 이 화면에서 글을 쓰는 중이 아닐 때만).
@@ -3450,10 +3547,11 @@
   }
   // force: 탭을 바꿨을 때. 아니면 지금 쓰는 중(최근 3초 안에 입력)에는 덮어쓰지 않는다.
   function loadCompose(force) {
+    if (!force && pendingComposers.has(activeTab)) return;
     const el = $('input');
     let want = composed[activeTab]?.text || '';
     // 이미 보낸 글이 서버 임시 저장에 남아 있으면(먼저 출발한 저장이 비우기보다 늦게 도착한 경우) 되살리지 않고 서버도 비운다.
-    const sentAt = sentTexts.get(want.trim());
+    const sentAt = sentTexts.get(activeTab + '\n' + want.trim());
     // 새로고침 등으로 보낸 기록(sentTexts)이 사라졌어도, 같은 글이 2분 안에 이미 이 세션에 보내졌으면 되살리지 않는다.
     const justSent = want && messages.some((m) => m.from === 'user' && m.to === activeTab && m.text === shortMarks(want.trim()) && Date.now() - Date.parse(m.at) < 120_000);
     if (want && ((sentAt && Date.now() - sentAt < 10 * 60_000) || justSent)) { want = ''; saveCompose(activeTab, ''); }
@@ -3623,14 +3721,213 @@
   };
   $('reload').onclick = () => reloadNow($('reload'));
   $('rbtn').onclick = () => reloadNow($('rbtn'));
+  let modalMount = null;
+  const sheetOffers = new Map();
+  const restoreStyle = (el, value) => value === null ? el.removeAttribute('style') : el.setAttribute('style', value);
+  const visibleBox = el => el instanceof HTMLElement && el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const visibleMount = el => visibleBox(el) && !el.closest('[hidden], [aria-hidden="true"], [inert]');
+  const restoreModalMount = () => {
+    if (!modalMount) return true;
+    const saved = modalMount;
+    if (!saved.parent.isConnected || saved.parent.closest('[hidden], [aria-hidden="true"], [inert]')) {
+      host.dataset.uifbModalError = 'original-anchor-unavailable'; return false;
+    }
+    const scroll = [saved.parent.scrollLeft, saved.parent.scrollTop];
+    saved.parent.insertBefore(host, saved.next?.parentNode === saved.parent ? saved.next : null);
+    restoreStyle(host, saved.hostStyle); restoreStyle($('btn'), saved.buttonStyle); restoreStyle($('rbtn'), saved.refreshStyle);
+    saved.parent.scrollLeft = scroll[0]; saved.parent.scrollTop = scroll[1];
+    modalMount = null; delete host.dataset.uifbModalDock;
+    for (const [owner, row] of sheetOffers) if (!row.content.isConnected) sheetOffers.delete(owner);
+    return true;
+  };
+  const eligibleSheet = () => {
+    // A nested modal may legitimately hide its registered parent's Content.
+    // Only the leaf is a mount target; explicit ancestry stays known while hidden.
+    const live = [...sheetOffers.values()].filter(x => x.open && !x.retired && x.content.isConnected);
+    // Roles are negative barriers only, NEVER proof of owner, modality or order.
+    const unknown = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="listbox"], [data-slot="select-content"], dialog[open]')]
+      .some(el => !host.contains(el) && visibleBox(el) && !live.some(x => x.content === el));
+    if (unknown || !live.length) return null;
+    const roots = live.filter(x => x.parentOwner === null), leaves = live.filter(x => !live.some(child => child.parentOwner === x.owner));
+    if (roots.length !== 1 || leaves.length !== 1 || !visibleMount(leaves[0].content)) return null;
+    const seen = new Set();
+    let next = leaves[0];
+    while (next) {
+      if (seen.has(next.owner) || !next.modal) return null;
+      seen.add(next.owner);
+      if (next.parentOwner === null) break;
+      next = live.find(x => x.owner === next.parentOwner);
+      if (!next) return null;
+    }
+    return seen.size === live.length ? leaves[0] : null;
+  };
+  const moveSheetHost = offer => {
+    if (!visibleMount(host) || !visibleMount(offer.content)) return false;
+    if (!modalMount) modalMount = { parent: host.parentNode, next: host.nextSibling, hostStyle: host.getAttribute('style'),
+      buttonStyle: $('btn').getAttribute('style'), refreshStyle: $('rbtn').getAttribute('style'), target: null, owner: null, epoch: null };
+    const target = offer.content, previous = host.parentElement;
+    const scroll = [target.scrollLeft, target.scrollTop], previousScroll = previous && [previous.scrollLeft, previous.scrollTop];
+    const focused = root.activeElement;
+    if (host.parentNode !== target || target.firstChild !== host) target.insertBefore(host, target.firstChild);
+    host.style.cssText = modalMount.hostStyle || '';
+    host.style.position = 'static'; host.style.inset = 'auto'; host.style.display = 'flex'; host.style.flexWrap = 'wrap';
+    host.style.gap = '8px'; host.style.padding = '8px'; host.style.boxSizing = 'border-box'; host.style.width = '100%'; host.style.flexShrink = '0';
+    $('btn').style.cssText = 'position:static;left:auto;top:auto;bottom:auto;flex:0 0 auto;';
+    $('rbtn').style.cssText = 'position:static;left:auto;top:auto;bottom:auto;flex:0 0 36px;';
+    target.scrollLeft = scroll[0]; target.scrollTop = scroll[1];
+    if (previous && previousScroll) { previous.scrollLeft = previousScroll[0]; previous.scrollTop = previousScroll[1]; }
+    modalMount.target = target; modalMount.owner = offer.owner; modalMount.epoch = offer.epoch;
+    host.dataset.uifbModalDock = 'true';
+    if (focused && root.activeElement !== focused) { host.dataset.uifbModalError = 'focus-lost-on-move'; return false; }
+    if (!visibleMount(host)) { host.dataset.uifbModalError = 'modal-access-hidden'; return false; }
+    const button = $('btn').getBoundingClientRect(), refresh = $('rbtn').getBoundingClientRect(), box = target.getBoundingClientRect();
+    if ($('panel').hidden && (button.left < box.left || button.right > box.right || refresh.left < box.left || refresh.right > box.right ||
+      button.bottom > box.bottom || refresh.bottom > box.bottom)) { host.dataset.uifbModalError = 'insufficient-dock-space'; return false; }
+    delete host.dataset.uifbModalError;
+    return true;
+  };
+  const placeModalDock = () => {
+    if (!modalMount) return false;
+    const current = sheetOffers.get(modalMount.owner), target = eligibleSheet();
+    if (current && current.epoch === modalMount.epoch && target === current && host.parentNode === current.content) {
+      if (!visibleMount(host)) host.dataset.uifbModalError = 'modal-access-hidden';
+      return true;
+    }
+    // Never acquire or hand off asynchronously after a missed pre-hide offer.
+    if (modalMount.target.isConnected) {
+      host.dataset.uifbModalError = 'modal-retirement-pending'; return true;
+    }
+    if (restoreModalMount()) host.dataset.uifbModalError = 'detached-without-safe-release';
+    return Boolean(modalMount);
+  };
+  const sheetHostOffer = event => {
+    const offer = event.detail;
+    if (!overlayWatching) return;
+    if (!event.bubbles || !event.composed || event.cancelable || !offer || offer.version !== 1 || !['attach', 'update', 'retiring', 'release'].includes(offer.phase) ||
+      !offer.owner || typeof offer.owner !== 'object' || !offer.epoch || typeof offer.epoch !== 'object' ||
+      !(offer.content instanceof HTMLElement) || event.target !== offer.content || offer.mount !== offer.content ||
+      typeof offer.open !== 'boolean' || typeof offer.modal !== 'boolean' || typeof offer.respond !== 'function' ||
+      (offer.parentOwner !== null && (!offer.parentOwner || typeof offer.parentOwner !== 'object')) || offer.parentOwner === offer.owner) return;
+    const respond = accepted => { try { return offer.respond({ owner: offer.owner, epoch: offer.epoch, accepted }) === true; } catch { return false; } };
+    const old = sheetOffers.get(offer.owner);
+    if (offer.phase === 'retiring' || offer.phase === 'release') {
+      if (!old || old.epoch !== offer.epoch || old.content !== offer.content) { respond(false); return; }
+      old.retired = true; old.open = false;
+      // A terminal acknowledgement processes identity, not hiding/close proof.
+      if (offer.phase === 'release' && modalMount?.owner !== offer.owner) sheetOffers.delete(offer.owner);
+      placeModalDock(); respond(true); return;
+    }
+    if (offer.phase === 'update' && (!old || !old.claimed || old.retired || old.epoch !== offer.epoch || old.content !== offer.content) ||
+      old && old.epoch === offer.epoch && (old.retired || old.missed) ||
+      old && old.epoch !== offer.epoch && !old.retired && old.content.isConnected) { respond(false); return; }
+    const row = { owner: offer.owner, epoch: offer.epoch, parentOwner: offer.parentOwner, content: offer.content,
+      open: offer.open, modal: offer.modal, retired: false, claimed: false, missed: false };
+    sheetOffers.set(offer.owner, row);
+    if (!offer.open || !offer.modal || eligibleSheet() !== row) { row.missed = true; respond(false); placeModalDock(); return; }
+    const before = { parent: host.parentNode, next: host.nextSibling, hostStyle: host.getAttribute('style'),
+      buttonStyle: $('btn').getAttribute('style'), refreshStyle: $('rbtn').getAttribute('style'), mount: modalMount && { ...modalMount },
+      scroll: [host.parentNode.scrollLeft, host.parentNode.scrollTop], targetScroll: [offer.content.scrollLeft, offer.content.scrollTop] };
+    const placed = moveSheetHost(row);
+    if (placed && respond(true)) { row.claimed = true; return; }
+    row.missed = true;
+    if (!placed) respond(false);
+    // Undo only this synchronous attempt if no matching acknowledgement exists.
+    if (before.parent.isConnected) before.parent.insertBefore(host, before.next?.parentNode === before.parent ? before.next : null);
+    restoreStyle(host, before.hostStyle); restoreStyle($('btn'), before.buttonStyle); restoreStyle($('rbtn'), before.refreshStyle);
+    before.parent.scrollLeft = before.scroll[0]; before.parent.scrollTop = before.scroll[1];
+    offer.content.scrollLeft = before.targetScroll[0]; offer.content.scrollTop = before.targetScroll[1];
+    modalMount = before.mount;
+    if (!modalMount) delete host.dataset.uifbModalDock;
+    host.dataset.uifbModalError = placed ? 'offer-not-acknowledged' : host.dataset.uifbModalError || 'offer-declined';
+  };
+  document.addEventListener('uifb:sheet-host-offer', sheetHostOffer);
   const placeRbtn = () => {
+    if (placeModalDock()) return;
+    const btn = $('btn'), refresh = $('rbtn');
+    btn.style.removeProperty('left');
+    btn.style.removeProperty('top');
+    btn.style.removeProperty('bottom');
+    // Move only closed controls, never the intentionally open chat or app content.
+    if ($('panel').hidden) {
+      const vv = window.visualViewport;
+      const view = { left: vv?.offsetLeft || 0, top: vv?.offsetTop || 0,
+        width: vv?.width || innerWidth, height: vv?.height || innerHeight };
+      const dialogs = [...document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]')]
+        .filter(el => !el.closest('[hidden], [aria-hidden="true"]') && el.getClientRects().length &&
+          getComputedStyle(el).visibility !== 'hidden' && el.getAttribute('data-state') !== 'closed');
+      if (dialogs.length !== observedDialogs.length || dialogs.some((el, index) => el !== observedDialogs[index])) {
+        overlayDialogs.disconnect();
+        observedDialogs = dialogs;
+        for (const el of dialogs) overlayDialogs.observe(el);
+      }
+      const boxes = dialogs.map(el => el.getBoundingClientRect());
+      const original = btn.getBoundingClientRect(), width = Math.max(original.width, refresh.offsetWidth);
+      const height = original.height + 8 + refresh.offsetHeight, gap = 8;
+      const fits = (left, top) => left >= view.left + gap && top >= view.top + gap &&
+        left + width <= view.left + view.width - gap && top + height <= view.top + view.height - gap &&
+        boxes.every(box => left + width + gap <= box.left || left >= box.right + gap ||
+          top + height + gap <= box.top || top >= box.bottom + gap);
+      if (boxes.length && !fits(original.left, original.top)) {
+        const left = Math.max(view.left + gap, Math.min(original.left, view.left + view.width - width - gap));
+        const top = Math.max(view.top + gap, Math.min(original.top, view.top + view.height - height - gap));
+        const positions = boxes.flatMap(box => [[left, box.top - height - gap], [box.left - width - gap, top],
+          [box.right + gap, top], [left, box.bottom + gap]]);
+        const position = positions.find(([x, y]) => fits(x, y));
+        if (position) {
+          btn.style.left = position[0] + 'px';
+          btn.style.top = position[1] + 'px';
+          btn.style.bottom = 'auto';
+        }
+        // No new compact/hiding policy: constrained layouts require a separate scope decision.
+      }
+    } else { overlayDialogs.disconnect(); observedDialogs = []; }
     const b = $('btn').getBoundingClientRect();
     // 여는 단추 바로 아래 왼쪽 정렬. 여는 단추를 바닥에서 112px 띄워, 왼쪽 아래 구석의 앱 개발 도구 단추(예: Next.js 의 N)와 겹치지 않는다.
     $('rbtn').style.left = b.left + 'px';
     $('rbtn').style.top = b.bottom + 8 + 'px';
   };
-  new ResizeObserver(placeRbtn).observe($('btn'));
-  addEventListener('resize', placeRbtn);
+  let overlayFrame = 0, overlayWatching = false, observedDialogs = [];
+  const scheduleOverlay = () => {
+    // A React portal may already have detached the host's ancestor. Rehome the
+    // existing shadow tree before interpreting disconnection as widget disposal.
+    if (modalMount) placeModalDock();
+    if (!host.isConnected) {
+      stopOverlay();
+      document.removeEventListener('uifb:sheet-host-offer', sheetHostOffer);
+      removeEventListener('pagehide', stopOverlay);
+      removeEventListener('pageshow', watchOverlay);
+      return;
+    }
+    if (!overlayFrame) overlayFrame = requestAnimationFrame(() => { overlayFrame = 0; placeRbtn(); });
+  };
+  const overlayDialogs = new ResizeObserver(scheduleOverlay);
+  const overlayButton = new ResizeObserver(scheduleOverlay);
+  const overlayMutations = new MutationObserver(scheduleOverlay);
+  const overlayPanel = new MutationObserver(scheduleOverlay);
+  function stopOverlay() {
+    overlayWatching = false;
+    cancelAnimationFrame(overlayFrame); overlayFrame = 0;
+    overlayDialogs.disconnect(); overlayButton.disconnect(); overlayMutations.disconnect(); overlayPanel.disconnect();
+    observedDialogs = [];
+    removeEventListener('resize', scheduleOverlay);
+    window.visualViewport?.removeEventListener('resize', scheduleOverlay);
+    window.visualViewport?.removeEventListener('scroll', scheduleOverlay);
+  }
+  function watchOverlay() {
+    if (overlayWatching || !host.isConnected) return;
+    overlayWatching = true;
+    overlayButton.observe($('btn'));
+    overlayPanel.observe($('panel'), { attributes: true, attributeFilter: ['hidden'] });
+    overlayMutations.observe(document.body, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ['role', 'aria-modal', 'aria-hidden', 'data-state', 'hidden', 'open', 'style', 'class'] });
+    addEventListener('resize', scheduleOverlay);
+    window.visualViewport?.addEventListener('resize', scheduleOverlay);
+    window.visualViewport?.addEventListener('scroll', scheduleOverlay);
+    scheduleOverlay();
+  }
+  addEventListener('pagehide', stopOverlay);
+  addEventListener('pageshow', watchOverlay);
+  watchOverlay();
   // 대화창 새로고침은 세션이 원할 때만 한다(세션이 /api/reload-widgets 를 부르면 서버의 새로고침 번호가 바뀜).
   // 그러면 "새로고침 중" 안내를 덮어 띄우고 잠깐 뒤 새로고침한다. 보내는 중(단추가 도는 중)이거나 말풍선을 고치는 중이면 끝날 때까지 기다린다.
   // 입력칸 글과 보던 위치는 서버에 남아 새로고침 뒤에도 그대로다.

@@ -24,9 +24,31 @@ const server = http.createServer((req, res) => {
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('not found');
 });
+let stopPromise;
+function stop(code = 0) {
+  if (stopPromise) return stopPromise;
+  process.exitCode = code;
+  stopPromise = Promise.all([
+    chat.shutdown(),
+    new Promise((resolve, reject) => server.close(error => {
+      if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') reject(error);
+      else resolve();
+    })),
+  ]).then(() => undefined);
+  const observation = setTimeout(() => {
+    const pending = chat.cleanupSnapshot();
+    if (pending.length) console.error('chat_cleanup_pending', JSON.stringify({ count: pending.length, resources: pending.slice(0, 16) }));
+  }, 5000);
+  stopPromise.then(() => clearTimeout(observation), () => clearTimeout(observation));
+  // No exit/timeout can discard pending provider resources. These categories
+  // contain no prompt, token, command line or owner content.
+  stopPromise.catch(() => { process.exitCode = 1; console.error('chat_shutdown_failed'); });
+  return stopPromise;
+}
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { void stop(); });
 server.on('error', (err) => {
   console.error(err.code === 'EADDRINUSE' ? `포트 ${port} 이(가) 이미 쓰이고 있습니다. --port 로 바꾸세요.` : err.message);
-  process.exit(1);
+  void stop(1);
 });
 server.listen(port, auth.host, () => {
   console.log(`대화창 서버: http://localhost:${port}/`);

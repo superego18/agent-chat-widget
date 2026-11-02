@@ -12,10 +12,172 @@ import { formatMessage, pendingFor, wasDelivered } from '../scripts/chat-format.
 const session = { sessionId: 'test-thread', tool: 'codex', name: 'Test session' };
 const message = { from: 'user', to: session.sessionId, context: 'app', text: 'Check the heading', cid: 'test-message' };
 
+test('stored acknowledgement returns the durable message before provider delivery finishes', async t => {
+  const f = fixture(t);
+  try {
+    const request = f.api('/api/chat', { ...message, ack: 'stored' });
+    const result = await Promise.race([request, new Promise(resolve => setTimeout(() => resolve(null), 100))]);
+    assert.ok(result, 'saving must acknowledge without waiting for the provider helper');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.queue.state, 'pending');
+    assert.equal(f.read('chat.json').messages[0].id, result.body.id);
+    assert.equal(f.read('chat.json').messages[0].ack, undefined, 'transport option is not persisted as message content');
+    f.calls[0].child.emit('close', 1);
+    await new Promise(resolve => setImmediate(resolve));
+    const refreshed = await f.api('/api/chat');
+    assert.equal(refreshed.body.messages[0].queue.state, 'failed');
+    assert.equal(f.calls.length, 1, 'refreshing never resubmits the request');
+  } finally { for (const call of f.calls) call.child.emit('close', 1); }
+});
+
+test('failed record deletion is reversible and never resends the input', async t => {
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 1)); return child; });
+  const sent = await f.api('/api/chat', message);
+  assert.equal((await f.api('/api/chat-hide-failed', { id: sent.body.id, hidden: true })).status, 200);
+  assert.ok(f.read('chat.json').messages[0].hiddenFailure);
+  assert.equal((await f.api('/api/chat-retry', { id: sent.body.id })).status, 400, 'hidden records cannot silently retry');
+  assert.equal((await f.api('/api/chat-hide-failed', { id: sent.body.id, hidden: false })).status, 200);
+  assert.equal(f.read('chat.json').messages[0].hiddenFailure, undefined);
+  assert.equal(f.calls.length, 1);
+  const chat = f.read('chat.json'); chat.messages[0].queue.state = 'unknown'; fs.writeFileSync(path.join(f.root, 'chat.json'), JSON.stringify(chat));
+  assert.equal((await f.api('/api/chat-hide-failed', { id: sent.body.id, hidden: true })).status, 409);
+});
+
+for (const state of ['accepted', 'failed', 'unknown']) test(`pending ordinary input converts to steering without a duplicate message: ${state}`, async t => {
+  const steps = [];
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, {
+    cancelSend: async () => { steps.push('withdraw'); return { ok: true }; },
+    steerSend: async () => { steps.push('steer'); return { ok: state === 'accepted', state, mode: 'steer' }; }
+  });
+  const sent = await f.api('/api/chat', message);
+  const changed = await f.api('/api/chat-interject', { id: sent.body.id, on: true });
+  assert.equal(changed.status, state === 'accepted' ? 200 : 502);
+  assert.deepEqual(steps, ['withdraw', 'steer']);
+  const saved = f.read('chat.json').messages;
+  assert.equal(saved.length, 1); assert.equal(saved[0].id, sent.body.id);
+  assert.equal(saved[0].queue.receipt, sent.body.queue.receipt);
+  assert.equal(saved[0].queue.state, state); assert.equal(saved[0].interject, true);
+  assert.equal(f.calls.length, 1, 'conversion never queues a second ordinary input');
+  if (state === 'accepted') { await f.api('/api/chat-interject', { id: sent.body.id, on: true }); assert.deepEqual(steps, ['withdraw', 'steer'], 'repeat conversion does not steer twice'); }
+  if (state === 'failed') assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 200, 'definitely failed steering can move to hold');
+  else if (state === 'unknown') assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409, 'uncertain steering cannot pretend to be recalled');
+});
+
+for (const state of ['not_pending', 'unknown']) test(`failed withdrawal never steers the queued original: ${state}`, async t => {
+  let steers = 0;
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { cancelSend: async () => ({ ok: false, state }), steerSend: async () => { steers++; return { ok: true, state: 'accepted' }; } });
+  const sent = await f.api('/api/chat', message);
+  assert.equal((await f.api('/api/chat-interject', { id: sent.body.id, on: true })).status, state === 'unknown' ? 502 : 409);
+  assert.equal(steers, 0); assert.equal(f.read('chat.json').messages[0].interject, undefined);
+});
+
+test('definitely failed steering can revert to ordinary queue delivery', async t => {
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { steerSend: async () => ({ ok: false, state: 'failed', mode: 'steer' }) });
+  const sent = await f.api('/api/chat', { ...message, interject: true });
+  assert.equal((await f.api('/api/chat-interject', { id: sent.body.id, on: false })).status, 200);
+  const saved = f.read('chat.json').messages[0];
+  assert.equal(saved.interject, undefined); assert.equal(saved.queue.state, 'accepted'); assert.equal(saved.queue.mode, undefined);
+  assert.equal(f.calls.length, 1);
+});
+
+test('conversion serializes cancel/retry and preserves concurrent history', async t => {
+  let enter, finish;
+  const entered = new Promise(r => { enter = r; }), gate = new Promise(r => { finish = r; });
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { cancelSend: async () => { enter(); await gate; return { ok: true }; }, steerSend: async () => ({ ok: true, state: 'accepted', mode: 'steer' }) });
+  const sent = await f.api('/api/chat', message), changing = f.api('/api/chat-interject', { id: sent.body.id, on: true });
+  await entered;
+  assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409);
+  assert.equal((await f.api('/api/chat-retry', { id: sent.body.id, confirmUnknown: true })).status, 409);
+  assert.equal((await f.api('/api/chat-interject', { id: sent.body.id, on: true })).status, 409);
+  const chat = f.read('chat.json'); chat.messages.push({ id: 2, from: 'agent', text: 'Concurrent reply' }); fs.writeFileSync(path.join(f.root, 'chat.json'), JSON.stringify(chat));
+  finish(); assert.equal((await changing).status, 200);
+  assert.equal(f.read('chat.json').messages.length, 2);
+});
+
+for (const [label, outcome, status] of [['deleted', { ok: true }, 200], ['already consumed', { ok: false, state: 'not_pending' }, 409], ['unknown deletion', { ok: false, state: 'unknown' }, 502]]) test(`Codex cancellation persists only confirmed deletion: ${label}`, async t => {
+  const cancelled = [];
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { cancelSend: async (...args) => { cancelled.push(args); return outcome; } });
+  const sent = await f.api('/api/chat', message);
+  const r = await f.api('/api/chat-cancel', { id: sent.body.id });
+  assert.equal(r.status, status);
+  assert.equal(!!f.read('chat.json').messages[0].cancelled, outcome.ok);
+  assert.equal(cancelled.length, 1);
+  assert.equal(cancelled[0][1], session.sessionId);
+  assert.equal(cancelled[0][2], sent.body.queue.receipt);
+  assert.equal(f.calls.length, 1, 'cancellation never resends or interrupts');
+});
+
+test('Codex cancellation refuses received and interjected inputs before native deletion', async t => {
+  let calls = 0;
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { cancelSend: async () => { calls++; return { ok: true }; } });
+  const sent = await f.api('/api/chat', message);
+  fs.writeFileSync(path.join(f.root, 'delivered.json'), JSON.stringify({ _at: { [sent.body.id]: new Date().toISOString() } }));
+  assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409);
+  fs.writeFileSync(path.join(f.root, 'delivered.json'), '{}');
+  const chat = f.read('chat.json'); chat.messages[0].queue.mode = 'steer'; fs.writeFileSync(path.join(f.root, 'chat.json'), JSON.stringify(chat));
+  assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409);
+  assert.equal(calls, 0);
+});
+
+test('cancellation blocks concurrent retry and preserves messages written while deletion waits', async t => {
+  let enter, finish;
+  const entered = new Promise(r => { enter = r; }), gate = new Promise(r => { finish = r; });
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { cancelSend: async () => { enter(); await gate; return { ok: true }; } });
+  const sent = await f.api('/api/chat', message), chat = f.read('chat.json');
+  chat.messages[0].queue.state = 'unknown'; fs.writeFileSync(path.join(f.root, 'chat.json'), JSON.stringify(chat));
+  const cancelling = f.api('/api/chat-cancel', { id: sent.body.id }); await entered;
+  assert.equal((await f.api('/api/chat-retry', { id: sent.body.id, confirmUnknown: true })).status, 409);
+  assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409);
+  const current = f.read('chat.json'); current.messages.push({ id: 2, from: 'agent', text: 'Concurrent answer' }); fs.writeFileSync(path.join(f.root, 'chat.json'), JSON.stringify(current));
+  finish(); assert.equal((await cancelling).status, 200);
+  assert.equal(f.read('chat.json').messages.length, 2);
+  assert.ok(f.read('chat.json').messages[0].cancelled);
+  assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 200, 'completed cancellation is idempotent');
+});
+
+test('a missing recipient registration never turns an uncertain native queue into a local cancellation', async t => {
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; });
+  const sent = await f.api('/api/chat', message);
+  fs.unlinkSync(path.join(f.root, 'sessions', session.sessionId + '.json'));
+  assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409);
+  assert.equal(f.read('chat.json').messages[0].cancelled, undefined);
+});
+
+test('explicit Codex interjection uses steering while ordinary sends still use queue', async t => {
+  const steered = [];
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0, null)); return child; }, {
+    steerSend: async (...args) => { steered.push(args); return { ok: true, state: 'accepted', mode: 'steer', turnId: 'turn_live' }; }
+  });
+  const response = await f.api('/api/chat', { ...message, interject: true });
+  assert.equal(response.body.queue.mode, 'steer'); assert.equal(response.body.queue.turnId, 'turn_live');
+  assert.equal(steered.length, 1); assert.equal(f.calls.length, 0);
+  assert.equal(steered[0][1], session.sessionId);
+  assert.ok(steered[0][2].includes(message.text)); assert.ok(steered[0][2].includes('[uifb-receipt:' + response.body.queue.receipt + ']'));
+  await f.api('/api/chat', { ...message, interject: true });
+  assert.equal(steered.length, 1, 'repeated clicks do not steer twice');
+  const normal = await f.api('/api/chat', { ...message, cid: 'ordinary-send', text: 'Next task' });
+  assert.equal(normal.body.queue.state, 'accepted');
+  assert.equal(f.calls.length, 1); assert.equal(steered.length, 1);
+});
+
+for (const state of ['failed', 'unknown']) test(`steering ${state} is stored without falling back to queue`, async t => {
+  const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0, null)); return child; }, { steerSend: async () => ({ ok: false, state, mode: 'steer', error: 'steer_failed' }) });
+  const r = await f.api('/api/chat', { ...message, interject: true });
+  assert.equal(r.status, 502); assert.equal(r.body.queue.state, state); assert.equal(f.calls.length, 0);
+  if (state === 'unknown') {
+    assert.equal((await f.api('/api/chat-retry', { id: r.body.id })).status, 409);
+    assert.equal((await f.api('/api/chat-retry', { id: r.body.id, confirmUnknown: true })).status, 502);
+    assert.equal(f.calls.length, 0, 'an explicitly confirmed retry still uses steering');
+  }
+});
+
 // Exercise the HTTP handler without sockets, CLI processes, hooks or real sessions.
 function fixture(t, spawnImpl, extra = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-queue-test-'));
-  t.after(() => {
+  const handlers = [];
+  t.after(async () => {
+    for (const call of calls) call.child.emit('close', 1);
+    await Promise.all(handlers.map(h => h.shutdown()));
     assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
     assert.ok(path.basename(root).startsWith('widget-queue-test-'));
     fs.rmSync(root, { recursive: true, force: true });
@@ -38,8 +200,10 @@ function fixture(t, spawnImpl, extra = {}) {
     calls.push({ args, child });
     return spawnImpl ? spawnImpl(child, args) : child;
   };
-  t.mock.method(fs, 'watch', () => ({}));
-  const makeHandler = () => createChatHandler({ root, queueSpawn, ...extra });
+  t.mock.method(fs, 'watch', () => {
+    const watcher = new EventEmitter(); watcher.close = () => watcher.emit('close'); return watcher;
+  });
+  const makeHandler = () => { const h = createChatHandler({ root, queueSpawn, ...extra }); handlers.push(h); return h; };
   const handler = makeHandler();
   const read = (name) => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
   const api = (url, body, chat = handler) => new Promise((resolve) => {
@@ -51,6 +215,22 @@ function fixture(t, spawnImpl, extra = {}) {
   });
   return { root, bin, cli, handler, makeHandler, calls, read, api };
 }
+
+test('handler shutdown fences ingress, keeps pending cleanup and returns one join promise', async t => {
+  const f = fixture(t);
+  const stored = await f.api('/api/chat', { ...message, ack: 'stored' });
+  assert.equal(stored.status, 200);
+  const shutdown = f.handler.shutdown(); assert.strictEqual(f.handler.shutdown(), shutdown);
+  assert.equal((await f.api('/api/chat')).status, 503);
+  assert.ok(f.handler.cleanupSnapshot().some(x => x.resources.some(r => r.kind === 'child' && !r.closed)));
+  let joined = false; shutdown.then(() => { joined = true; });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(joined, false);
+  f.calls[0].child.emit('close', 1);
+  await shutdown;
+  assert.deepEqual(f.handler.cleanupSnapshot(), []);
+  assert.equal(f.calls.length, 1, 'shutdown does not launch or retry a provider');
+  assert.equal(f.read('chat.json').messages[0].text, message.text);
+});
 
 test('Codex receives native replies, references, partial quotes and mixed quote context', async t => {
   const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; });
@@ -386,4 +566,40 @@ test('Claude and noQueue callers keep synchronous addChat behavior without spawn
   assert.equal(claude.queue, undefined);
   assert.equal(f.calls.length, 0);
   assert.deepEqual(pendingFor([claude], session.sessionId, 0, {}), [claude]);
+});
+
+test('standalone adapter injected shutdown joins real HTTP and child close, not Windows console delivery', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-chat-adapter-'));
+  const entry = new URL('../scripts/chat-server.mjs', import.meta.url).href;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import http from 'node:http';
+    const entry=process.argv[1], root=process.argv[2], create=http.createServer;
+    http.createServer=(...args)=>{const server=create(...args);
+      server.once('listening',()=>process.send({event:'listening',port:server.address().port}));
+      server.once('close',()=>{process.send({event:'server-closed'});process.disconnect();});return server;};
+    process.on('message',message=>{if(message==='stop')process.emit('SIGTERM');});
+    process.argv=[process.execPath,entry,'--dir',root,'--port','0'];
+    try{await import(entry);}catch(error){process.send({event:'fixture-error',code:error.code||'import_failed'});process.exitCode=1;process.disconnect();}
+  `, entry, root], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  child.stdout.resume(); child.stderr.resume();
+  let serverClosed = false;
+  const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+  t.after(async () => {
+    if (child.connected) child.send('stop');
+    await closed; fs.rmSync(root, { recursive: true, force: true });
+  });
+  const ready = await new Promise((resolve, reject) => {
+    child.on('message', message => {
+      if (message.event === 'server-closed') serverClosed = true;
+      if (message.event === 'listening') resolve(message);
+      if (message.event === 'fixture-error') reject(new Error(message.code));
+    });
+    child.once('error', reject); child.once('close', () => reject(new Error('Adapter closed before listening')));
+  });
+  const response = await fetch(`http://127.0.0.1:${ready.port}/api/sessions`);
+  assert.equal(response.status, 200); await response.json();
+  child.send('stop');
+  assert.deepEqual(await closed, { code: 0, signal: null });
+  assert.equal(serverClosed, true);
+  await assert.rejects(fetch(`http://127.0.0.1:${ready.port}/api/sessions`));
 });

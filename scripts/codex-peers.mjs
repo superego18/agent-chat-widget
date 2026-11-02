@@ -1,7 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
-
-const cache = new Map();
+import { createHash } from 'node:crypto';
+import { createEvidenceContext, readEvidenceRegistry, readEvidenceRecords, takeEvidenceReceipt } from './codex-orchestration.mjs';
 
 export function nextOrcaBinding(previous, terminal, at) {
   if (!terminal || terminal === previous?.terminal) return previous;
@@ -30,29 +28,20 @@ function commands(payload) {
     .flatMap(m => { try { return [JSON.parse(m[1])]; } catch { return []; } });
 }
 
-export function readPeerSends(root, target) {
-  const sends = new Map(), keys = [];
-  let files;
-  try { files = fs.readdirSync(path.join(root, 'sessions')).sort(); } catch { return { sends, key: '' }; }
-  for (const file of files) {
-    let session, stat;
-    try {
-      session = JSON.parse(fs.readFileSync(path.join(root, 'sessions', file), 'utf8'));
-      if (session.tool !== 'codex' || session.sessionId === target.sessionId) continue;
-      stat = fs.statSync(session.path);
-    } catch { continue; }
-    const key = `${session.sessionId}:${session.name}:${stat.size}:${stat.mtimeMs}`;
-    keys.push(key);
-    let entries = cache.get(session.path);
-    if (entries?.key !== key) {
-      const items = [];
-      const records = fs.readFileSync(session.path, 'utf8').split('\n').map(line => { try { return JSON.parse(line); } catch { return null; } });
-      const calls = records.flatMap((record, index) => record?.type === 'response_item' ? commands(record.payload || {}).map((cmd, commandIndex) => ({ cmd, index, commandIndex, at: Date.parse(record.timestamp) })) : []);
-      for (const result of records.filter(Boolean).map(receipt).filter(Boolean).sort((a, b) => a.start - b.start)) {
+export function readPeerSends(root, target, context = createEvidenceContext()) {
+  const sends = new Map(), registry = readEvidenceRegistry(root, context);
+  sends.complete = registry.complete;
+  for (const session of registry.sessions) {
+    if (session.sessionId === target.sessionId) continue;
+    const source = readEvidenceRecords(root, session, context);
+    if (!source.complete) continue;
+    const items = [], records = source.rows;
+    const calls = records.flatMap(({ record, index }) => record?.type === 'response_item' ? commands(record.payload || {}).map((cmd, commandIndex) => ({ cmd, index, commandIndex, at: Date.parse(record.timestamp) })) : []);
+      for (const result of records.map(x => x.record).filter(Boolean).map(receipt).filter(Boolean).sort((a, b) => a.start - b.start)) {
         const call = calls.filter(c => c.cmd === result.cmd && !c.result && c.at <= result.start).at(-1);
         if (call) call.result = result;
       }
-      for (const [index, record] of records.entries()) {
+      for (const { index, record } of records) {
         if (!record) continue;
         if (record.type !== 'response_item' || !record.payload) continue;
         for (const [commandIndex, cmd] of commands(record.payload).entries()) {
@@ -71,21 +60,18 @@ export function readPeerSends(root, target) {
           }
         }
       }
-      entries = { key, items };
-      cache.set(session.path, entries);
-    }
-    for (const item of entries.items) {
+    for (const item of items) {
       if (item.terminal !== target.orca?.terminal && !(target.orca?.previousTerminals || []).some(b => b.terminal === item.terminal && Date.parse(item.at) <= Date.parse(b.until))) continue;
+      if (!takeEvidenceReceipt(context, source.key, item)) continue;
       const list = sends.get(item.text) || [];
-      list.push(item);
-      sends.set(item.text, list);
+      list.push(item); sends.set(item.text, list);
     }
   }
-  return { sends, key: `${JSON.stringify(target.orca || {})}:${keys.join('|')}` };
+  return { sends, key: createHash('sha256').update(JSON.stringify([target.orca, [...sends], registry.complete])).digest('hex'), complete: registry.complete };
 }
-
 // Cover the entire native input using ordered sends by one sender. Never discard owner-added text.
 export function matchPeerInput(sends, text, at, used) {
+  if (sends.complete === false) return [];
   const candidates = [...sends].map(([part, evidence]) => [part, evidence.filter(e => {
     const age = Date.parse(at) - Date.parse(e.at);
     return !used.has(e.id) && age >= 0 && age <= (e.accepted ? 86_400_000 : 60_000);

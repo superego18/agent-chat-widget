@@ -13,7 +13,11 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import zlib from 'node:zlib';
 import { readQueuePickups } from './codex-pickup.mjs';
+import { steerCodex } from './codex-steer.mjs';
 import { readCodexHistory, readStoredHistory } from './transcript-store.mjs';
+import { cancelCodexQueued } from './codex-cancel.mjs';
+import { createRpcCleanupOwner } from './codex-rpc.mjs';
+import { createEvidenceContext } from './codex-orchestration.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
 import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines, interruptedSince } from './chat-format.mjs';
 
@@ -29,20 +33,31 @@ const SHARED = {
 const MAX_BODY = 256 * 1024;
 const NOT_MINE = Symbol('not mine');
 
-export function createChatHandler({ root, auth = { key: null }, queueSpawn = spawn, queueTimeoutMs = 15000 }) {
+export function createChatHandler({ root, auth = { key: null }, queueSpawn = spawn, queueTimeoutMs = 15000, steerSend = steerCodex, cancelSend = cancelCodexQueued }) {
 if (!Number.isFinite(queueTimeoutMs) || queueTimeoutMs <= 0) throw new Error('queueTimeoutMs must be positive');
-let closing = false, shutdownPromise = null, reviewWatcher = null;
-const notificationTimers = new Set(), ownedCloses = new Set();
-function trackClose(child) {
-  const closed = new Promise(resolve => child.once('close', resolve));
-  ownedCloses.add(closed);
-  closed.then(() => ownedCloses.delete(closed));
-  return child;
-}
-function notificationTimeout(fn, ms) {
-  const timer = setTimeout(() => { notificationTimers.delete(timer); if (!closing) fn(); }, ms);
-  notificationTimers.add(timer);
-  return timer;
+const cleanupOwner = createRpcCleanupOwner();
+const ownedTimers = new Set();
+let closing = false, shutdownPromise;
+const ownedTimeout = (fn, ms) => {
+  if (closing) return null;
+  const timer = setTimeout(() => { ownedTimers.delete(timer); if (!closing) fn(); }, ms);
+  ownedTimers.add(timer); return timer;
+};
+const ownedInterval = (fn, ms) => {
+  if (closing) return null;
+  const timer = setInterval(() => { if (!closing) fn(); }, ms);
+  ownedTimers.add(timer); return timer;
+};
+const clearOwnedTimer = timer => { clearTimeout(timer); ownedTimers.delete(timer); };
+function shutdown() {
+  if (shutdownPromise) return shutdownPromise;
+  let resolveShutdown, rejectShutdown;
+  shutdownPromise = new Promise((resolve, reject) => { resolveShutdown = resolve; rejectShutdown = reject; });
+  closing = true;
+  for (const timer of ownedTimers) { clearTimeout(timer); clearInterval(timer); }
+  ownedTimers.clear();
+  Promise.all([cleanupOwner.shutdown(), ...queueRequests.values(), ...sideQueue.values()]).then(() => resolveShutdown(), rejectShutdown);
+  return shutdownPromise;
 }
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -80,7 +95,7 @@ function queueWatch(session) {
     (process.env.PATH || '').split(path.delimiter).some(dir => {
       try { fs.accessSync(path.join(dir, 'codex'), fs.constants.X_OK); return true; } catch { return false; }
     });
-  return { active: configured, configured, via: 'queue', handlesDone: true,
+  return { active: configured, configured, via: 'queue', handlesDone: true, steer: configured && typeof WebSocket === 'function', cancel: configured && typeof WebSocket === 'function',
     agent: session.agent || session.name, session: session.sessionId };
 }
 
@@ -189,6 +204,7 @@ const reloadFile = path.join(root, 'reload.json');
 let reloadToken = (() => { try { return JSON.parse(fs.readFileSync(reloadFile, 'utf8')).r || 0; } catch { return 0; } })();
 const answerPushed = new Set(); // 답장 알림으로 이미 알린 세션 답 번호(작업 끝 알림이 같은 글로 한 번 더 가지 않게)
 async function pushAll(data, kind, skip) {
+  if (closing) return 0;
   const subs = readSubs().filter((s) => {
     if (!kind) return true;
     const p = prefsOf(s);
@@ -227,7 +243,7 @@ function notifyStatus(s, prev) {
   if (s.state === 'permission' && prev.state !== 'permission') pushAll({ title: `${name} 승인 필요`, body: s.detail || '터미널에서 승인을 기다리는 중', tag: `uifb-perm-${s.session}`, session: s.session }, 'permission');
   if (s.state === 'idle' && busy(prev.state)) {
     // 마지막 답은 작업이 끝나는 것과 거의 같은 때 기록되므로 잠깐 기다렸다가 그 답을 알림 본문에 담는다.
-    notificationTimeout(() => {
+    ownedTimeout(() => {
       const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
       // 마지막 답을 이미 답장 알림으로 보냈으면, 답장 알림을 켠 기기에는 작업 끝 알림을 또 보내지 않는다(같은 글이 두 번 오지 않게).
       const dup = s.lastPushed || (!s.last && last && answerPushed.has(last.id));
@@ -262,21 +278,23 @@ function codexStatus(file) {
       if (!tool && (t === 'function_call' || t === 'custom_tool_call')) tool = String(o.payload.name || '');
       if (t === 'task_complete') return { state: 'idle', last: o.payload.last_agent_message || '', at: st.mtime.toISOString() };
       if (t === 'turn_aborted') return { state: 'idle', at: st.mtime.toISOString() };
-      if (t === 'task_started') return { state: 'working', detail: codexToolLabel(tool), at: st.mtime.toISOString() };
+      if (t === 'task_started') return { state: 'working', detail: codexToolLabel(tool), at: st.mtime.toISOString(), startedAt: o.timestamp };
     }
   } catch {}
   return null;
 }
 const codexSeen = new Map(); // 세션마다 마지막으로 본 대화 기록 상태(처음 본 상태는 알리지 않는다)
 const codexAnswered = new Map(); // 세션마다 답장 알림을 보낸 마지막 Codex 답 번호
-const answerPoll = setInterval(() => {
+ownedInterval(() => {
+  const evidence = createEvidenceContext();
   let files = [];
-  try { files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith('.json')); } catch {}
-  for (const f of files) {
-    const s = readJsonSafe(path.join(sessionsDir, f));
+  try { files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json')); } catch {}
+  // Receipt-evidence budgets must not restrict answer/status monitoring.
+  for (const file of files) {
+    const s = readJsonSafe(path.join(sessionsDir, file));
     if (s?.tool !== 'codex' || !s.path || !sid(s.sessionId)) continue;
     // 새 최종 답(중간 안내 빼고)이 대화 기록에 생기면 답장 알림을 보낸다(Claude 세션이 답을 남길 때와 같게).
-    const answers = readTranscript(s.sessionId).items.filter((m) => m.from === 'agent' && !m.interim);
+    const answers = readTranscript(s.sessionId, evidence).items.filter((m) => m.from === 'agent' && !m.interim);
     const lastAns = answers.at(-1)?.id ?? null, seenAns = codexAnswered.get(s.sessionId);
     if (seenAns === undefined) codexAnswered.set(s.sessionId, lastAns); // 서버를 띄웠을 때 이미 있던 답은 알리지 않는다
     else if (lastAns !== seenAns) {
@@ -295,12 +313,12 @@ const answerPoll = setInterval(() => {
     codexSeen.set(s.sessionId, key);
     const prev = readStatus(s.sessionId);
     if (before !== undefined && (now.state !== prev.state || (now.detail || '') !== (prev.detail || ''))) notifyStatus({ session: s.sessionId, ...now }, prev);
-    fs.writeFileSync(path.join(root, `status-${s.sessionId}.json`), JSON.stringify({ state: now.state, detail: now.detail || '', at: now.at }) + '\n');
+    fs.writeFileSync(path.join(root, `status-${s.sessionId}.json`), JSON.stringify({ state: now.state, detail: now.detail || '', at: now.at, ...(now.startedAt ? { startedAt: now.startedAt } : {}) }) + '\n');
   }
 }, 2000).unref();
 // 오래 멈춤: "작업 중"이 5분 넘게 그대로면 그 상태에 한 번 알린다.
 const staleSent = new Map();
-const stalePoll = setInterval(() => {
+ownedInterval(() => {
   for (const x of listSessions()) {
     const st = x.status;
     if (st?.state !== 'working' || !st.at || Date.now() - Date.parse(st.at) < 5 * 60_000 || staleSent.get(x.id) === st.at) continue;
@@ -311,14 +329,17 @@ const stalePoll = setInterval(() => {
 // 비교 페이지 준비: .ui-feedback 에 review*.html 이 새로 생기면 알린다.
 try {
   const known = new Set(fs.readdirSync(root).filter((f) => /^review.*\.html$/.test(f)));
-  reviewWatcher = fs.watch(root, (ev, f) => {
+  const watcher = fs.watch(root, (ev, f) => {
     if (!f || !/^review.*\.html$/.test(f) || known.has(f) || !fs.existsSync(path.join(root, f))) return;
     known.add(f);
-    notificationTimeout(() => {
+    ownedTimeout(() => {
       const title = /<title>([^<]*)<\/title>/.exec(fs.readFileSync(path.join(root, f), 'utf8'))?.[1] || f;
       pushAll({ title: '비교 페이지 준비', body: `${title} — 평가할 차례예요`, tag: `uifb-review-${f}` }, 'review');
     }, 1500);
   });
+  const record = cleanupOwner.open(() => {});
+  try { record.track('watcher', watcher, () => watcher.close()); }
+  finally { record.seal(); }
 } catch {}
 
 // ── 세션끼리 주고받은 메시지 ──
@@ -448,7 +469,7 @@ function addChat(msg) {
   // keepUnread: 사용자가 직접 쓴 글이 아니라 서버가 대신 남기는 글(평가 완료 요약)은 읽음으로 치지 않는다(#1874).
   const talkedTo = entry.from === 'user' && !msg.keepUnread ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
-  if (entry.from === 'user' && entry.to && !msg.keepUnread) notificationTimeout(() => nudge(entry.to), 2000);
+  if (entry.from === 'user' && entry.to && !msg.keepUnread) ownedTimeout(() => nudge(entry.to), 2000);
   return entry;
 }
 
@@ -723,6 +744,7 @@ function handleDrafts(req) {
 
 const QUEUE_PREFIX = '[대화/피드백 · ';
 const queueRequests = new Map();
+const cancelling = new Set();
 
 function saveQueue(entry, outcome, expectedAttempt) {
   const chat = readChat();
@@ -740,6 +762,12 @@ async function sendChatEntry(res, entry) {
 
 // 페이지 메시지를 실행 중인 Codex 세션에 넣는다. 쉬고 있으면 바로 새 턴이 시작되고, 작업 중이면 그 턴이 끝난 뒤 처리된다.
 // Pass arguments directly, including on Windows; shell shims can corrupt quotes and newlines.
+function referenceMessages(sessionId) {
+  const evidence = createEvidenceContext();
+  const outgoing = listSessions().filter(s => s.id !== sessionId)
+    .flatMap(s => readTranscript(s.id, evidence).items.filter(m => m.from === 'peer' && m.session === sessionId));
+  return [...readChat().messages, ...readTranscript(sessionId, evidence).items, ...outgoing];
+}
 function queueToCodex(session, entry) {
   const where = entry.where?.url || entry.where?.selector
     ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.component ? ' · 컴포넌트 ' + entry.where.component : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}${adjustText(entry.where) ? '\n' + adjustText(entry.where) : ''}`
@@ -747,13 +775,16 @@ function queueToCodex(session, entry) {
   const src = (entry.context === 'app' ? '앱 화면' : '비교 페이지') + (entry.device === 'mobile' ? ' · 모바일' : entry.device === 'desktop' ? ' · 데스크톱' : '');
   const attempt = randomUUID();
   const receipt = entry.queue?.receipt || randomUUID();
-  saveQueue(entry, { state: 'pending', attempt, receipt });
+  saveQueue(entry, { state: 'pending', attempt, receipt, ...(entry.interject ? { mode: 'steer' } : {}) });
   // 답장·참고로 붙인 원문도 함께 넣는다(Claude 세션이 받는 글과 같게). Codex 답은 대화 기록에서 찾는다.
   // Outgoing native peer messages are stored in the recipient's transcript but shown in both tabs.
-  const outgoing = listSessions().filter(s => s.id !== session.sessionId)
-    .flatMap(s => readTranscript(s.id).items.filter(m => m.from === 'peer' && m.session === session.sessionId));
-  const quotes = quoteLines(entry, [...readChat().messages, ...readTranscript(session.sessionId).items, ...outgoing]);
-  const request = queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`)
+  const quotes = quoteLines(entry, referenceMessages(session.sessionId));
+  const text = `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`;
+  const delivery = entry.interject
+    ? Promise.resolve().then(() => steerSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, text, { timeoutMs: queueTimeoutMs, clientUserMessageId: receipt, cleanupOwner }))
+      .catch(() => ({ ok: false, state: 'unknown', mode: 'steer', error: 'steer_failed' }))
+    : queueText(session, text);
+  const request = delivery
     .then((outcome) => {
       saveQueue(entry, { ...outcome, attempt, receipt }, attempt);
       if (queueRequests.get(entry.id) === request) queueRequests.delete(entry.id);
@@ -781,15 +812,20 @@ function queueText(session, message) {
   // Resolve once. Return only diagnostic categories, never raw stderr or prompt fragments.
   return new Promise((resolve) => {
     let settled = false;
-    let timer;
-    const finish = (outcome) => { if (!settled) { settled = true; clearTimeout(timer); resolve(outcome); } };
+    let timer, record;
+    const finish = (outcome) => {
+      if (!settled) { settled = true; clearOwnedTimer(timer); resolve(outcome); }
+      record?.seal(); record?.cleanup();
+    };
     try {
+      if (closing) { finish({ ok: false, state: 'failed', error: 'spawn_failed' }); return; }
       const command = process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] };
       if (!command) { finish({ ok: false, state: 'failed', error: 'spawn_failed', diagnostic: 'cli_not_found' }); return; }
-      const child = trackClose(queueSpawn(command.file, [...command.prefix, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }));
-      timer = setTimeout(() => {
+      record = cleanupOwner.open(() => finish({ ok: false, state: 'unknown', error: 'queue_interrupted' }));
+      const child = queueSpawn(command.file, [...command.prefix, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      record.track('child', child, () => child.kill?.());
+      timer = ownedTimeout(() => {
         finish({ ok: false, state: 'unknown', error: 'queue_timeout' });
-        try { child.kill?.(); } catch {}
       }, queueTimeoutMs);
       let stderr = '';
       child.stderr?.setEncoding('utf8');
@@ -818,7 +854,8 @@ function askSide(s, q) {
   sideQueue.set(q.sideGroup, run);
 }
 function runSide(s, q, done) {
-  const all = [...readChat().messages, ...readTranscript(s.sessionId).items], on = q.sideOn && all.find((m) => m.id === q.sideOn);
+  if (closing) { done(); return; }
+  const all = referenceMessages(s.sessionId), on = q.sideOn && all.find((m) => m.id === q.sideOn);
   const prompt = [SIDE_HEAD, ...(on ? [`이 질문은 대화의 #${on.id} 메시지에 대한 것입니다: "${on.text.slice(0, 2000)}"`] : []), ...formatMessage(q, all)].join('\n');
   const settings = path.join(root, 'side-settings.json');
   fs.writeFileSync(settings, '{"disableAllHooks":true}');
@@ -835,16 +872,17 @@ function runSide(s, q, done) {
   const child = process.platform === 'win32'
     ? spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', "$ErrorActionPreference = 'Stop'; [Console]::InputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding; $OutputEncoding = [Console]::OutputEncoding; $sideArgs = ConvertFrom-Json $env:UIFB_SIDE_ARGS; & $env:UIFB_SIDE_COMMAND @sideArgs; exit $LASTEXITCODE"], { ...options, env: { ...process.env, UIFB_SIDE_COMMAND: command, UIFB_SIDE_ARGS: JSON.stringify(args) } })
     : spawn(command, args, options);
+  const record = cleanupOwner.open(() => {});
+  record.track('child', child, () => child.kill()); record.seal();
   let out = '', err = '';
   child.stdout.on('data', (b) => { out += b; });
   child.stderr.on('data', (b) => { err += b; });
-  const timer = setTimeout(() => child.kill(), 5 * 60_000);
+  const timer = ownedTimeout(() => child.kill(), 5 * 60_000);
   let replied = false;
   const reply = (text) => { if (replied) return; replied = true; addChat({ from: 'agent', session: s.sessionId, context: 'side', sideGroup: q.sideGroup, agent: s.agent || s.name, text: `<re ${q.id}> ${text}` }); done(); };
-  child.on('error', (e) => { clearTimeout(timer); reply(`곁질문을 실행하지 못했습니다: ${e.message}`); });
-  trackClose(child);
+  child.on('error', (e) => { clearOwnedTimer(timer); reply(`곁질문을 실행하지 못했습니다: ${e.message}`); });
   child.on('close', (code) => {
-    clearTimeout(timer);
+    clearOwnedTimer(timer);
     if (replied) return;
     let text = '', id = '';
     try {
@@ -854,27 +892,28 @@ function runSide(s, q, done) {
         text = ev.filter((o) => o.type === 'item.completed' && o.item?.type === 'agent_message').at(-1)?.item.text || '';
       } else ({ result: text = '', session_id: id = '' } = JSON.parse(out));
     } catch {}
-    if (!fork && sid(id)) { const g = readJsonSafe(sideFile) || {}; g[q.sideGroup] = { session: s.sessionId, fork: id }; writeJsonAtomic(sideFile, g); }
+    if (code === 0 && text.trim() && !fork && sid(id)) { const g = readJsonSafe(sideFile) || {}; g[q.sideGroup] = { session: s.sessionId, fork: id }; writeJsonAtomic(sideFile, g); }
     reply(text.trim() || `곁질문 답을 받지 못했습니다(종료 코드 ${code}). ${(err || out).trim().slice(-300)}`);
   });
   child.stdin.end(prompt);
 }
 
-function readTranscript(id) {
+function readTranscript(id, evidence = createEvidenceContext()) {
   const session = findSession(id);
   if (!session) return { items: [] };
   if (session.tool !== 'codex') return { ...readStoredHistory(root, id), via: 'hooks' };
-  return readCodexHistory(root, session);
+  return readCodexHistory(root, session, evidence);
 }
 
 function readWatchFile(name) {
   try {
     const watch = JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
     if (watch.state === 'handling') {
-      if (Date.parse(watch.until) < Date.now()) return { active: false };
+      const until = Date.parse(watch.until);
+      if (!Number.isFinite(until) || until <= Date.now()) return { active: false };
       return { active: true, handling: true, agent: watch.agent, session: watch.session, handlesDone: !!watch.handlesDone, round: watch.round };
     }
-    if (watch.expiresAt && Date.parse(watch.expiresAt) < Date.now()) return { active: false };
+    if (watch.expiresAt && (!Number.isFinite(Date.parse(watch.expiresAt)) || Date.parse(watch.expiresAt) <= Date.now())) return { active: false };
     process.kill(watch.pid, 0);
     return { active: true, agent: watch.agent, session: watch.session, handlesDone: !!watch.handlesDone, round: watch.round, expiresAt: watch.expiresAt };
   } catch {
@@ -898,6 +937,7 @@ function readReviewWatch(sessionKey, round) {
   // 감시가 라운드를 정했으면 그 라운드 페이지에만 보인다. 다른 라운드·비교 페이지에 "자동 이어가기 켜짐"으로 잘못 뜨지 않게.
   // 페이지가 받을 세션을 정했으면 그 세션의 감시만 본다(다른 세션의 감시로 "켜짐"이 뜨지 않게 #2113).
   const s = findSessionByKey(sessionKey);
+  if (sessionKey && !s) return { active: false };
   const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone && (!s || w.session === s.sessionId) && (w.round == null || !round || String(w.round) === round));
   if (live[0]) return live[0];
   // 평가 완료는 대화로도 그 세션에 가므로(onDone → addChat), 그 세션의 대화 감시가 살아 있어도 이어진다.
@@ -908,6 +948,7 @@ function readReviewWatch(sessionKey, round) {
 }
 
 function inner(req, res, url) {
+  if (closing) return send(res, 503, { error: 'unavailable' });
   // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 비교 페이지가 같은 파일을 쓴다.
   if (SHARED[url.pathname]) {
     const [file, type] = SHARED[url.pathname];
@@ -1175,12 +1216,29 @@ function inner(req, res, url) {
       try { const input = JSON.parse(body); id = Number(input.id); confirmUnknown = input.confirmUnknown === true; } catch {}
       const entry = readChat().messages.find((m) => m.id === id);
       const session = entry && findSession(entry.to);
-      if (!entry || entry.from !== 'user' || entry.cancelled || session?.tool !== 'codex') return send(res, 400, { error: '재시도할 메시지가 없습니다.' });
+      if (cancelling.has(id)) return send(res, 409, { error: '취소 처리 중입니다. 완료 후 다시 시도해 주세요.' });
+      if (!entry || entry.from !== 'user' || entry.cancelled || entry.hiddenFailure || session?.tool !== 'codex') return send(res, 400, { error: '재시도할 메시지가 없습니다.' });
       const d = readDelivered();
       if (d._at?.[id] || !['failed', 'unknown'].includes(entry.queue?.state)) return send(res, 409, { error: '재시도할 수 없는 메시지입니다.' });
       if (entry.queue.state === 'unknown' && !confirmUnknown) return send(res, 409, { error: '이미 전달됐을 수 있습니다. 중복 전송 가능성을 확인해야 합니다.' });
       queueToCodex(session, entry);
       sendChatEntry(res, entry);
+    });
+    return;
+  }
+
+  if (url.pathname === '/api/chat-hide-failed' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > MAX_BODY) req.destroy(); });
+    req.on('end', () => {
+      let id, hidden;
+      try { ({ id, hidden } = JSON.parse(body)); } catch {}
+      const chat = readChat(), entry = chat.messages.find(m => m.id === Number(id));
+      if (!entry || entry.from !== 'user' || typeof hidden !== 'boolean') return send(res, 400, { error: '삭제할 실패 기록을 확인하지 못했습니다.' });
+      if (hidden && (entry.queue?.state !== 'failed' || readDelivered()._at?.[entry.id])) return send(res, 409, { error: '실패가 확인된 기록만 삭제할 수 있습니다.' });
+      if (hidden) entry.hiddenFailure = new Date().toISOString(); else delete entry.hiddenFailure;
+      writeJsonAtomic(chatFile, chat);
+      send(res, 200, { ok: true });
     });
     return;
   }
@@ -1191,17 +1249,34 @@ function inner(req, res, url) {
       body += chunk;
       if (body.length > MAX_BODY) req.destroy();
     });
-    req.on('end', () => {
+    req.on('end', async () => {
       let id;
       try { id = Number(JSON.parse(body).id); } catch {}
-      const chat = readChat();
-      const m = chat.messages.find((x) => x.id === id);
-      const d = readDelivered();
-      if (!m || m.from !== 'user' || !m.to || m.context === 'terminal') return send(res, 400, { error: '취소할 수 없는 메시지입니다.' });
-      if (m.id <= (d[m.to] || 0) || d._at?.[m.id] || findSession(m.to)?.tool === 'codex') return send(res, 409, { error: '세션이 이미 받아 가서 취소할 수 없습니다.' });
-      m.cancelled = new Date().toISOString();
-      writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
-      send(res, 200, { ok: true });
+      if (cancelling.has(id)) return send(res, 409, { error: '취소 처리 중입니다.' });
+      cancelling.add(id);
+      try {
+        await queueRequests.get(id);
+        let chat = readChat();
+        let m = chat.messages.find((x) => x.id === id);
+        const d = readDelivered();
+        if (!m || m.from !== 'user' || !m.to || m.context === 'terminal') return send(res, 400, { error: '취소할 수 없는 메시지입니다.' });
+        const session = findSession(m.to);
+        if (m.cancelled) return send(res, 200, { ok: true });
+        if (m.queue && session?.tool !== 'codex') return send(res, 409, { error: '연결된 Codex 세션을 확인하지 못해 취소하지 않았습니다.' });
+        if (d._at?.[m.id] || (!m.queue && m.id <= (d[m.to] || 0))) return send(res, 409, { error: '세션이 이미 받아 가서 취소할 수 없습니다.' });
+        if (session?.tool === 'codex' && !(m.queue?.mode === 'steer' && m.queue.state === 'failed')) {
+          if (!m.queue?.receipt || m.queue.mode === 'steer') return send(res, 409, { error: '이미 전달된 끼워넣기는 취소할 수 없습니다.' });
+          let result;
+          try { result = await cancelSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, m.queue.receipt, { timeoutMs: queueTimeoutMs, cleanupOwner }); }
+          catch { result = { ok: false, state: 'unknown' }; }
+          if (!result.ok) return send(res, result.state === 'not_pending' ? 409 : 502, { error: result.state === 'not_pending' ? '대기열에 없거나 이미 실행돼 취소할 수 없습니다.' : '취소 여부를 확인하지 못했습니다. 취소된 것으로 처리하지 않았습니다.' });
+          chat = readChat(); m = chat.messages.find(x => x.id === id);
+          if (!m) return send(res, 409, { error: '메시지를 찾지 못했습니다.' });
+        }
+        m.cancelled = new Date().toISOString();
+        writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
+        send(res, 200, { ok: true });
+      } finally { cancelling.delete(id); }
     });
     return;
   }
@@ -1213,18 +1288,53 @@ function inner(req, res, url) {
       body += chunk;
       if (body.length > MAX_BODY) req.destroy();
     });
-    req.on('end', () => {
+    req.on('end', async () => {
       let id, on;
       try { ({ id, on } = JSON.parse(body)); } catch {}
-      const chat = readChat();
-      const m = chat.messages.find((x) => x.id === Number(id));
-      const d = readDelivered();
-      if (!m || m.from !== 'user' || !m.to || m.cancelled || m.context === 'terminal') return send(res, 400, { error: '바꿀 수 없는 메시지입니다.' });
-      if (d._at?.[m.id] || findSession(m.to)?.tool === 'codex') return send(res, 409, { error: '세션이 이미 받아 갔습니다.' });
-      if (on === true) m.interject = true;
-      else delete m.interject;
-      writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
-      send(res, 200, { ok: true });
+      id = Number(id);
+      if (typeof on !== 'boolean') return send(res, 400, { error: '변경할 방식을 확인하지 못했습니다.' });
+      if (cancelling.has(id)) return send(res, 409, { error: '메시지를 변경하는 중입니다.' });
+      cancelling.add(id);
+      try {
+        await queueRequests.get(id);
+        let chat = readChat();
+        let m = chat.messages.find((x) => x.id === id);
+        const d = readDelivered();
+        if (!m || m.from !== 'user' || !m.to || m.cancelled || m.hiddenFailure || m.context === 'terminal') return send(res, 400, { error: '바꿀 수 없는 메시지입니다.' });
+        if (d._at?.[m.id] || (!m.queue && m.id <= (d[m.to] || 0))) return send(res, 409, { error: '세션이 이미 받아 갔습니다.' });
+        const session = findSession(m.to);
+        if (m.queue && session?.tool !== 'codex') return send(res, 409, { error: '연결된 Codex 세션을 확인하지 못했습니다.' });
+        if (session?.tool === 'codex') {
+          if (on === !!m.interject) return send(res, 200, { ok: true });
+          if (!m.queue?.receipt || (m.queue.mode === 'steer' && m.queue.state !== 'failed')) return send(res, 409, { error: '실행 중인 턴에 이미 전달됐거나 결과가 불확실해 변경할 수 없습니다.' });
+          if (on && m.queue.mode !== 'steer') {
+            const before = { ...m.queue };
+            m.queue = { ...before, state: 'pending', changingTo: 'steer' };
+            writeJsonAtomic(chatFile, chat);
+            let withdrawn;
+            try { withdrawn = await cancelSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, before.receipt, { timeoutMs: queueTimeoutMs, cleanupOwner }); }
+            catch { withdrawn = { ok: false, state: 'unknown' }; }
+            chat = readChat(); m = chat.messages.find(x => x.id === id);
+            if (!m) return send(res, 409, { error: '메시지를 찾지 못했습니다.' });
+            if (!withdrawn.ok) {
+              m.queue = withdrawn.state === 'unknown' ? { ...before, state: 'unknown', error: 'conversion_withdrawal_unknown' } : before;
+              writeJsonAtomic(chatFile, chat);
+              return send(res, withdrawn.state === 'not_pending' ? 409 : 502, { error: '원래 대기 요청의 회수를 확인하지 못해 끼워넣지 않았습니다.' });
+            }
+            // Durable safe state if the process stops between withdrawal and steering.
+            m.queue = { ...before, state: 'failed', mode: 'steer', error: 'conversion_not_submitted' };
+          }
+          if (on) m.interject = true; else delete m.interject;
+          writeJsonAtomic(chatFile, chat);
+          await queueToCodex(session, m);
+          const saved = readChat().messages.find(x => x.id === id);
+          return send(res, saved?.queue?.state === 'accepted' ? 200 : 502, { ok: saved?.queue?.state === 'accepted', error: saved?.queue?.state === 'accepted' ? undefined : saved?.queue?.state === 'unknown' ? '전달 결과를 확인하지 못했습니다. 글은 유지되며 재전송하면 중복될 수 있습니다.' : '전달하지 못했습니다. 글은 유지되며 메시지 상태에서 재시도하거나 보류로 옮길 수 있습니다.' });
+        }
+        if (on === true) m.interject = true;
+        else delete m.interject;
+        writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
+        send(res, 200, { ok: true });
+      } finally { cancelling.delete(id); }
     });
     return;
   }
@@ -1246,6 +1356,7 @@ function inner(req, res, url) {
         }
         const entry = addChat(msg);
         if (!entry) return send(res, 400, { error: 'from(user|agent|peer)과 text가 필요합니다.' });
+        if (msg.from === 'user' && msg.ack === 'stored') return send(res, 200, entry);
         sendChatEntry(res, entry);
       });
       return;
@@ -1257,20 +1368,9 @@ function inner(req, res, url) {
 }
 
   return {
-    handle: (req, res, url) => closing ? (send(res, 503, { error: 'Chat is draining' }), true) : inner(req, res, url) !== NOT_MINE,
-    shutdown() {
-      if (shutdownPromise) return shutdownPromise;
-      closing = true;
-      clearInterval(answerPoll); clearInterval(stalePoll); reviewWatcher?.close();
-      for (const timer of notificationTimers) clearTimeout(timer);
-      notificationTimers.clear();
-      shutdownPromise = (async () => {
-        while (queueRequests.size) await Promise.allSettled([...queueRequests.values()]);
-        await Promise.allSettled([...sideQueue.values()]);
-        while (ownedCloses.size) await Promise.allSettled([...ownedCloses]);
-      })();
-      return shutdownPromise;
-    },
+    shutdown,
+    cleanupSnapshot: () => cleanupOwner.snapshot(),
+    handle: (req, res, url) => inner(req, res, url) !== NOT_MINE,
     // 비교 페이지와 함께 쓸 때 평가 완료를 대화에 남기고 그 세션을 깨우는 데 쓴다.
     addChat,
     findSessionByKey,
