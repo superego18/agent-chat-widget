@@ -91,3 +91,21 @@ test('normal append during a cold read accepts the captured prefix and increment
   assert.deepEqual(f.read().map(x => x.id), ['xfirst', 'xsecond']);
   assert.ok(bytes < 20000, `concurrent append caused a cold reread of ${bytes} bytes`);
 });
+
+test('tool-only native growth does not rebuild or serialize the complete displayed conversation', t => {
+  const f = fixture(t);
+  const retained = 'x'.repeat(2 * 1024 * 1024 + 100);
+  fs.writeFileSync(f.session.path, message('retained', retained) + '\n');
+  assert.equal(f.read()[0].text, retained, 'conversation history larger than the receipt cache remains complete');
+  let fullSerializations = 0;
+  const stringify = JSON.stringify;
+  t.mock.method(JSON, 'stringify', function(value, ...args) {
+    if (value?.items?.some(x => x.id === 'xretained')) fullSerializations++;
+    return stringify.call(this, value, ...args);
+  });
+  fs.appendFileSync(f.session.path, '{"type":"event_msg","payload":{"type":"task_started"}}\n');
+  assert.equal(f.read().length, 1);
+  assert.equal(fullSerializations, 0, 'tool activity must not repeatedly rebuild the unchanged full conversation');
+  fs.appendFileSync(f.session.path, message('new-answer') + '\n');
+  assert.ok(f.read().some(x => x.id === 'xnew-answer'), 'a real answer invalidates the displayed-history cache');
+});

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { adjustText, quoteLines, readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 import { readPeerSends, matchPeerInput } from './codex-peers.mjs';
-import { readOrchestrationEvidence, matchOrchestrationInput, createEvidenceContext, cachedEvidence, storeEvidence } from './codex-orchestration.mjs';
+import { readOrchestrationEvidence, matchOrchestrationInput, createEvidenceContext } from './codex-orchestration.mjs';
 
 const modifiedAt = file => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } };
 const fileOf = (root, id) => path.join(root, 'transcript-history', `${id}.json`);
@@ -69,6 +69,8 @@ export const readStoredHistory = (root, id) => shortReferences(root, historyOf(f
 // Keep conversation records apart from the small, lossy receipt-evidence cache.
 // Codex appends tool output far more often than it appends displayed messages.
 const nativeMessages = new Map();
+const displayedHistories = new Map();
+let nativeRevision = 0;
 const identity = stat => `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
 function messageRecord(line) {
   if (!/"type"\s*:\s*"message"/.test(line)) return null;
@@ -98,14 +100,14 @@ function readNativeMessages(file) {
       stat.size === entry.size && stat.mtimeMs !== entry.mtime ||
       !range(0, entry.prefix.length).equals(entry.prefix) ||
       !range(entry.size - entry.suffix.length, entry.suffix.length).equals(entry.suffix))) entry = null;
-    if (!entry) entry = { identity: identity(stat), size: 0, tail: Buffer.alloc(0), rows: [], bytes: 0 };
+    if (!entry) entry = { identity: identity(stat), size: 0, tail: Buffer.alloc(0), rows: [], bytes: 0, revision: ++nativeRevision };
     const bytes = range(entry.size, stat.size - entry.size);
     const buffer = Buffer.concat([entry.tail, bytes]);
     const rows = [...entry.rows];
-    let cursor = 0, retained = entry.bytes;
+    let cursor = 0, retained = entry.bytes, revision = entry.revision;
     for (let end; (end = buffer.indexOf(10, cursor)) !== -1;) {
       const row = messageRecord(buffer.subarray(cursor, end).toString('utf8'));
-      if (row) { rows.push(row); retained += end - cursor; }
+      if (row) { rows.push(row); retained += end - cursor; revision = ++nativeRevision; }
       cursor = end + 1;
     }
     const tail = buffer.subarray(cursor);
@@ -118,12 +120,13 @@ function readNativeMessages(file) {
       s.size === stat.size && s.mtimeMs !== stat.mtimeMs)) throw new Error('Native transcript changed during read');
     nativeMessages.delete(key);
     nativeMessages.set(key, { identity: identity(stat), size: stat.size, mtime: stat.mtimeMs, prefix, suffix,
-      rows, tail: Buffer.from(tail), bytes: retained });
+      rows, tail: Buffer.from(tail), bytes: retained, revision });
     while (nativeMessages.size > 16 || [...nativeMessages.values()].reduce((n, x) => n + x.bytes + x.tail.length, 0) > 64 * 1024 * 1024) nativeMessages.delete(nativeMessages.keys().next().value);
     // A valid final JSON line need not have a newline yet. Reparse it on append
     // so split UTF-8 and partial JSON never become permanently lost or duplicated.
     const last = messageRecord(tail.toString('utf8'));
-    return last ? [...rows, last] : rows;
+    return { rows: last ? [...rows, last] : rows,
+      key: `${revision}:${last ? createHash('sha256').update(last.line).digest('hex') : ''}` };
   } catch (error) { nativeMessages.delete(key); throw error; }
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
@@ -132,8 +135,7 @@ function readNativeMessages(file) {
 export function readCodexHistory(root, session, context = createEvidenceContext()) {
   const file = fileOf(root, session.sessionId);
   const saved = historyOf(file);
-  let stat;
-  try { stat = fs.statSync(session.path); } catch { return shortReferences(root, saved); }
+  try { fs.statSync(session.path); } catch { return shortReferences(root, saved); }
   // Receipt-source faults cannot bypass the healthy current transcript/fallback.
   let peers, orchestration;
   try { peers = readPeerSends(root, session, context); }
@@ -142,14 +144,14 @@ export function readCodexHistory(root, session, context = createEvidenceContext(
   catch { orchestration = { sessions: [], results: [], target: session, key: 'native-incomplete', complete: false }; }
   const inputs = widgetInputs(root, session);
   const chatKey = createHash('sha256').update(JSON.stringify([...inputs])).digest('hex');
-  const key = `${session.path}:${stat.size}:${stat.mtimeMs}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}`;
   const cacheKey = 'history:' + path.resolve(file);
-  if (cachedEvidence(cacheKey)?.key === key) return cachedEvidence(cacheKey).data;
-  const items = new Map(saved.items.map(item => [item.id, item]));
   let source;
   try { source = readNativeMessages(session.path); } catch { return shortReferences(root, saved); }
+  const key = `${session.path}:${source.key}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}`;
+  if (displayedHistories.get(cacheKey)?.key === key) return displayedHistories.get(cacheKey).data;
+  const items = new Map(saved.items.map(item => [item.id, item]));
   const usedSends = new Set(saved.items.flatMap(item => [item.peerSend, ...(item.peerSends || [])]).filter(Boolean));
-  for (const { line, o } of source) {
+  for (const { line, o } of source.rows) {
     const p = o.payload;
     if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
     const raw = (p.content || []).filter(b => ['input_text', 'output_text'].includes(b.type)).map(b => b.text).join('\n');
@@ -180,7 +182,11 @@ export function readCodexHistory(root, session, context = createEvidenceContext(
   const data = shortReferences(root, { items: [...items.values()].sort((a, b) => String(a.at).localeCompare(String(b.at))) });
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (JSON.stringify(data) !== JSON.stringify(saved)) writeJsonAtomic(file, data);
-  storeEvidence(cacheKey, { key: `${session.path}:${stat.size}:${stat.mtimeMs}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}`, data });
+  // Full conversation history must not evict the small native receipt cache.
+  const bytes = Buffer.byteLength(JSON.stringify(data));
+  displayedHistories.delete(cacheKey);
+  if (bytes <= 16 * 1024 * 1024) displayedHistories.set(cacheKey, { key: `${session.path}:${source.key}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}`, data, bytes });
+  while (displayedHistories.size > 16 || [...displayedHistories.values()].reduce((n, x) => n + x.bytes, 0) > 16 * 1024 * 1024) displayedHistories.delete(displayedHistories.keys().next().value);
   return data;
 }
 
