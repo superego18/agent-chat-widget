@@ -4,3 +4,9 @@ node_modules/
 .claude/
 templates/
 CODING_STANDARDS.md
+.local/development-pipeline/
+
+# 로컬 작업 파일: 개발 파이프라인 설정(이 컴퓨터 경로·세션 ID), 셸 충돌 기록, 에이전트 작업 계획
+.development-pipeline.json
+*.stackdump
+docs/superpowers/
