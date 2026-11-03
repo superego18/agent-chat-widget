@@ -66,6 +66,68 @@ function shortReferences(root, history) {
 }
 export const readStoredHistory = (root, id) => shortReferences(root, historyOf(fileOf(root, id)));
 
+// Keep conversation records apart from the small, lossy receipt-evidence cache.
+// Codex appends tool output far more often than it appends displayed messages.
+const nativeMessages = new Map();
+const identity = stat => `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
+function messageRecord(line) {
+  if (!/"type"\s*:\s*"message"/.test(line)) return null;
+  try {
+    const o = JSON.parse(line);
+    return o.type === 'response_item' && o.payload?.type === 'message' && ['user', 'assistant'].includes(o.payload.role) ? { line, o } : null;
+  } catch { return null; }
+}
+function readNativeMessages(file) {
+  const key = path.resolve(file);
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const stat = fs.fstatSync(fd);
+    const range = (start, length) => {
+      const bytes = Buffer.alloc(length);
+      let count = 0;
+      while (count < length) {
+        const n = fs.readSync(fd, bytes, count, length - count, start + count);
+        if (!n) break;
+        count += n;
+      }
+      return bytes.subarray(0, count);
+    };
+    let entry = nativeMessages.get(key);
+    if (entry && (entry.identity !== identity(stat) || stat.size < entry.size ||
+      stat.size === entry.size && stat.mtimeMs !== entry.mtime ||
+      !range(0, entry.prefix.length).equals(entry.prefix) ||
+      !range(entry.size - entry.suffix.length, entry.suffix.length).equals(entry.suffix))) entry = null;
+    if (!entry) entry = { identity: identity(stat), size: 0, tail: Buffer.alloc(0), rows: [], bytes: 0 };
+    const bytes = range(entry.size, stat.size - entry.size);
+    const buffer = Buffer.concat([entry.tail, bytes]);
+    const rows = [...entry.rows];
+    let cursor = 0, retained = entry.bytes;
+    for (let end; (end = buffer.indexOf(10, cursor)) !== -1;) {
+      const row = messageRecord(buffer.subarray(cursor, end).toString('utf8'));
+      if (row) { rows.push(row); retained += end - cursor; }
+      cursor = end + 1;
+    }
+    const tail = buffer.subarray(cursor);
+    const prefix = entry.prefix?.length === 4096 ? entry.prefix : range(0, Math.min(stat.size, 4096));
+    const suffix = range(Math.max(0, stat.size - 4096), Math.min(stat.size, 4096));
+    const after = fs.fstatSync(fd), named = fs.statSync(file);
+    // An active provider may append while we read. Accept the captured prefix;
+    // the next poll reads the growth. Replacement/shrink/rewrite still reset.
+    if ([after, named].some(s => identity(s) !== identity(stat) || s.size < stat.size ||
+      s.size === stat.size && s.mtimeMs !== stat.mtimeMs)) throw new Error('Native transcript changed during read');
+    nativeMessages.delete(key);
+    nativeMessages.set(key, { identity: identity(stat), size: stat.size, mtime: stat.mtimeMs, prefix, suffix,
+      rows, tail: Buffer.from(tail), bytes: retained });
+    while (nativeMessages.size > 16 || [...nativeMessages.values()].reduce((n, x) => n + x.bytes + x.tail.length, 0) > 64 * 1024 * 1024) nativeMessages.delete(nativeMessages.keys().next().value);
+    // A valid final JSON line need not have a newline yet. Reparse it on append
+    // so split UTF-8 and partial JSON never become permanently lost or duplicated.
+    const last = messageRecord(tail.toString('utf8'));
+    return last ? [...rows, last] : rows;
+  } catch (error) { nativeMessages.delete(key); throw error; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
 // The widget owns a durable copy of displayed native messages, independent of the provider's rollout.
 export function readCodexHistory(root, session, context = createEvidenceContext()) {
   const file = fileOf(root, session.sessionId);
@@ -85,11 +147,9 @@ export function readCodexHistory(root, session, context = createEvidenceContext(
   if (cachedEvidence(cacheKey)?.key === key) return cachedEvidence(cacheKey).data;
   const items = new Map(saved.items.map(item => [item.id, item]));
   let source;
-  try { source = fs.readFileSync(session.path, 'utf8'); } catch { return shortReferences(root, saved); }
+  try { source = readNativeMessages(session.path); } catch { return shortReferences(root, saved); }
   const usedSends = new Set(saved.items.flatMap(item => [item.peerSend, ...(item.peerSends || [])]).filter(Boolean));
-  for (const line of source.split('\n')) {
-    let o;
-    try { o = JSON.parse(line); } catch { continue; }
+  for (const { line, o } of source) {
     const p = o.payload;
     if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
     const raw = (p.content || []).filter(b => ['input_text', 'output_text'].includes(b.type)).map(b => b.text).join('\n');
