@@ -11,7 +11,10 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const COOKIE = 'uifb_k';
+// 쿠키는 포트를 가리지 않아, 같은 주소(예: <기기>.ts.net)에서 여러 프로젝트가 같은 이름을 쓰면 서로의 키를 덮어쓴다.
+// 그래서 이름에 키에서 만든 짧은 표시를 붙여 프로젝트(.ui-feedback)마다 따로 저장한다. 예전 이름(uifb_k)도 받아 준다.
+const LEGACY_COOKIE = 'uifb_k';
+export const cookieName = (key) => `${LEGACY_COOKIE}_${crypto.createHash('sha256').update(key).digest('hex').slice(0, 10)}`;
 
 export function lanAuth({ dir, lan }) {
   let key = null;
@@ -28,7 +31,9 @@ export function lanAuth({ dir, lan }) {
   }
   // tailscale serve(HTTPS)로 들어온 요청은 이 컴퓨터(127.0.0.1)에서 온 것처럼 보이지만, 전달 헤더가 붙으므로 바깥 요청으로 보고 키를 확인한다.
   const isLocal = (req) => LOCAL.has(req.socket.remoteAddress) && !req.headers['tailscale-user-login'] && !req.headers['x-forwarded-for'];
-  const hasCookie = (req) => (req.headers.cookie || '').split(/;\s*/).some((c) => c === `${COOKIE}=${key}`);
+  const COOKIE = key ? cookieName(key) : LEGACY_COOKIE;
+  const hasCookie = (req) =>
+    (req.headers.cookie || '').split(/;\s*/).some((c) => c === `${COOKIE}=${key}` || c === `${LEGACY_COOKIE}=${key}`);
   const ok = (req) => !lan || isLocal(req) || hasCookie(req);
 
   return {

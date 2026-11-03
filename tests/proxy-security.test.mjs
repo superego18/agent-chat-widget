@@ -69,6 +69,32 @@ test('strict-origin validates before rewrite; loopback with LAN auth denies unau
   if (address) await assert.rejects(fetch(`http://${address}:${new URL(f.base).port}/html`, { signal: AbortSignal.timeout(600) }));
 });
 
+test('access-key cookie name is per project so projects on one host do not overwrite each other', async t => {
+  const a = await proxyFixture(t, []);
+  const b = await proxyFixture(t, []);
+  const remote = { 'x-forwarded-for': '100.64.0.2' };
+  const nameOf = async f => {
+    const key = fs.readFileSync(path.join(f.root, 'lan-key'), 'utf8').trim();
+    const res = await fetch(`${f.base}/html?k=${key}`, { headers: remote, redirect: 'manual' });
+    assert.equal(res.status, 302);
+    const [pair] = res.headers.get('set-cookie').split(';');
+    assert.equal(pair.split('=').slice(1).join('='), key);
+    return { key, name: pair.split('=')[0], pair };
+  };
+  const ka = await nameOf(a);
+  const kb = await nameOf(b);
+  assert.match(ka.name, /^uifb_k_[0-9a-f]{10}$/);
+  assert.notEqual(ka.name, kb.name);
+  // 같은 주소에 두 프로젝트 쿠키가 함께 있어도 각자 통과한다
+  const both = `${ka.pair}; ${kb.pair}`;
+  assert.equal((await fetch(a.base + '/html', { headers: { ...remote, cookie: both } })).status, 200);
+  assert.equal((await fetch(b.base + '/html', { headers: { ...remote, cookie: both } })).status, 200);
+  // 다른 프로젝트 쿠키만으로는 통과하지 못한다
+  assert.equal((await fetch(a.base + '/html', { headers: { ...remote, cookie: kb.pair } })).status, 401);
+  // 예전 이름(uifb_k)으로 저장된 브라우저도 계속 들어온다
+  assert.equal((await fetch(a.base + '/html', { headers: { ...remote, cookie: `uifb_k=${ka.key}` } })).status, 200);
+});
+
 test('without new flags, original proxy default write behavior is unchanged', async t => {
   const f = await proxyFixture(t, []);
   assert.equal((await fetch(f.base + '/__uifb/api/compose', { method: 'POST', body: '{}' })).status, 200);
