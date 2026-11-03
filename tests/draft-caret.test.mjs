@@ -7,6 +7,9 @@ import http from 'node:http';
 import { chromium, webkit } from 'playwright-core';
 import { createChatHandler } from '../scripts/chat-handler.mjs';
 
+const endKey = process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End';
+const selectAllKey = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
+
 for (const engine of ['chromium', 'webkit']) for (const width of [390, 768, 1440]) {
   test('editing a scrolled saved draft preserves visible native insertion: ' + engine + ' ' + width, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-draft-caret-'));
@@ -34,7 +37,7 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 768, 1440
       await page.goto(base); await page.locator('#btn').click(); await page.locator('#draftsBtn').click();
       const ta = page.locator('.draft textarea');
       await ta.tap({ position: { x: 50, y: 20 } }); await page.waitForTimeout(200);
-      await ta.press('Control+End'); await page.waitForTimeout(80);
+      await ta.press(endKey); await page.waitForTimeout(80);
       const position = () => ta.evaluate(el => {
         const r = el.getBoundingClientRect(), style = getComputedStyle(el), box = el.closest('.drafts'), bounds = box.getBoundingClientRect();
         const line = el.value.slice(0, el.selectionStart).split('\n').length;
@@ -52,15 +55,22 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 768, 1440
       assert.equal(await ta.evaluate(el => el.getRootNode().activeElement === el), true);
       const insertedUnicode = '\uD55C\uAE00\uD83D\uDE42';
       await page.keyboard.insertText(insertedUnicode);
-      const expected = text + 'Z' + insertedUnicode;
+      let expected = text + 'Z' + insertedUnicode;
       assert.equal(await ta.inputValue(), expected, 'Unicode insertion preserves exact native text');
       assert.equal((await position()).visible, true, 'Unicode input preserves the visible editing line');
+      await page.keyboard.press('Enter'); expected += '\n';
+      await page.waitForTimeout(80);
+      assert.equal(await ta.inputValue(), expected, 'native newline preserves exact text');
+      assert.equal((await position()).visible, true, 'newline keeps the insertion line visible');
+      await page.keyboard.insertText('next'); expected += 'next';
+      assert.equal(await ta.inputValue(), expected);
+      assert.equal((await position()).visible, true);
       // The public blur-save path persists the actual native edit.
       await page.locator('#dclose').click();
       for (let n = 0; n < 30 && JSON.parse(fs.readFileSync(path.join(root, 'drafts.json'))).drafts[0].text !== expected; n++) await new Promise(resolve => setTimeout(resolve, 20));
       assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'drafts.json'))).drafts[0].text, expected);
       await page.locator('#draftsBtn').click();
-      await ta.press('Control+A'); await page.keyboard.insertText('short');
+      await ta.press(selectAllKey); await page.keyboard.insertText('short');
       assert.equal(await ta.inputValue(), 'short');
       assert.ok(await ta.evaluate(el => el.getBoundingClientRect().height <= 50), 'deleting text still shrinks the editor');
       assert.equal(await ta.evaluate(el => el.getRootNode().activeElement === el), true, 'measurement must not steal focus');
@@ -70,8 +80,8 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 768, 1440
       assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'drafts.json'))).drafts[0].text, 'short');
       await page.locator('#draftsBtn').click();
       const wrapped = 'native wrapping text '.repeat(100) + ' END';
-      await ta.press('Control+A'); await page.keyboard.insertText(wrapped);
-      await ta.press('Control+End');
+      await ta.press(selectAllKey); await page.keyboard.insertText(wrapped);
+      await ta.press(endKey);
       await page.locator('#drafts').evaluate(el => { el.scrollTop = el.scrollHeight; });
       const wrappedBefore = await ta.evaluate(el => el.closest('.drafts').scrollTop);
       assert.ok(wrappedBefore > 0, 'wrapped fixture must be scrolled');
