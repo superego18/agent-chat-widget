@@ -3094,11 +3094,11 @@
       more.className = 'dmore';
       more.hidden = true;
       // 재기(measure)와 높이 바꾸기(apply)를 나눠, 보관함을 처음 열 때 모든 칸을 한 번에 재고 한 번에 바꾼다(칸마다 번갈아 하면 화면 계산이 칸 수만큼 반복돼 버벅인다).
-      const measure = () => {
-        const cs = getComputedStyle(ta);
+      const measure = (field = ta) => {
+        const cs = getComputedStyle(field);
         const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
         const edge = parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
-        return { full: ta.scrollHeight + 2, lh, edge, four: Math.floor(lh * 4 + edge + parseFloat(cs.paddingBottom)) };
+        return { full: field.scrollHeight + 2, lh, edge, four: Math.floor(lh * 4 + edge + parseFloat(cs.paddingBottom)) };
       };
       const apply = ({ full, lh, edge, four }) => {
         const open = openDrafts.has(d.id);
@@ -3108,7 +3108,22 @@
         more.hidden = full <= four + 1;
         more.textContent = open ? '접기' : '펼치기';
       };
-      const fit = () => { ta.style.height = 'auto'; ta.style.paddingBottom = ''; apply(measure()); };
+      const fit = () => {
+        // Shrinking the live editor to measure it clamps the scrolled draft list
+        // to the top and moves the native caret out of view. Measure off-flow.
+        const probe = ta.cloneNode();
+        probe.value = ta.value;
+        probe.tabIndex = -1;
+        probe.setAttribute('aria-hidden', 'true');
+        Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none',
+          width: ta.getBoundingClientRect().width + 'px', height: '0', minHeight: '0', paddingBottom: '' });
+        top.append(probe);
+        try {
+          const size = measure(probe);
+          ta.style.paddingBottom = '';
+          apply(size);
+        } finally { probe.remove(); }
+      };
       more.onclick = () => { openDrafts.has(d.id) ? openDrafts.delete(d.id) : openDrafts.add(d.id); fit(); };
       ta.addEventListener('input', fit);
       ta.addEventListener('focus', () => { if (!openDrafts.has(d.id)) { openDrafts.add(d.id); fit(); } });
