@@ -63,13 +63,6 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
-// 대화 기록은 쌓일수록 커져(수천 개면 2MB) 폰에서 3초마다 받으면 다른 요청(보내기)까지 막힌다. 받을 수 있으면 gzip 으로 줄여 보낸다.
-function sendGzip(req, res, status, body) {
-  if (!/\bgzip\b/.test(req.headers?.['accept-encoding'] || '')) return send(res, status, body);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
-  res.end(zlib.gzipSync(JSON.stringify(body), { level: 6 }));
-}
-
 const chatFile = path.join(root, 'chat.json');
 const sessionsDir = path.join(root, 'sessions');
 function readChat() {
@@ -78,6 +71,42 @@ function readChat() {
   } catch {
     return { messages: [] };
   }
+}
+
+// Poll snapshots are read-only. Writers continue to read the latest file.
+// Larger conversations are still returned in full, without retaining a cache.
+const POLL_CACHE_BYTES = 8 * 1024 * 1024;
+let pollChat, pollResponse;
+function chatVersion() {
+  try {
+    const s = fs.statSync(chatFile);
+    return `${s.dev}:${s.ino}:${s.birthtimeMs}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
+  } catch { return null; }
+}
+function readPollChat() {
+  const version = chatVersion();
+  if (version && pollChat?.version === version) return pollChat.chat;
+  pollChat = null;
+  try {
+    const raw = fs.readFileSync(chatFile, 'utf8'), chat = JSON.parse(raw);
+    if (version && version === chatVersion() && Buffer.byteLength(raw) <= POLL_CACHE_BYTES) pollChat = { version, chat };
+    return chat;
+  } catch { return { messages: [] }; }
+}
+function sendChatPoll(req, res) {
+  const chat = readPollChat();
+  // Pickups can change without chat.json changing; always observe them first.
+  const delivered = readDelivered(chat), deliveredKey = JSON.stringify(delivered);
+  let response = pollResponse;
+  if (response?.chat !== chat || response.deliveredKey !== deliveredKey) {
+    const json = JSON.stringify({ ...chat, delivered });
+    response = { chat, deliveredKey, json, gzip: null };
+    pollResponse = Buffer.byteLength(json) <= POLL_CACHE_BYTES ? response : null;
+  }
+  if (!/\bgzip\b/.test(req.headers?.['accept-encoding'] || '')) return send(res, 200, response.json);
+  response.gzip ||= zlib.gzipSync(response.json, { level: 6 });
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  res.end(response.gzip);
 }
 
 // A previous process may have submitted the request before losing its outcome.
@@ -496,11 +525,11 @@ const cmuxCli = () => process.env.CMUX_BUNDLED_CLI_PATH || (fs.existsSync('/Appl
 // Actual pickup only. Queue acceptance is stored separately on the message.
 const deliveredFile = path.join(root, 'delivered.json');
 let lastDelivered = {};
-function readDelivered() {
+function readDelivered(chat = readChat()) {
   const d = readJsonSafe(deliveredFile);
   if (d) lastDelivered = d; // 다른 쪽이 쓰는 중이라 못 읽으면 마지막으로 읽은 기록을 쓴다(빈 기록을 대화창에 보내지 않게)
   const delivered = d || lastDelivered;
-  const messages = readChat().messages.filter(m => m.queue?.receipt && !delivered._at?.[m.id]);
+  const messages = chat.messages.filter(m => m.queue?.receipt && !delivered._at?.[m.id]);
   let changed = false;
   for (const id of new Set(messages.map(m => m.to))) {
     const session = findSession(id);
@@ -1340,7 +1369,7 @@ function inner(req, res, url) {
   }
 
   if (url.pathname === '/api/chat') {
-    if (req.method === 'GET') return sendGzip(req, res, 200, { ...readChat(), delivered: readDelivered() });
+    if (req.method === 'GET') return sendChatPoll(req, res);
     if (req.method === 'POST') {
       let body = '';
       req.on('data', (chunk) => {
