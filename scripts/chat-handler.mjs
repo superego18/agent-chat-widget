@@ -778,7 +778,7 @@ function queueToCodex(session, entry) {
   saveQueue(entry, { state: 'pending', attempt, receipt, ...(entry.interject ? { mode: 'steer' } : {}) });
   // 답장·참고로 붙인 원문도 함께 넣는다(Claude 세션이 받는 글과 같게). Codex 답은 대화 기록에서 찾는다.
   // Outgoing native peer messages are stored in the recipient's transcript but shown in both tabs.
-  const quotes = quoteLines(entry, referenceMessages(session.sessionId));
+  const quotes = entry.quotes?.length || entry.replyTo ? quoteLines(entry, referenceMessages(session.sessionId)) : [];
   const text = `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`;
   const delivery = entry.interject
     ? Promise.resolve().then(() => steerSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, text, { timeoutMs: queueTimeoutMs, clientUserMessageId: receipt, cleanupOwner }))

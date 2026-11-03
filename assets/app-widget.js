@@ -2473,7 +2473,7 @@
     await withBusy(side ? $('side') : interject ? $('now') : $('form').querySelector('button[type="submit"]'), async () => {
       pendingCids.add(body.cid);
       pendingComposers.add(target);
-      let abortT;
+      let abortT, rejected = false;
       try {
         // 저장 확인이 8초 안에 오지 않으면 요청을 끝내고 글을 보존한다. 전달 결과는 별도 상태로 확인한다.
         const ac = new AbortController();
@@ -2482,7 +2482,7 @@
         const saved = await r.json();
         clearTimeout(abortT);
         const failed = saved.id && saved.cid === body.cid && ['failed', 'unknown'].includes(saved.queue?.state);
-        if (!r.ok && !failed) throw new Error('send');
+        if (!r.ok && !failed) { rejected = true; throw new Error('send'); }
         if (side) { sideOpen[target] = saved.sideGroup; delete sideNew[target]; } // 새 묶음이면 그 묶음을 펼친다
         rememberMessages([saved]);
         pendingCids.delete(body.cid);
@@ -2498,7 +2498,7 @@
         poll();
         if (failed) toast(saved.queue.state === 'unknown' ? '메시지는 저장됐지만 전달 결과를 확인하지 못했습니다. 재시도하면 중복될 수 있습니다.' : '메시지는 저장됐지만 전달하지 못했습니다. 전달 재시도를 눌러 주세요.');
       } catch {
-        toast('보내지 못했어요. 글은 입력칸에 남겨 뒀어요');
+        toast(!side && !rejected ? '저장 미확인 · 재전송 전 상태를 확인해 주세요' : '보내지 못했어요. 글은 입력칸에 남겨 뒀어요');
       } finally {
         clearTimeout(abortT);
         pendingCids.delete(body.cid);

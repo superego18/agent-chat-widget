@@ -9,6 +9,43 @@ const source = fs.readFileSync(process.env.UIFB_TEST_SOURCE || new URL('../asset
 const session = { id: 'test-thread', name: 'Test session', tool: 'codex', watch: { active: false, via: 'queue' }, status: { state: 'unknown' } };
 const entry = (state) => ({ id: 1, from: 'user', to: session.id, text: 'Synthetic request', cid: 'test-message', context: 'app', at: new Date().toISOString(), queue: { state } });
 
+for (const failure of ['timeout', 'connection']) test(`a lost stored acknowledgement reports uncertainty rather than a definite send failure: ${failure}`, async t => {
+  const { page, store } = await open(t, 390);
+  await page.clock.install();
+  let release, posted;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { posted = resolve; });
+  let sends = 0;
+  await page.route('**/__uifb/api/chat', async route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { messages: store.messages, delivered: {} } });
+    sends++;
+    const saved = { ...route.request().postDataJSON(), id: 1, at: new Date().toISOString(), queue: { state: 'accepted' } };
+    store.messages.push(saved); posted();
+    if (failure === 'connection') return route.abort('failed');
+    await gate;
+    await route.fulfill({ json: saved }).catch(() => {});
+  });
+  try {
+    await page.locator('#input').fill('Synthetic saved request with lost acknowledgement');
+    await page.locator('#form button[type="submit"]').click();
+    await started;
+    if (failure === 'timeout') await page.clock.runFor(8100);
+    const toast = page.locator('.toast');
+    await toast.waitFor({ state: 'visible' });
+    assert.doesNotMatch(await toast.textContent(), /보내지 못/);
+    assert.match(await toast.textContent(), /확인/);
+    assert.equal(await toast.evaluate(el => {
+      const span = el.querySelector('span'), text = span.getBoundingClientRect();
+      return text.left >= 0 && text.right <= innerWidth && span.scrollWidth <= span.clientWidth + 1;
+    }), true, 'the uncertainty and retry guidance must fit on mobile');
+    assert.equal(await page.locator('#input').evaluate(el => el.value), 'Synthetic saved request with lost acknowledgement');
+    assert.equal(store.messages.length, 1);
+    assert.equal(store.messages[0].queue.state, 'accepted');
+    assert.equal(sends, 1, 'an unconfirmed response never triggers an automatic resend');
+    assert.equal(await page.locator('#form button[type="submit"]').evaluate(el => el.classList.contains('busy')), false);
+  } finally { release(); }
+});
+
 test('send acknowledgement clears the composer and loading together with its bubble despite slow polling', async t => {
   const { page, store } = await open(t, 390);
   let release;

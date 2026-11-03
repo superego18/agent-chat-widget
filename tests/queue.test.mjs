@@ -12,6 +12,24 @@ import { formatMessage, pendingFor, wasDelivered } from '../scripts/chat-format.
 const session = { sessionId: 'test-thread', tool: 'codex', name: 'Test session' };
 const message = { from: 'user', to: session.sessionId, context: 'app', text: 'Check the heading', cid: 'test-message' };
 
+test('plain stored sends do not scan native histories to construct empty quote context', async t => {
+  const f = fixture(t);
+  const native = path.join(f.root, 'synthetic-native.jsonl');
+  fs.writeFileSync(native, JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Synthetic previous answer' }] } }) + '\n');
+  fs.writeFileSync(path.join(f.root, 'sessions', session.sessionId + '.json'), JSON.stringify({ ...session, path: native }));
+  const read = fs.readFileSync;
+  let historyReads = 0;
+  t.mock.method(fs, 'readFileSync', (file, ...args) => {
+    if (String(file) === native) historyReads++;
+    return read(file, ...args);
+  });
+  const result = await f.api('/api/chat', { ...message, ack: 'stored' });
+  assert.equal(result.status, 200);
+  assert.equal(historyReads, 0, 'a plain send must not synchronously rebuild transcript history before its stored acknowledgement');
+  assert.equal(f.calls.length, 1);
+  f.calls[0].child.emit('close', 0);
+});
+
 test('stored acknowledgement returns the durable message before provider delivery finishes', async t => {
   const f = fixture(t);
   try {
