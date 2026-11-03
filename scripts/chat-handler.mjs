@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import zlib from 'node:zlib';
 import { readQueuePickups } from './codex-pickup.mjs';
 import { steerCodex } from './codex-steer.mjs';
@@ -639,7 +639,7 @@ const toTrash = (store, list, gone, extra = {}) => {
 };
 
 function writeDrafts(d) {
-  fs.writeFileSync(draftsFile, JSON.stringify(d, null, 2) + '\n');
+  writeJsonAtomic(draftsFile, d);
 }
 
 // 저장 당시 코드 버전. 나중에 화면이 바뀌어도 세션이 그때 코드와 비교해 어디를 말한 것인지 찾게 한다.
@@ -719,6 +719,50 @@ function sendDrafts(ids, combine, device) {
 function handleDrafts(req) {
   const store = readDrafts();
   const ids = Array.isArray(req.ids) ? req.ids.filter(Number.isInteger) : [];
+  if (['work-start', 'work-review', 'work-answer', 'work-finish'].includes(req.action)) {
+    const d = store.drafts.find(x => x.id === req.id);
+    if (!d) return { status: 404, body: { error: '없는 항목입니다.' } };
+    const fail = (status, error) => ({ status, body: { error } });
+    const now = new Date().toISOString();
+    const answerText = typeof req.text === 'string' ? req.text.trim() : '';
+    if (req.action === 'work-answer' && (req.text !== undefined && typeof req.text !== 'string' || !['approved', 'changes'].includes(req.decision) || typeof req.cid !== 'string' || !req.cid.trim() || req.cid.length > 50 || answerText.length > 4000 || req.decision === 'changes' && !answerText)) return fail(400, '확인 결과와 수정할 내용을 확인해 주세요.');
+    if (req.action !== 'work-answer' && (req.actor !== d.to || !findSession(req.actor))) return fail(403, '담당 세션만 작업 상태를 바꿀 수 있습니다.');
+    if (req.action === 'work-start') {
+      if (req.expectedText !== d.text) return fail(409, '요청 내용이 바뀌었습니다. 최신 내용을 다시 확인해 주세요.');
+      if (d.work) return { status: 200, body: d };
+      d.work = { state: 'working', actor: req.actor, revision: 1, startedAt: now, updatedAt: now };
+    } else {
+      const w = d.work;
+      if (!w) return fail(409, '아직 담당 세션이 가져가지 않은 항목입니다.');
+      if (req.action === 'work-answer' && w.answer?.cid === req.cid && w.answer.revision === req.revision &&
+        w.revision === req.revision + 1 && w.answer.decision === req.decision && w.answer.text === answerText) return { status: 200, body: d };
+      if (req.revision !== w.revision) return fail(409, '확인 내용이 바뀌었습니다. 최신 요청을 다시 확인해 주세요.');
+      if (w.state === 'done') return fail(409, '이미 완료된 항목입니다.');
+      if (req.action === 'work-review') {
+        if (typeof req.note !== 'string' || !req.note.trim() || req.note.length > 4000) return fail(400, '확인할 내용을 4,000자 이내로 적어 주세요.');
+        w.state = 'review'; w.note = req.note.trim(); w.reviewRequired = true;
+        delete w.answer;
+      } else if (req.action === 'work-answer') {
+        const text = answerText;
+        if (w.state !== 'review' || w.answer) return fail(409, '현재 답할 수 있는 확인 요청이 아닙니다.');
+        const label = req.decision === 'approved' ? '확인했어요' : '수정 요청';
+        const cid = 'work-' + createHash('sha256').update(JSON.stringify([d.id, w.revision, req.cid])).digest('hex');
+        const message = `[진행·확인 #${d.id} · ${label}]\n원래 요청: ${d.text.slice(0, 160)}\n${text || label}`;
+        const previous = readChat().messages.find(m => m.cid === cid);
+        if (previous && (previous.from !== 'user' || previous.to !== d.to || previous.text !== message)) return fail(409, '같은 답변 번호에 다른 내용이 있습니다. 상태를 다시 확인해 주세요.');
+        const entry = addChat({ from: 'user', to: d.to, context: 'app', cid, text: message });
+        if (!entry) return fail(503, '답을 저장하지 못했습니다. 입력을 보존하고 다시 시도해 주세요.');
+        w.answer = { decision: req.decision, text, cid: req.cid, revision: w.revision, at: now, messageId: entry.id };
+        if (req.decision === 'changes') w.state = 'working';
+      } else {
+        if (w.reviewRequired && w.answer?.decision !== 'approved') return fail(409, '사용자의 확인이 아직 끝나지 않았습니다.');
+        w.state = 'done'; w.completedAt = now;
+      }
+      w.revision++; w.updatedAt = now;
+    }
+    writeDrafts(store);
+    return { status: 200, body: d };
+  }
   if (req.action === 'add') {
     const text = typeof req.text === 'string' ? req.text.trim().slice(0, 4000) : '';
     if (!text || !sid(req.to)) return { status: 400, body: { error: 'text와 to(세션)가 필요합니다.' } };
@@ -735,6 +779,7 @@ function handleDrafts(req) {
   if (req.action === 'update') {
     const d = store.drafts.find((x) => x.id === req.id);
     if (!d) return { status: 404, body: { error: '없는 항목입니다.' } };
+    if (d.work) return { status: 409, body: { error: '진행·확인에 있는 원래 요청은 여기서 바꾸지 않습니다.' } };
     if (typeof req.text === 'string' && req.text.trim()) d.text = req.text.trim().slice(0, 4000);
     if (sid(req.to)) d.to = req.to;
     if ('label' in req) d.label = cleanLabel(req.label);
@@ -749,6 +794,7 @@ function handleDrafts(req) {
     return { status: 200, body: d };
   }
   if (req.action === 'delete') {
+    if (store.drafts.some(d => ids.includes(d.id) && d.work)) return { status: 409, body: { error: '진행·확인 항목은 보관함에서 지우지 않습니다.' } };
     toTrash(store, store.drafts.filter((d) => ids.includes(d.id)), 'deleted');
     store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
     writeDrafts(store);
@@ -764,6 +810,7 @@ function handleDrafts(req) {
   }
   if (req.action === 'send') {
     if (!ids.length) return { status: 400, body: { error: '보낼 항목(ids)이 필요합니다.' } };
+    if (store.drafts.some(d => ids.includes(d.id) && d.work)) return { status: 409, body: { error: '진행·확인에 있는 항목은 다시 보내지 않습니다.' } };
     const device = req.device === 'mobile' || req.device === 'desktop' ? req.device : null;
     if (req.plain === true) return { status: 200, body: { sent: sendPlain(ids, device, req.interject === true) } };
     return { status: 200, body: { sent: sendDrafts(ids, req.combine !== false, device) } };
@@ -1166,8 +1213,10 @@ function inner(req, res, url) {
         } catch {
           return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
         }
-        const out = handleDrafts(r);
-        send(res, out.status, out.body);
+        try {
+          const out = handleDrafts(r);
+          send(res, out.status, out.body);
+        } catch { send(res, 503, { error: '저장 결과를 확인하지 못했습니다. 입력을 보존하고 상태를 확인해 주세요.' }); }
       });
       return;
     }

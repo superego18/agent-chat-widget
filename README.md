@@ -37,6 +37,45 @@ node scripts/app-proxy.mjs --app http://localhost:3000 --port 4798 --review http
 
 그다음 `http://localhost:4798` 을 열면 앱 화면 왼쪽 아래에 `대화/피드백` 단추가 생깁니다. 세션 등록과 훅 설치는 ui-feedback-loop 의 SKILL.md 를 따릅니다.
 
+## Persistent work and owner review
+
+The **진행·확인** sheet keeps work and explicit owner questions outside the chat
+timeline. A worker takes an existing saved/held draft; its ID, original text,
+references and context stay in `drafts.json`. Work items are excluded from the
+ordinary pending/send lists. Completed items remain in a collapsed section.
+
+Use the existing private `POST /api/drafts` endpoint (the embedded widget uses
+`/__uifb/api/drafts`). Fetch current drafts before each change:
+
+```json
+{"action":"work-start","id":151,"actor":"registered-session-id","expectedText":"exact current draft text"}
+```
+
+Only the draft's registered destination session can be recorded as its worker.
+The actor is an operational assertion by a trusted local caller, not proof of
+native Task identity or additional permissions. It never starts an agent or
+claims the provider is currently running.
+
+```json
+{"action":"work-review","id":151,"actor":"registered-session-id","revision":1,"note":"Concrete result and the question to inspect"}
+```
+
+The owner answers in the sheet. The answer is persisted and stored as one normal
+user message to the assigned session with an idempotent CID. Queue acceptance,
+actual pickup and completion retain their existing meanings. A lost HTTP reply
+does not automatically resend or erase the owner's text. Stale review revisions
+are rejected. An approval stays pending until the worker actually finishes:
+
+```json
+{"action":"work-finish","id":151,"actor":"registered-session-id","revision":3}
+```
+
+An item that requested review cannot finish without approval; a correction goes
+back to work and needs a fresh review. Workers may finish work that never asked
+for review directly. These records do not execute code, merge or deploy changes.
+Native Codex/Claude question tools are not automatically imported or answered by
+this interface; a worker explicitly registers its question using `work-review`.
+
 ## 시험
 
 Codex queue outcomes, restart recovery, pickup evidence, embedding contracts and optional

@@ -241,6 +241,11 @@
   /* 보관함: 대화 목록을 바꾸지 않고 입력칸 위로 올라오는 시트(드롭업). 대화와 입력칸은 그대로 보인다. */
   .dsheet { position: absolute; left: 0; right: 0; z-index: 3; max-height: 62%; display: flex; flex-direction: column; background: #f6f5f1; border-top: 1px solid rgba(0,0,0,.12); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 24px rgba(0,0,0,.14); animation: sheetup .16s ease-out; }
   .dsheet[hidden] { display: none; }
+  .workgroup h3 { font-size: 14px; }
+  .workcard { min-width: 0; overflow-wrap: anywhere; }
+  .workcard p { white-space: pre-wrap; }
+  .workcard textarea { width: 100%; box-sizing: border-box; font-size: 16px; min-height: 80px; }
+  @media (max-width: 519px) { #wsheet button { min-height: 44px; } }
   .cats { display: contents; }
   /* 분류 칩 한 줄: 짧게 누르면 "나중에" 담을 분류(진한 색), 꾹 누르면 그 분류 보관함 열기(▾). 누르는 동안 칩이 차오른다. */
   .cats .cat { position: relative; overflow: hidden; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid #c7c9f5; background: #eef0ff; color: #3730a3; cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform .12s; }
@@ -441,7 +446,8 @@
   <div class="msgs" id="msgs" aria-live="polite"></div>
   <div class="dsheet" id="psheet" hidden role="dialog" aria-label="비교 페이지 목록"><div class="dhead"><span id="ptitle">비교 페이지</span><span class="dbtns"><button type="button" id="phid">숨긴 것 보기</button><button type="button" id="pclose" aria-label="비교 페이지 목록 닫기">닫기 ▾</button></span></div><div class="drafts" id="plist"></div></div><div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
-  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
+  <div class="dsheet" id="wsheet" hidden role="dialog" aria-label="진행·확인"><div class="dhead"><span id="wtitle">진행·확인</span><button type="button" id="wclose" aria-label="진행·확인 닫기">닫기 ▾</button></div><div class="drafts" id="wlist"></div></div>
+  <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><button class="chipbtn" type="button" id="workBtn" aria-pressed="false" aria-controls="wsheet">진행·확인</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
   <div class="where" id="reply" hidden></div>
   <span class="selreply" id="selReply" hidden><button type="button" id="selR">↩ 답장</button><button type="button" id="selF">📎 참고</button></span>
   <div class="toast" id="toast" hidden role="status"></div>
@@ -1947,8 +1953,11 @@
       const dk = JSON.stringify(dd.drafts || []) + JSON.stringify(dd.trash || []);
       if (dk !== draftsKey) {
         draftsKey = dk;
-        drafts = dd.drafts || [];
+        workItems = dd.drafts.filter(d => d.work);
+        drafts = dd.drafts.filter(d => !d.work);
         trash = dd.trash || [];
+        updateWorkBtn();
+        if (workOpen && !$('wlist').contains(root.activeElement)) renderWork();
         if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts();
       }
       sessions = ss.sessions || [];
@@ -2771,6 +2780,7 @@
 
   // ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(대화창 서버 drafts.json, 리뷰 페이지와 같은 보관함) ──
   let drafts = [];
+  let workItems = [], workOpen = false;
   let draftsRenderedKey = ''; // 보관함을 마지막으로 그렸을 때의 내용
   let trash = []; // 최근 7일 보낸 것·지운 것
   let showTrash = false;
@@ -3273,8 +3283,86 @@
     setDraftsView(false); // 보관함에서 보내면(하나든 분류·고른 것 전부든) 닫고 대화에서 보낸 글을 본다(#1881, #1883)
   }
 
+  function updateWorkBtn() {
+    const pending = workItems.filter(d => d.work.state === 'review' && !d.work.answer).length;
+    $('workBtn').textContent = `진행·확인${pending ? ` ${pending}` : ''}`;
+    $('workBtn').setAttribute('aria-pressed', String(workOpen));
+  }
+  const workReply = id => { try { return localStorage.getItem('__uifb_work_reply_' + id) || ''; } catch { return ''; } };
+  function keepWorkReply(id, value) { try { value ? localStorage.setItem('__uifb_work_reply_' + id, value) : localStorage.removeItem('__uifb_work_reply_' + id); } catch {} }
+  function renderWork() {
+    const box = $('wlist'); box.textContent = '';
+    $('wtitle').textContent = `진행·확인 ${workItems.filter(d => d.work.state !== 'done').length}개`;
+    if (!workItems.length) {
+      const empty = document.createElement('p'); empty.className = 'empty';
+      empty.textContent = '보관한 요청을 맡겨 주세요. 진행 상태와 확인할 내용이 여기에 남습니다.';
+      box.append(empty); return;
+    }
+    for (const [state, label] of [['review', '확인 요청'], ['working', '진행 중'], ['done', '완료']]) {
+      const list = workItems.filter(d => d.work.state === state);
+      if (!list.length) continue;
+      const group = document.createElement(state === 'done' ? 'details' : 'section'); group.className = 'workgroup';
+      const heading = document.createElement(state === 'done' ? 'summary' : 'h3');
+      heading.textContent = `${label} ${list.length}개`; group.append(heading);
+      for (const d of list) {
+        const w = d.work, card = document.createElement('article'); card.className = 'draft workcard'; card.dataset.workId = d.id;
+        const meta = document.createElement('p'); meta.className = 'meta';
+        meta.textContent = `${nameOf(w.actor)} · ${w.answer?.decision === 'approved' && state === 'review' ? '확인됨 · 담당 세션의 마무리 대기' : label}`;
+        const original = document.createElement('p'); original.textContent = d.text;
+        card.append(meta, original);
+        if (w.note) { const note = document.createElement('p'); note.textContent = w.note; card.append(note); }
+        if (state === 'review' && !w.answer) {
+          const input = document.createElement('textarea'); input.rows = 3; input.maxLength = 4000;
+          input.setAttribute('aria-label', `요청 ${d.id} 확인 의견`); input.placeholder = '수정할 내용이나 확인 의견'; input.value = workReply(d.id);
+          input.oninput = () => keepWorkReply(d.id, input.value);
+          const acts = document.createElement('div'); acts.className = 'acts';
+          for (const [decision, text] of [['approved', '확인했어요'], ['changes', '수정 요청']]) {
+            const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
+            button.onclick = () => withBusy(button, async () => {
+              if (decision === 'changes' && !input.value.trim()) { toast('수정할 내용을 적어 주세요'); input.focus(); return; }
+              const kind = `work:${d.id}:${w.revision}:${decision}`, reply = input.value.trim(), cid = cidFor(kind, reply || decision);
+              try {
+                const result = await draftsApi({ action: 'work-answer', id: d.id, revision: w.revision, decision, text: reply, cid });
+                doneCid(kind, reply || decision); keepWorkReply(d.id, '');
+                workItems = workItems.map(item => item.id === result.id ? result : item);
+                renderWork(); updateWorkBtn();
+                toast(decision === 'approved' ? '확인 내용을 저장했어요 · 담당 세션에 전달합니다' : '수정 요청을 저장했어요 · 담당 세션에 전달합니다');
+              } catch {
+                let recovered = false;
+                try {
+                  const latest = await fetch('/__uifb/api/drafts').then(r => { if (!r.ok) throw Error('drafts'); return r.json(); });
+                  workItems = (latest.drafts || []).filter(item => item.work);
+                  recovered = workItems.some(item => item.id === d.id && item.work.answer?.cid === cid && item.work.answer.revision === w.revision && item.work.answer.decision === decision && item.work.answer.text === reply);
+                  if (recovered) { keepWorkReply(d.id, ''); doneCid(kind, reply || decision); }
+                  renderWork(); updateWorkBtn();
+                } catch {}
+                toast(recovered ? '확인 내용이 저장되어 있어요' : '저장 결과를 확인하지 못했어요. 입력을 보존했어요. 최신 요청을 확인해 주세요.');
+              }
+            });
+            acts.append(button);
+          }
+          card.append(input, acts);
+        } else if (w.answer) { const answer = document.createElement('p'); answer.textContent = `내 답: ${w.answer.text || (w.answer.decision === 'approved' ? '확인했어요' : '수정 요청')}`; card.append(answer); }
+        group.append(card);
+      }
+      box.append(group);
+    }
+  }
+  function setWorkView(on) {
+    if (on) { setDraftsView(false); if (pagesOpen) setPagesView(false); }
+    const focused = $('wsheet').contains(root.activeElement);
+    workOpen = on; $('wsheet').hidden = !on; updateWorkBtn();
+    if (on) { renderWork(); placeSheet(); $('wclose').focus(); }
+    else if (focused) $('workBtn').focus();
+  }
+  $('workBtn').onclick = () => setWorkView(!workOpen);
+  $('wclose').onclick = () => setWorkView(false);
+  $('wsheet').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); setWorkView(false); } });
+  $('msgs').addEventListener('pointerdown', () => { if (workOpen) setWorkView(false); });
+
   // 시트는 보관함 버튼 줄 바로 위에 붙는다. 입력칸이 커지면 따라 올라간다.
   function placeSheet() {
+    if (workOpen) $('wsheet').style.bottom = Math.round($('panel').getBoundingClientRect().bottom - $('composeRow').getBoundingClientRect().top) + 'px';
     if (!showDrafts) return;
     const p = $('panel').getBoundingClientRect();
     $('dsheet').style.bottom = Math.round(p.bottom - $('composeRow').getBoundingClientRect().top) + 'px';
@@ -3290,6 +3378,7 @@
     if (showDrafts) { updateDraftsBtn(); renderDrafts(); } else setDraftsView(true);
   }
   function setDraftsView(on) {
+    if (on && workOpen) setWorkView(false);
     if (!on) sheetLabel = null;
     saveSheet({ open: on, label: sheetLabel, tab: activeTab });
     if (on && !showDrafts) loadFold();
@@ -3352,6 +3441,7 @@
     }
   }
   async function setPagesView(on) {
+    if (on && workOpen) setWorkView(false);
     pagesOpen = on;
     if (on && showDrafts) setDraftsView(false);
     $('psheet').hidden = !on;
