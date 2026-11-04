@@ -2,6 +2,8 @@
 // --lan 을 켜면 모든 네트워크에서 받되, 이 컴퓨터 밖에서 온 요청은 접속 키가 있어야 통과한다.
 //   처음 한 번 http://<주소>:<포트>/?k=<키> 로 열면 그 브라우저에 30일짜리 쿠키를 남기고 k 없는 주소로 다시 보낸다.
 //   이 컴퓨터 안(127.0.0.1)에서 온 요청(내 브라우저·에이전트 스크립트·훅·앱 프록시)은 키 없이 통과한다(tailscale serve 로 전달된 요청은 제외).
+// trustTailnet(--trust-tailnet)을 켜면 Tailscale 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)에서 직접 온 요청도 키 없이 통과한다.
+//   tailnet에 들어온 기기는 모두 대화창으로 세션을 조종할 수 있게 되므로, tailnet을 나 혼자 쓸 때만 켠다. 와이파이(LAN) 요청은 여전히 키가 필요하다.
 // 키는 <dir>/lan-key 에 두어 서버를 다시 켜도 같은 키를 쓴다(폰을 다시 등록할 필요 없음). 바꾸려면 그 파일을 지운다.
 
 import fs from 'node:fs';
@@ -16,7 +18,15 @@ const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const LEGACY_COOKIE = 'uifb_k';
 export const cookieName = (key) => `${LEGACY_COOKIE}_${crypto.createHash('sha256').update(key).digest('hex').slice(0, 10)}`;
 
-export function lanAuth({ dir, lan }) {
+// Tailscale CGNAT 대역(100.64.0.0/10)과 Tailscale IPv6 대역. IPv4-mapped(::ffff:100.x)도 받는다.
+export const isTailnetAddress = (addr = '') => {
+  const v4 = addr.replace(/^::ffff:/, '');
+  const m = /^100\.(\d+)\.\d+\.\d+$/.exec(v4);
+  if (m) return Number(m[1]) >= 64 && Number(m[1]) <= 127;
+  return /^fd7a:115c:a1e0:/i.test(addr);
+};
+
+export function lanAuth({ dir, lan, trustTailnet = false }) {
   let key = null;
   if (lan) {
     const file = path.join(dir, 'lan-key');
@@ -34,7 +44,8 @@ export function lanAuth({ dir, lan }) {
   const COOKIE = key ? cookieName(key) : LEGACY_COOKIE;
   const hasCookie = (req) =>
     (req.headers.cookie || '').split(/;\s*/).some((c) => c === `${COOKIE}=${key}` || c === `${LEGACY_COOKIE}=${key}`);
-  const ok = (req) => !lan || isLocal(req) || hasCookie(req);
+  const isTrustedTailnet = (req) => trustTailnet && isTailnetAddress(req.socket.remoteAddress) && !req.headers['x-forwarded-for'];
+  const ok = (req) => !lan || isLocal(req) || isTrustedTailnet(req) || hasCookie(req);
 
   return {
     key, // 홈 화면에 설치한 앱은 브라우저와 쿠키를 따로 써서, 설치 정보(manifest)의 시작 주소에 키를 붙인다(키가 있어야 받는 파일이라 새지 않는다)

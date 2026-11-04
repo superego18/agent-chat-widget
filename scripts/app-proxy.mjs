@@ -3,6 +3,7 @@
 // 사용: node app-proxy.mjs --app http://localhost:3001 [--port 4798] [--review http://localhost:4799] [--lan --dir .ui-feedback] [--no-widget]
 //   --no-widget: 위젯을 넣지 않고 접속 키만 확인한다(비교 페이지 안에 실제 앱을 띄울 때. 안에 위젯이 또 뜨지 않게).
 //   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, 키는 대화창 서버와 같은 <dir>/lan-key, lan-auth.mjs).
+//   --trust-tailnet: --lan과 함께 쓰면 Tailscale 주소에서 온 요청은 키 없이 통과(tailnet을 혼자 쓸 때만).
 //   --loopback: bind 127.0.0.1 even with --lan, for Tailscale Serve.
 //   --strict-origin: require same-origin writes before forwarding rewrites Origin.
 //   http://localhost:<port>/ 로 열면 앱을 그대로 보여 주고, HTML 응답에만 피드백 위젯 스크립트를 넣는다.
@@ -25,7 +26,7 @@ function arg(name, fallback) {
 const app = new URL(arg('app', 'http://localhost:3001'));
 const review = new URL(arg('review', 'http://localhost:4799'));
 const port = Number(arg('port', '4798'));
-const auth = lanAuth({ dir: path.resolve(arg('dir', '.ui-feedback')), lan: process.argv.includes('--lan') });
+const auth = lanAuth({ dir: path.resolve(arg('dir', '.ui-feedback')), lan: process.argv.includes('--lan'), trustTailnet: process.argv.includes('--trust-tailnet') });
 const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
 const TAG = '<script src="/__uifb/widget.js" defer></script>';
 const noWidget = process.argv.includes('--no-widget');

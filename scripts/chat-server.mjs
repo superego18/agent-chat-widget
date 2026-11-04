@@ -2,6 +2,7 @@
 // 대화창 서버를 혼자 띄운다. 의존성 없음 (Node 18+).
 // 사용: node chat-server.mjs [--dir .ui-feedback] [--port 4799] [--lan]
 //   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, lan-auth.mjs).
+//   --trust-tailnet: --lan과 함께 쓰면 Tailscale 주소에서 온 요청은 키 없이 통과(tailnet을 혼자 쓸 때만).
 //   앱 화면에 대화창을 붙이려면 app-proxy.mjs --review http://localhost:<이 포트> 로 앱 앞에 세운다.
 //   비교 페이지(ui-review-page)와 함께 쓰려면 이 서버 대신 두 처리기를 함께 붙인 서버를 쓴다.
 import http from 'node:http';
@@ -12,7 +13,7 @@ import { createChatHandler } from './chat-handler.mjs';
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback; };
 const root = path.resolve(arg('dir', '.ui-feedback'));
 const port = Number(arg('port', '4799'));
-const auth = lanAuth({ dir: root, lan: process.argv.includes('--lan') });
+const auth = lanAuth({ dir: root, lan: process.argv.includes('--lan'), trustTailnet: process.argv.includes('--trust-tailnet') });
 const chat = createChatHandler({ root, auth });
 
 const server = http.createServer((req, res) => {
