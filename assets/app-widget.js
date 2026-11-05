@@ -434,6 +434,7 @@
   .msg.side .tag { background: #cffafe; color: #155e75; font-weight: 600; }
   form .later { background: #fff; color: #1c1b18; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
   /* 보류 = 대화창 맨 아래 점선 말풍선과 같은 남색 점선, 보관함 = 보관함 창과 같은 베이지 상자 */
+  form #side { background: #ecfeff; color: #155e75; box-shadow: none; border: 1.5px dashed #22d3ee; }
   form #later, .msg.user.hold .hacts .tohold { background: #fff; color: #3730a3; box-shadow: none; border: 1.5px dashed #818cf8; }
   form #stash, .msg.user.hold .hacts .tostash { background: #ece9e1; color: #57534e; box-shadow: inset 0 0 0 1px #d6d3cb, inset 0 -3px 0 #d6d3cb; }
   form #later::before, form #stash::before, .msg.user.hold .hacts .tostash::before { margin-right: 3px; }
