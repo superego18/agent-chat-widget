@@ -21,6 +21,17 @@
   root.innerHTML = `
 <style>
   :host { all: initial; }
+  .native-question { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 16px; border: 1px solid #777; border-radius: 12px; background: #faf9f6; color: #25241f; }
+  .native-question::backdrop { background: rgba(0,0,0,.4); }
+  .native-question h2 { margin: 0 0 12px; font-size: 18px; }
+  .native-question form { display: block; padding: 0; }
+  .native-question fieldset { margin: 12px 0; min-width: 0; border: 1px solid #aaa; border-radius: 6px; }
+  .native-question legend { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .native-question label { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
+  .native-question textarea { display: block; width: 100%; font-size: 16px; }
+  .native-question button, .question-open { min-height: 44px; padding: 8px 12px; font: inherit; cursor: pointer; }
+  .native-question [role=status], .native-question [role=alert] { white-space: pre-wrap; }
+  .native-question-note { display: block; margin-top: 8px; font-size: 12px; color: #555; }
   * { box-sizing: border-box; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
   .btn { position: fixed; left: 20px; bottom: 112px; padding: 10px 14px; border-radius: 999px; border: 0; background: #1c1b18; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; gap: 6px; align-items: center; }
   /* 세션이 작업 중이면 버튼에 움직이는 점 세 개(승인 대기면 주황). 안 읽은 개수 배지와 따로 보인다. */
@@ -44,7 +55,7 @@
   header { padding: 10px 12px; border-bottom: 1px solid rgba(0,0,0,.1); }
   header b { font-size: 14px; }
   header p { margin: 2px 0 0; font-size: 12px; line-height: 1.4; }
-  header p.on { color: #15803d; } header p.off { color: #b45309; }
+  header p.on { color: #15803d; } header p.inactive { color: #b45309; }
   .msgs { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; background: #f6f5f1; }
   .msg { max-width: 88%; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
   .msg.user { align-self: flex-end; background: #4f46e5; color: #fff; }
@@ -140,12 +151,34 @@
   /* 세션끼리 주고받은 메시지: 사람이 쓴 글이 아니라는 게 한눈에 보이게 점선 테두리·다른 색으로 둔다. 받은 세션 탭에서는 오른쪽, 보낸 세션 탭에서는 왼쪽(그 세션이 말한 쪽). */
   .msg.sub { align-self: flex-start; background: #ecfdf5; color: #064e3b; box-shadow: 0 0 0 1px #6ee7b7; }
   .msg.sub .tag { background: #a7f3d0; color: #065f46; }
+  .chat-image { display: block; max-width: 100%; max-height: 240px; object-fit: contain; margin-top: 8px; border-radius: 8px; }
+  #image-preview:empty { display: none; }
+  #image-preview { display: flex; gap: 8px; padding: 4px 8px; overflow-x: auto; flex-shrink: 0; }
+  #image-preview > span { display: flex; align-items: center; flex-shrink: 0; }
+  #image-preview img { width: 72px; height: 72px; object-fit: contain; border-radius: 6px; }
+  #image-preview button { min-width: 44px; min-height: 44px; }
+  #image-quality { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid #8f8c84; border-radius: 12px; padding: 16px; background: #fff; color: #1c1b18; }
+  #image-quality::backdrop { background: rgba(0,0,0,.4); }
+  #image-quality form { display: block; padding: 0; }
+  #image-quality h2 { margin: 0 0 8px; font-size: 18px; }
+  #image-quality p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; }
+  #image-quality fieldset { min-width: 0; margin: 0 0 12px; padding: 8px; border: 1px solid #d4d2cd; border-radius: 8px; }
+  #image-quality legend { max-width: 100%; overflow-wrap: anywhere; font-size: 14px; }
+  #image-quality label { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; }
+  #image-quality .quality-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  #image-quality button { min-height: 44px; padding: 8px 16px; border: 1px solid #d4d2cd; border-radius: 8px; background: #f6f5f1; color: inherit; font: inherit; }
+  #image-quality button[value=upload] { background: #1c1b18; color: #fff; }
   .msg.sub .mbody { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   .msg.sub.open .mbody { display: block; -webkit-line-clamp: unset; }
   .msg.sub .subt { display: block; margin-top: 4px; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: #047857; cursor: pointer; }
-  .msg.peer { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
+  .msg.peer, .msg.automation, .msg.mailbox-notice { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
+  .msg.automation { align-self: flex-end; }
   .msg.peer.in { align-self: flex-end; }
-  .msg.peer .tag { background: #fed7aa; color: #9a3412; }
+  .msg.peer .tag, .msg.automation .tag, .msg.mailbox-notice .tag { background: #fed7aa; color: #9a3412; }
+  .msg.native-internal { align-self: flex-start; background: #f1f5f9; color: #334155; box-shadow: none; border: 1px solid #94a3b8; }
+  .msg.native-internal .tag { background: #e2e8f0; color: #334155; }
+  .msg.native-dispatch { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
+  .msg.native-dispatch .tag { background: #fed7aa; color: #9a3412; }
   .msg.peer .route { display: block; font-size: 11px; font-weight: 600; color: #c2410c; margin-bottom: 3px; }
   .tabs .flow { display: inline-block; align-self: center; font-weight: 700; color: #d97706; animation: flow .9s ease-in-out infinite; }
   .tabs .flow.back { animation-name: flowback; }
@@ -241,11 +274,37 @@
   /* 보관함: 대화 목록을 바꾸지 않고 입력칸 위로 올라오는 시트(드롭업). 대화와 입력칸은 그대로 보인다. */
   .dsheet { position: absolute; left: 0; right: 0; z-index: 3; max-height: 62%; display: flex; flex-direction: column; background: #f6f5f1; border-top: 1px solid rgba(0,0,0,.12); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 24px rgba(0,0,0,.14); animation: sheetup .16s ease-out; }
   .dsheet[hidden] { display: none; }
-  .workgroup h3 { font-size: 14px; }
-  .workcard { min-width: 0; overflow-wrap: anywhere; }
-  .workcard p { white-space: pre-wrap; }
-  .workcard textarea { width: 100%; box-sizing: border-box; font-size: 16px; min-height: 80px; }
-  @media (max-width: 519px) { #wsheet button { min-height: 44px; } }
+  #wsheet { --work-ink: #1c1b18; --work-muted: #5f5b52; --work-line: #e4e2dc; --work-soft: #f6f5f1; background: #fff; color: var(--work-ink); }
+  #wsheet > .dhead { padding: 4px 16px; color: var(--work-ink); font-size: 16px; border-bottom: 1px solid var(--work-line); }
+  #wsheet > .dhead button { min-height: 44px; font-size: 13px; color: var(--work-muted); }
+  #wlist { padding: 0 16px 16px; gap: 8px; }
+  .workgroup h3, .workgroup > summary { font-size: 12px; font-weight: 600; color: var(--work-muted); margin: 4px 0 0; line-height: 1.5; }
+  .workgroup > summary { cursor: pointer; padding: 8px 0; }
+  #wsheet .workcard { min-width: 0; overflow-wrap: anywhere; background: none; box-shadow: none; padding: 0; display: block; }
+  .workcard p { white-space: pre-wrap; line-height: 1.6; word-break: keep-all; }
+  .worksection { margin: 0 0 16px; }
+  .worksection h4 { font-size: 14px; margin: 0 0 8px; }
+  .worksection p { font-size: 14px; margin: 0 0 12px; }
+  #wsheet .workcard .meta { font-size: 12px; color: var(--work-muted); margin: 4px 0 16px; }
+  #wsheet .workcard textarea { width: 100%; box-sizing: border-box; font-size: 16px; min-height: 88px; padding: 12px; border: 1px solid var(--work-line); border-radius: 8px; background: var(--work-soft); line-height: 1.5; }
+  #wsheet textarea::placeholder { color: var(--work-muted); }
+  .worklist-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 8px 0; margin: 0; border: 0; border-bottom: 1px solid var(--work-line); border-radius: 0; background: none; color: var(--work-ink); cursor: pointer; }
+  .worklist-body { flex: 1; min-width: 0; }
+  .worklist-row svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--work-muted); }
+  .worklist-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 14px; font-weight: 600; line-height: 1.45; word-break: keep-all; }
+  .workrequest-text { font-size: 16px; margin: 0; }
+  .workrequest-text.expanded { display: block; -webkit-line-clamp: unset; }
+  #wsheet [data-work-expand] { background: none; border: 0; color: var(--work-muted); padding: 8px 0; min-height: 44px; font-size: 13px; cursor: pointer; }
+  #wsheet [data-work-expand][hidden] { display: none; }
+  .worklist-meta { display: block; margin-top: 4px; font-size: 12px; color: var(--work-muted); line-height: 1.4; }
+  .workback { position: sticky; top: 0; z-index: 1; background: #fff; border: 0; padding: 12px 0; min-height: 44px; text-align: left; color: var(--work-muted); cursor: pointer; }
+  .worksection summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 8px 0; min-height: 44px; }
+  #wsheet .acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  #wsheet .acts button { min-height: 44px; padding: 10px 12px; font-size: 14px; font-weight: 600; border-radius: 8px; color: var(--work-ink); border: 1px solid var(--work-line); background: #fff; cursor: pointer; }
+  #wsheet .acts .work-approve { background: var(--work-ink); color: #fff; border-color: var(--work-ink); }
+  #wsheet button:disabled { opacity: .5; cursor: wait; }
+  #wsheet :is(button, summary, textarea):focus-visible { outline: 2px solid var(--work-ink); outline-offset: 2px; }
+  @media (hover: hover) { .worklist-row:hover { background: var(--work-soft); } }
   .cats { display: contents; }
   /* 분류 칩 한 줄: 짧게 누르면 "나중에" 담을 분류(진한 색), 꾹 누르면 그 분류 보관함 열기(▾). 누르는 동안 칩이 차오른다. */
   .cats .cat { position: relative; overflow: hidden; font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid #c7c9f5; background: #eef0ff; color: #3730a3; cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform .12s; }
@@ -272,6 +331,10 @@
   .page .pst.todo { color: #4f46e5; }
   .page .pacts { display: flex; gap: 6px; }
   .page .pacts button { border: 1px solid rgba(0,0,0,.12); background: #fff; border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; color: #5a5852; }
+  .project-link { min-width: 0; }
+  .project-link a { display: block; min-height: 44px; padding: 5px 0; overflow-wrap: anywhere; }
+  .project-link a span { display: block; font-weight: 400; font-size: 12px; }
+  .link-heading { margin: 8px 0 2px; font-size: 13px; }
   .page.hid { opacity: .6; }
   .drafts { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
   .drafts[hidden], .msgs[hidden], form[hidden], .chipbtn[hidden] { display: none; }
@@ -437,14 +500,14 @@
 </style>
 <div class="pins" id="pins" hidden></div>
 <div class="peek" id="peek" hidden role="status"></div>
-<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="화면 새로고침" aria-label="화면 새로고침"><span class="ri">↻</span></button>
+<button class="btn" id="btn" type="button" aria-expanded="false">대화/피드백<span class="work" id="work" hidden><i></i><i></i><i></i></span><span class="badge" id="badge" hidden></span></button><button class="rbtn" id="rbtn" type="button" title="대화 새로고침" aria-label="대화 새로고침"><span class="ri">↻</span></button>
 <section class="panel" id="panel" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절" aria-hidden="true"></div>
-  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="pagesBtn" type="button" title="이 프로젝트의 비교 페이지 목록">비교 페이지</button><button class="notif" id="stopBtn" type="button" title="이 세션이 하던 작업 멈추기(터미널에 Esc)" hidden>중지</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
+  <header><button class="close" id="close" type="button">닫기</button><button class="notif" id="pagesBtn" type="button" title="앱·서버의 로컬·원격 주소와 비교 페이지">프로젝트 링크</button><button class="notif" id="stopBtn" type="button" title="이 세션이 하던 작업 멈추기(터미널에 Esc)" hidden>중지</button><button class="notif" id="compact" type="button" title="이 세션의 터미널에 /compact 입력" hidden>압축</button><button class="notif" id="reload" type="button" title="대화 새로고침" aria-label="대화 새로고침"><span class="ri">↻</span></button><button class="notif" id="notif" type="button" title="알림 켜기·설정">🔕 알림</button>
   <div class="nset" id="nset" hidden role="dialog" aria-label="알림 설정"></div><b id="heading">대화/피드백</b><div class="row tabs" id="tabs" role="tablist" aria-label="세션"></div><p id="mode" class="off"></p></header>
   <div class="pinbar" id="pinbar" hidden></div>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="dsheet" id="psheet" hidden role="dialog" aria-label="비교 페이지 목록"><div class="dhead"><span id="ptitle">비교 페이지</span><span class="dbtns"><button type="button" id="phid">숨긴 것 보기</button><button type="button" id="pclose" aria-label="비교 페이지 목록 닫기">닫기 ▾</button></span></div><div class="drafts" id="plist"></div></div><div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
+  <div class="dsheet" id="psheet" hidden role="dialog" aria-label="프로젝트 링크"><div class="dhead"><span id="ptitle">프로젝트 링크</span><span class="dbtns"><button type="button" id="phid">숨긴 것 보기</button><button type="button" id="pclose" aria-label="프로젝트 링크 닫기">닫기 ▾</button></span></div><div class="drafts" id="plist"></div></div><div class="dsheet" id="dsheet" hidden role="dialog" aria-label="보관함"><div class="dhead"><span id="dtitle">보관함</span><span class="dbtns"><button type="button" id="pinsToggle" hidden title="이 화면에 위치를 찍은 보관함 글을 앱 위에 번호로 보이기">화면 번호 끄기</button><button type="button" id="dclose" aria-label="보관함 닫기">닫기 ▾</button></span></div><div class="drafts" id="drafts"></div>
   <div class="dfoot" id="dfoot"><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div></div>
   <div class="dsheet" id="wsheet" hidden role="dialog" aria-label="진행·확인"><div class="dhead"><span id="wtitle">진행·확인</span><button type="button" id="wclose" aria-label="진행·확인 닫기">닫기 ▾</button></div><div class="drafts" id="wlist"></div></div>
   <div class="row" id="composeRow"><button class="chipbtn" type="button" id="draftsBtn" aria-pressed="false" aria-label="보관함 전체">전체</button><button class="chipbtn" type="button" id="workBtn" aria-pressed="false" aria-controls="wsheet">진행·확인</button><span class="cats" id="cats"></span><button class="chipbtn" type="button" id="pick" style="margin-left:auto">위치 찍기</button></div>
@@ -456,7 +519,9 @@
   <div class="sidepop" id="sidepop" hidden role="dialog" aria-label="곁질문 묶음"></div>
   <div class="where sidebar" id="sidebar" hidden><span id="sideText"></span><button type="button" id="sideCut" title="이 묶음을 닫고, 다음 곁질문은 새 묶음으로">끊기</button></div>
   <div class="where" id="where" hidden><span id="whereText"></span><button type="button" class="adjbtn" id="adjBtn" hidden title="찍은 요소의 글자·크기·색·여백을 그 자리에서 바꿔 보고, 바꾼 값을 함께 보내기">값 바꾸기</button><button type="button" id="whereClear" aria-label="위치 지우기">×</button></div>
-  <form id="form"><span class="inwrap" id="inback"><div id="input" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메시지" data-placeholder="질문이나 요청 · Enter 보내기" data-empty="true"></div><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="글을 쓰고 누르면 세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 비어 있을 때 누르면 곁질문 묶음 목록">곁질문</button></span></form>
+  <div id="image-preview" aria-live="polite"></div><input id="image-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif" multiple hidden>
+  <dialog id="image-quality" aria-labelledby="image-quality-title"><form method="dialog"><h2 id="image-quality-title">사진 화질 선택</h2><p>원본은 그대로 올립니다. 압축은 긴 변 최대 1600px의 JPG로 만들어요. GIF를 압축하면 정지 이미지가 됩니다. 아래 용량은 실제 전송할 파일 기준입니다.</p><div id="image-quality-options"></div><div class="quality-actions"><button value="cancel">취소</button><button value="upload">선택한 화질로 첨부</button></div></form></dialog>
+  <form id="form"><span class="inwrap" id="inback"><div id="input" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메시지" data-placeholder="질문이나 요청 · Enter 보내기" data-empty="true"></div><button type="button" class="clr" id="clr" aria-label="입력칸 비우기" title="입력칸 비우기" hidden>×</button></span><span class="bcol"><button type="button" id="attach" class="later" aria-label="사진 첨부">사진</button><button type="submit">보내기</button><button type="button" class="now" id="now" title="하던 일이 끝나길 기다리지 않고, 세션이 다음 단계로 넘어갈 때 바로 읽게 보내기" hidden>끼워넣기</button></span><span class="bcol"><button type="button" class="later" id="later" title="대화창 맨 아래에 잠깐 보류(보내기를 누를 때까지 안 보냄)">보류</button><button type="button" class="later" id="stash" title="보관함에 담아 두고 나중에 분류해서 보내기">보관함</button><button type="button" class="later" id="side" title="글을 쓰고 누르면 세션을 복제한 사본에게 따로 묻기(원래 세션에는 안 감). 비어 있을 때 누르면 곁질문 묶음 목록">곁질문</button></span></form>
 </section>
 <div class="hint" id="hint" hidden><span>찍을 곳을 누르세요</span><span class="seg" role="group" aria-label="찍을 화면"><button type="button" data-t="app" aria-pressed="true">앱 화면</button><button type="button" data-t="widget" aria-pressed="false">대화창</button></span><button type="button" class="hcancel" id="pickCancel">취소</button></div>
 <div class="adj" id="adj" hidden role="dialog" aria-label="값 바꾸기"><div class="ahead"><b>값 바꾸기</b><span id="adjWhat"></span><button type="button" class="aclose" id="adjClose" aria-label="닫기" title="닫기">✕</button></div><div class="afields" id="adjFields"></div><div class="aacts"><button type="button" id="adjReset">되돌리기</button><button type="button" class="primary" id="adjDone">완료</button></div></div>
@@ -487,8 +552,23 @@
     try { return await fn(); } catch { toast('처리하지 못했어요. 다시 눌러 주세요'); } finally { btn.classList.remove('busy'); }
   }
   let sessions = [];
+  let sessionsState = 'loading';
+  function sessionNotice() {
+    return sessionsState === 'loading' ? '세션 목록을 불러오는 중입니다.'
+      : sessionsState === 'error' ? '세션 목록을 불러오지 못했습니다. 연결을 확인하고 잠시 기다려 주세요. 자동으로 다시 확인합니다.'
+      : '등록된 세션이 없습니다.';
+  }
   const transcripts = {};
+  const loadedHistories = new Set();
+  const historyRequests = new Map(), historyVersions = new Map(), historySnapshots = new Map(), historyErrors = new Set();
+  let chatLoaded = false, positionsLoaded = false;
   let activeTab = null;
+  let stagedImages = {};
+  try { const saved = JSON.parse(localStorage.getItem('__uifb_images') || '{}'); if (saved && typeof saved === 'object' && !Array.isArray(saved)) stagedImages = saved; } catch {}
+  const uploadingImages = new Set();
+  const imageStages = new Map();
+  let imagePreviewKey = '';
+  const imageIds = m => (m.attachments || []).map(a => a.id);
   try { activeTab = localStorage.getItem('__uifb_tab'); } catch {}
   let where = null;
   let prefsReady = false; // 서버 설정(prefs)을 한 번이라도 받았는지
@@ -499,6 +579,7 @@
   let editStartAt = 0;
   // 보내기를 취소한(또는 막 취소한) 글을 보류로 돌린다. 답장·참고·위치 정보도 함께 가져간다.
   async function moveToHold(m) {
+    if (m.attachments?.length) { toast('사진 메시지는 대화에 그대로 보관됩니다. 보류로 옮기기는 아직 지원하지 않습니다.'); return; }
     const text = m.draft ? m.draft.items.map((it) => it.text).join('\n') : m.text;
     await draftsApi({ action: 'add', hold: true, fromMsg: m.id, cid: 'tohold-' + m.id, ...(m.replyTo ? { replyTo: m.replyTo, replyQuote: m.replyQuote, refer: m.refer } : {}), ...(m.quotes ? { quotes: m.quotes } : {}), to: m.to, text, context: m.context, round: m.round, device: m.device, ...(m.where ? { where: m.where } : {}) });
     toast('✓ 보류로 옮김');
@@ -510,7 +591,7 @@
     if (!text) return;
     if (sessionById(m.to)?.tool === 'codex' && m.queue?.state === 'accepted' && !got(m) &&
       !confirm('원래 메시지는 이미 전달 요청되어 아직 실행될 수 있습니다. 수정한 글은 새 메시지로 보내므로 작업이 중복될 수 있습니다. 그래도 보낼까요?')) return;
-    const body = { from: 'user', text, ...(draft ? { draft } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, cid: cidFor('resend:' + m.id, text), ...(m.quotes ? { quotes: m.quotes } : {}), ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
+    const body = { from: 'user', text, ...(draft ? { draft } : {}), ...(m.attachments?.length ? { attachments: imageIds(m) } : {}), to: m.to, context: m.context, round: m.round, device: deviceNow(), resendOf: m.id, cid: cidFor('resend:' + m.id, text), ...(m.quotes ? { quotes: m.quotes } : {}), ...(m.replyTo ? { replyTo: m.replyTo, ...(m.replyQuote ? { replyQuote: m.replyQuote } : {}), ...(m.refer ? { refer: true } : {}) } : {}), ...(m.where ? { where: m.where } : {}) };
     body.ack = 'stored';
     pendingCids.add(body.cid);
     try {
@@ -545,9 +626,16 @@
   // 메시지 번호: 대화창 기록은 숫자, Codex 대화 기록에서 읽은 메시지는 x 로 시작하는 글자(#2113). 둘 다 답장·참고·고정·곁질문할 수 있다.
   const idOf = (v) => (/^x[\w-]+$/.test(String(v)) ? String(v) : Number(v));
   const canRef = (m) => typeof m.id === 'number' || /^x[\w-]+$/.test(String(m.id));
+  let renderingTimelines = null, renderingReferences = null;
   function refMessage(id) {
     const key = String(id).startsWith('\u2063') ? 'xq' + String(id).slice(1) : idOf(id);
+    if (renderingReferences) return renderingReferences.ids.get(key) || renderingReferences.refs.get(key);
     const all = [...messages, ...Object.values(transcripts).flat()];
+    if (renderingTimelines) {
+      renderingReferences = { ids: new Map(), refs: new Map() };
+      for (const m of all) { if (!renderingReferences.ids.has(m.id)) renderingReferences.ids.set(m.id, m); if (!renderingReferences.refs.has(m.refId)) renderingReferences.refs.set(m.refId, m); }
+      return renderingReferences.ids.get(key) || renderingReferences.refs.get(key);
+    }
     return all.find(m => m.id === key) || all.find(m => m.refId === key);
   }
   // Keep the native namespace distinct from numbered chat messages without adding visible text width.
@@ -611,6 +699,16 @@
     }
   }
   const isUnread = (m) => m.from === 'agent' && !!m.session && String(m.at) > (seen[m.session] || '');
+  function isMailboxNotice(m) {
+    // This recognizes only the native notice format, not its sender or a successful delivery.
+    if (m.from !== 'user' || m.context !== 'terminal' || !/^x[\w-]+$/.test(String(m.id)) || sessionById(m.session)?.tool !== 'codex' || typeof m.text !== 'string' || !m.text.startsWith('You have ')) return false;
+    const parts = m.text.split(/\r?\n[ \t]*\r?\n/).map(part => /^You have [1-9]\d* orchestration messages?\. Run `orca orchestration check(?: --run (run_[\w-]+))?`\.$/.exec(part));
+    return parts.every(p => p && p[1] === parts[0]?.[1]);
+  }
+  function nativeSourceLabel(m) {
+    if (m.from !== 'user' || m.context !== 'terminal' || !/^x[\w-]+$/.test(String(m.id)) || m.nativeDisplay?.provider !== 'codex') return '';
+    return { 'goal-context': '자동 문맥 · Codex · 목표 진행', 'project-instructions': '프로젝트 지침 · Codex', 'environment-context': '환경 정보 · Codex', 'orca-dispatch': '작업 배정 · Orca · 기록 확인', 'pipeline-continuation': '자동 안내 · 작업 이어가기 · Codex · 전송 경로 미확인' }[m.nativeDisplay.kind] || '';
+  }
 
   function mdLite(text) {
     const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -651,7 +749,7 @@
     return el.tagName.toLowerCase() + (el.id ? '#' + el.id : el.classList[0] ? '.' + el.classList[0] : '');
   }
 
-  const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.from === 'sub' ? '서브에이전트' : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
+  const quoteOf = (m) => `${m.from === 'user' ? '나' : m.from === 'automation' ? '자동 안내' : m.from === 'peer' ? (m.session ? nameOf(m.session) : m.fromName || '다른 세션') : m.from === 'sub' ? '서브에이전트' : m.agent || nameOf(m.session)}: ${m.text.replace(/\s+/g, ' ').slice(0, 80)}`;
   // 일부만 인용: 메시지 글의 일부를 길게 눌러(또는 끌어) 고른 뒤 그 메시지의 "답장"을 누르면 고른 부분만 인용한다.
   // 버튼을 누르는 순간 선택이 풀리기도 해서, 마지막으로 고른 글을 잠시 기억해 둔다.
   let replyQuote = null;
@@ -1087,18 +1185,20 @@
     for (const m of messages) if (m.from === 'user' && (m.to === activeTab || m.session === activeTab)) for (const q of m.quotes || (m.replyTo ? [{ id: m.replyTo, refer: m.refer }] : [])) if (!q.refer) pairs.push({ from: q.id, tos: [m.id], kind: 'reply' });
     for (const p of links.peer || []) pairs.push({ ...p, kind: 'peer' }); // 세션끼리 주고받은 것은 따로 묶는다(같은 답 줄기와 섞이지 않게)
     // 같은 답(또는 같은 원문)으로 모이는 연결은 한 줄기로 합친다: 같은 종류끼리 보내는 쪽이나 받는 쪽 메시지를 하나라도 함께 쓰면 한 묶음.
-    const groups = [];
+    const groups = new Set(), membership = { answer: new Map(), reply: new Map(), peer: new Map() };
+    let groupOrder = 0;
     for (const p of pairs) {
       const ids = new Set([p.from, ...p.tos]);
-      const hit = groups.filter((g) => g.kind === p.kind && [...ids].some((id) => g.ids.has(id)));
-      const g = hit[0] || { kind: p.kind, froms: new Set(), tos: new Set(), ids: new Set() };
-      for (const o of hit.slice(1)) { o.froms.forEach((x) => g.froms.add(x)); o.tos.forEach((x) => g.tos.add(x)); o.ids.forEach((x) => g.ids.add(x)); groups.splice(groups.indexOf(o), 1); }
+      const owners = membership[p.kind];
+      const hit = [...new Set([...ids].map(id => owners.get(id)).filter(Boolean))].sort((a, b) => a.order - b.order);
+      const g = hit[0] || { kind: p.kind, froms: new Set(), tos: new Set(), ids: new Set(), order: groupOrder++ };
+      for (const o of hit.slice(1)) { o.froms.forEach((x) => g.froms.add(x)); o.tos.forEach((x) => g.tos.add(x)); o.ids.forEach((x) => { g.ids.add(x); owners.set(x, g); }); groups.delete(o); }
       g.froms.add(p.from);
       p.tos.forEach((x) => g.tos.add(x));
-      ids.forEach((x) => g.ids.add(x));
-      if (!hit[0]) groups.push(g);
+      ids.forEach((x) => { g.ids.add(x); owners.set(x, g); });
+      if (!hit[0]) groups.add(g);
     }
-    const placed = groups.map((g) => {
+    const placed = [...groups].map((g) => {
       const qs = [...g.froms].map((id) => ({ id, p: pos(id) })).filter((x) => x.p).sort((a, b) => a.p.y - b.p.y);
       const ends = [...g.tos].filter((id) => !g.froms.has(id)).map(pos).filter(Boolean).sort((a, b) => a.y - b.y);
       return { ...g, qs, ends };
@@ -1142,10 +1242,13 @@
   new ResizeObserver(() => { if (lastLinks && !linkRaf) linkRaf = requestAnimationFrame(() => { linkRaf = 0; drawLinks(lastLinks); }); }).observe($('msgs'));
 
   function timeline(tab) {
-    return [...messages, ...Object.values(transcripts).flat()]
+    if (renderingTimelines?.has(tab)) return renderingTimelines.get(tab);
+    const items = [...messages, ...Object.values(transcripts).flat()]
       .filter(m => !m.hiddenFailure && !pendingCids.has(m.cid))
       .filter((m) => tab === 'all' || ownerOf(m) === tab || (m.from === 'peer' && m.session === tab))
       .sort((a, b) => orderAt(a).localeCompare(orderAt(b)));
+    renderingTimelines?.set(tab, items);
+    return items;
   }
   // 세션에게 보낸 메시지는 보낸 시각이 아니라 세션이 받아 간 시각에 놓는다. 아직 안 받아 갔으면 맨 아래에 둔다.
   // 세션이 받아 갔는지: 감시 명령이 넘긴 마지막 번호까지, 또는 끼워넣기로 따로 넘긴 것(_at).
@@ -1171,7 +1274,7 @@
     const box = $('tabs');
     box.textContent = '';
     const tabs = sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active }));
-    if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || {}).id || null;
+    if (sessionsState === 'ready' && !tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || {}).id || null;
     $('compact').hidden = !sessionById(activeTab)?.compact;
     { const x = sessionById(activeTab); $('stopBtn').hidden = !x?.compact || !(x.tool === 'codex' || ['working', 'permission'].includes(x.status?.state)); }
     for (const t of tabs) {
@@ -1346,7 +1449,83 @@
       return c;
     }));
   }
+  let nativeQuestionDialog;
+  const nativeQuestionDrafts = new Map();
+  async function openNativeQuestion(message, opener) {
+    if (nativeQuestionDialog) { nativeQuestionDialog.focus(); return; }
+    const dialog = document.createElement('dialog'); dialog.className = 'native-question';
+    nativeQuestionDialog = dialog;
+    const title = document.createElement('h2'); title.textContent = '원래 질문에 답변'; title.id = 'native-question-title';
+    dialog.setAttribute('aria-labelledby', title.id);
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '닫기';
+    close.onclick = () => dialog.close();
+    const status = document.createElement('p'); status.setAttribute('role', 'status'); status.textContent = '현재 질문을 확인하고 있습니다…';
+    dialog.append(title, status, close); root.append(dialog);
+    dialog.addEventListener('close', () => { dialog.remove(); nativeQuestionDialog = null; if (opener.isConnected) opener.focus(); }, { once: true });
+    dialog.showModal(); close.focus();
+    const request = async submission => {
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 22000);
+      try {
+        const response = await fetch('/__uifb/api/question', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ session: message.session, itemId: message.nativeQuestion.itemId, ...(submission ? { submission } : {}) }) });
+        const value = await response.json();
+        if (!response.ok || !value.ok) throw Object.assign(new Error(value.error || '원래 질문을 확인하지 못했습니다.'), { state: value.state });
+        return value;
+      } finally { clearTimeout(timer); }
+    };
+    let question;
+    try { question = await request(); }
+    catch (error) { status.setAttribute('role', 'alert'); status.textContent = error.name === 'AbortError' ? '질문 확인 시간이 초과됐습니다. 답변은 전송하지 않았습니다.' : error.message; return; }
+    if (!dialog.isConnected) return;
+    if (question.state !== 'pending') { status.textContent = question.message || '이 질문은 이미 전송을 시작했습니다. 원래 질문창을 확인해 주세요.'; return; }
+    status.textContent = '일반 메시지 대신 원래 질문 ID에 답변합니다.';
+    const form = document.createElement('form'), fields = [];
+    const draft = nativeQuestionDrafts.get(message.id) || {};
+    for (const [index, q] of question.questions.entries()) {
+      const fieldset = document.createElement('fieldset'), legend = document.createElement('legend');
+      legend.textContent = q.title; fieldset.append(legend);
+      const radios = [];
+      for (const [i, option] of q.options.entries()) {
+        const label = document.createElement('label'), radio = document.createElement('input'); radio.type = 'radio'; radio.name = `native-q-${index}`; radio.value = String(i); radio.required = true;
+        radio.checked = draft[q.id]?.option === String(i); radios.push(radio);
+        label.append(radio, option.label + (option.description ? ' — ' + option.description : '')); fieldset.append(label);
+      }
+      let other, otherRadio;
+      if (q.allowOther) {
+        const label = document.createElement('label');
+        if (q.options.length) { otherRadio = document.createElement('input'); otherRadio.type = 'radio'; otherRadio.name = `native-q-${index}`; otherRadio.value = 'other'; otherRadio.checked = draft[q.id]?.option === 'other'; radios.push(otherRadio); label.append(otherRadio); }
+        const caption = document.createElement('span'); caption.textContent = '직접 입력'; label.append(caption); fieldset.append(label);
+        other = document.createElement('textarea'); other.setAttribute('aria-label', `${q.title} 직접 입력`); other.maxLength = 16000; other.value = draft[q.id]?.other || ''; fieldset.append(other);
+        other.oninput = () => { if (otherRadio) otherRadio.checked = true; remember(); };
+      }
+      const remember = () => { draft[q.id] = { option: radios.find(r => r.checked)?.value, other: other?.value || '' }; nativeQuestionDrafts.set(message.id, draft); };
+      for (const r of radios) r.onchange = remember;
+      fields.push({ q, radios, other }); form.append(fieldset);
+    }
+    const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = '질문에 답변 보내기'; form.append(submit); close.before(form);
+    form.onsubmit = async event => {
+      event.preventDefault(); if (submit.disabled) return;
+      const answers = fields.map(({ q, radios, other }) => {
+        const selected = radios.find(r => r.checked)?.value;
+        return { id: q.id, value: selected === 'other' || !q.options.length ? other?.value || '' : q.options[Number(selected)]?.label || '' };
+      });
+      if (answers.some(a => !a.value.trim())) { status.setAttribute('role', 'alert'); status.textContent = '각 질문에 답변을 입력해 주세요.'; return; }
+      // The first attempt may have reached the native host even if HTTP is lost.
+      // Never turn a failure into an ordinary chat send or automatic retry.
+      submit.disabled = true; status.setAttribute('role', 'status'); status.textContent = '원래 질문창에 답변을 전송하고 있습니다…';
+      try {
+        const result = await request({ revision: question.revision, answers }); status.textContent = result.message;
+        for (const fieldset of form.querySelectorAll('fieldset')) fieldset.disabled = true;
+        nativeQuestionDrafts.delete(message.id);
+      } catch (error) { if (error.state === 'invalid') submit.disabled = false; status.setAttribute('role', 'alert'); status.textContent = error.name === 'AbortError' ? '처리 결과를 확인하지 못했습니다. 중복 전송하지 말고 원래 질문창을 확인해 주세요.' : error.message; }
+    };
+  }
+  const imageLayoutObserver = new ResizeObserver(() => restoreLayoutPosition());
   function render() {
+    // Reuse lookups only within this synchronous render; later data always gets fresh indexes.
+    const priorTimelines = renderingTimelines, priorReferences = renderingReferences;
+    renderingTimelines = new Map(); renderingReferences = null;
+    try {
     renderTabs();
     const box = $('msgs');
     const gapBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
@@ -1357,12 +1536,27 @@
     const prevTop = box.scrollTop;
     // 보던 위치는 화면 맨 위에 걸린 메시지를 기준으로 기억한다(위쪽 내용 높이가 바뀌어도 그 메시지가 같은 자리에 오게).
     const boxTop = box.getBoundingClientRect().top;
-    const anchorEl = [...box.querySelectorAll('.msg[data-id]')].find((el) => el.getBoundingClientRect().bottom > boxTop + 1);
-    const anchorId = anchorEl?.dataset.id, anchorOff = anchorEl ? anchorEl.getBoundingClientRect().top - boxTop : 0;
-    const keepPlace = () => {
-      const el = anchorId && renderedTab === activeTab ? box.querySelector(`.msg[data-id="${CSS.escape(anchorId)}"]`) : null;
-      box.scrollTop = el ? box.scrollTop + (el.getBoundingClientRect().top - box.getBoundingClientRect().top) - anchorOff : prevTop;
+    const anchorTop = el => {
+      const transform = getComputedStyle(el).transform;
+      return el.getBoundingClientRect().top - box.getBoundingClientRect().top - (transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42);
     };
+    const rows = [...box.querySelectorAll('.msg[data-id]')];
+    const anchorIndex = rows.findIndex(el => el.getBoundingClientRect().bottom > boxTop + 1);
+    const nextAnchorId = rows[anchorIndex + 1]?.dataset.id;
+    // The top row can be deleted or moved after delivery. Keep its nearest
+    // surviving neighbour as a fallback, at that neighbour's original offset.
+    const anchors = anchorIndex < 0 ? [] : [rows[anchorIndex], rows[anchorIndex + 1], rows[anchorIndex - 1]].filter(Boolean).map(el => ({ id: el.dataset.id, offset: anchorTop(el) }));
+    const keepPlace = () => {
+      const positions = new Map([...box.querySelectorAll('.msg[data-id]')].map((el, index) => [el.dataset.id, { el, index }]));
+      const candidates = renderedTab === activeTab ? anchors.filter(a => positions.has(a.id)).map(a => ({ ...a, ...positions.get(a.id) })) : [];
+      let anchor = candidates[0];
+      const next = candidates.find(a => a.id === nextAnchorId);
+      // A delivered row may move out of the held-message group. Stay with the
+      // surrounding conversation instead of following it across the history.
+      if (anchor?.id === anchors[0]?.id && next && next.index !== anchor.index + 1) anchor = next;
+      box.scrollTop = anchor ? box.scrollTop + anchorTop(anchor.el) - anchor.offset : prevTop;
+    };
+    imageLayoutObserver.disconnect();
     box.textContent = '';
     renderSide();
     // 곁질문 화면(#2102): 묶음을 펼쳤거나 새 곁질문을 시작하면 그 메시지와 그 묶음 곁질문만 보인다. 끊기를 누르면 원래 대화로 돌아간다.
@@ -1376,8 +1570,9 @@
       const p = document.createElement('p');
       p.className = 'empty';
       p.textContent = sessions.length
-        ? '앱을 쓰다가 생긴 질문이나 요청을 보내세요.\n"위치 찍기"로 화면의 한 곳을 함께 보낼 수 있습니다.'
-        : '등록된 세션이 없습니다.\n작업 세션이 자기 세션을 등록하면 대화할 수 있습니다.';
+        ? !loadedHistories.has(activeTab) ? historyErrors.has(activeTab) ? '대화 기록을 불러오지 못했습니다. 자동으로 다시 확인합니다.' : '대화 기록을 불러오는 중입니다…'
+        : '앱을 쓰다가 생긴 질문이나 요청을 보내세요.\n"위치 찍기"로 화면의 한 곳을 함께 보낼 수 있습니다.'
+        : sessionNotice() + (sessionsState === 'ready' ? '\n작업 세션이 자기 세션을 등록하면 대화할 수 있습니다.' : '');
       box.append(p);
     }
     if (showTab !== activeTab) { showCount = PAGE; showTab = activeTab; }
@@ -1419,13 +1614,18 @@
       }
       const d = document.createElement('div');
       d.className = 'msg ' + m.from + (m.interim ? ' interim' : '') + (m.context === 'side' ? ' side' : '') + (m.from === 'sub' && openSubs.has(m.id) ? ' open' : '') + (isUnread(m) ? ' unread' : '') + (m.from === 'peer' ? (m.session === activeTab ? ' out' : ' in') : '');
+      const mailboxNotice = isMailboxNotice(m);
+      if (mailboxNotice) d.classList.add('mailbox-notice');
+      const nativeLabel = nativeSourceLabel(m);
+      if (nativeLabel) d.classList.add(['orca-dispatch', 'pipeline-continuation'].includes(m.nativeDisplay.kind) ? 'native-dispatch' : 'native-internal');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
       if (m.context === 'side') d.dataset.group = String(groupOf(m));
       if (sideView && m.id === sideAnchor) d.classList.add('sideanchor');
       const tag = document.createElement('span');
       tag.className = 'tag';
-      const src = m.from === 'peer' ? '세션끼리' : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'side' ? '곁질문' : m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : '');
+      const peerLabel = { terminal: 'Orca · 직접 전달', mailbox: 'Orca · 수신함 알림', dispatch: 'Orca · 작업 배정', 'app-server-steer': 'Codex · app-server 끼워넣기', 'message-tool': 'Claude · SendMessage', 'hook-relay': '경로 미확인 · Claude 훅 수신' }[m.peerMethod] || '전달 경로 미확인';
+      const src = nativeLabel || (mailboxNotice ? 'Orca 확인 안내 · Codex · 전송 경로 미확인' : m.from === 'automation' ? '자동 안내 · 작업 이어가기 · Codex · app-server' : m.from === 'peer' ? `세션끼리 · ${peerLabel}` : m.from === 'sub' ? '서브에이전트 보고' : (m.context === 'side' ? '곁질문' : m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱' : m.context === 'reply' ? '답장' : '비교 페이지') + (m.device ? ' · ' + (m.device === 'mobile' ? '모바일' : '데스크톱') : ''));
       tag.textContent = src + (m.interim ? ' · 중간 안내' : ''); // Codex 가 일하며 남긴 안내(최종 답과 구분 #2113)
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
@@ -1436,13 +1636,31 @@
       if (m.draft) renderDraftBody(body, m.draft, m.id);
       else if (m.quotes?.length) fillWithQuotes(body, m.text, m.quotes, m.id);
       else body.innerHTML = mdLite(m.text);
+      for (const a of m.attachments || []) {
+        if (!/^\/__uifb\/api\/chat-images\/[0-9a-f-]{36}$/.test(a.url || '')) continue;
+        const link = document.createElement('a'); link.href = a.url; link.target = '_blank'; link.rel = 'noopener';
+        const image = document.createElement('img'); image.src = a.url + '?thumbnail=1'; image.onerror = () => { image.onerror = null; image.src = a.url; }; image.alt = a.name || '첨부 사진'; image.loading = 'lazy'; image.className = 'chat-image';
+        link.append(image); body.append(link);
+        imageLayoutObserver.observe(image);
+      }
       if (m.from === 'peer') {
         const route = document.createElement('span');
         route.className = 'route';
-        route.textContent = `${m.session ? nameOf(m.session) : m.fromName || '다른 세션'} → ${m.to ? nameOf(m.to) : m.toName || '다른 세션'}`;
+        const toolName = (tool, host) => ({ claude: 'Claude', codex: 'Codex' }[tool] || '도구 미확인') + (host === 'cmux' ? ' · cmux 환경' : '');
+        route.textContent = `${m.session ? nameOf(m.session) : m.fromName || '다른 세션'} (${toolName(m.peerSourceTool, m.peerSourceHost)}) → ${m.to ? nameOf(m.to) : m.toName || '다른 세션'} (${toolName(m.peerTargetTool, m.peerTargetHost)})`;
         small.textContent = new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + (m.readAt ? ' · 받음' : '');
         d.append(tag, route, body, small);
       } else d.append(tag, body, small);
+      if (m.nativeQuestion?.tool === 'request_user_input_async' || m.nativeQuestion?.provider === 'claude') {
+        const note = document.createElement('span'); note.className = 'native-question-note';
+        note.textContent = '전용 질문창에서 답변 · 이 대화창의 직접 연결은 아직 미지원'; body.after(note);
+      } else if (m.nativeQuestion) {
+        const answer = document.createElement('button');
+        answer.type = 'button'; answer.className = 'question-open';
+        answer.textContent = '원래 질문에 답변';
+        answer.onclick = () => openNativeQuestion(m, answer);
+        body.after(answer);
+      }
       if (m.from === 'sub') {
         // 서브에이전트 보고는 앞 3줄만 보이고, 잘렸거나 펼친 상태일 때만 "펼치기/접기"를 보인다(#1948).
         const t = document.createElement('button');
@@ -1760,8 +1978,10 @@
       const anchor = posId && posId !== 'bottom' ? box.querySelector(`.msg[data-id="${CSS.escape(posId)}"]`) : null;
       // offsetTop 은 창 기준이라 머리말 높이만큼 어긋난다. 목록 기준 위치로 바꿔 계산한다.
       const topOf = (el) => el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-      box.scrollTop = anchor ? Math.max(0, topOf(anchor) - (posOff === undefined ? 8 : Number(posOff) || 0)) : newLine ? Math.max(0, topOf(newLine) - 8) : box.scrollHeight;
-      scrollToUnread = false;
+      if (anchor || (loadedHistories.has(activeTab) && chatLoaded && positionsLoaded)) {
+        box.scrollTop = anchor ? Math.max(0, topOf(anchor) - (posOff === undefined ? 8 : Number(posOff) || 0)) : newLine ? Math.max(0, topOf(newLine) - 8) : box.scrollHeight;
+        scrollToUnread = false;
+      }
     } else if (nearBottom) {
       // 새 답이 왔으면 그 답의 처음이 보이게 둔다(긴 답이면 끝부터 보이지 않게). 짧으면 어차피 맨 아래까지 내려간다.
       const fresh = [...box.querySelectorAll('.msg.agent, .msg.peer')].find((el) => renderedTab === activeTab && rendered.size > 0 && !rendered.has(el.dataset.id));
@@ -1776,26 +1996,33 @@
     requestAnimationFrame(renderPinned); // 말풍선의 펼치기 단추 등이 자리 잡은 뒤 본뜬다
     placeToBottom();
     const target = sessionById(activeTab);
-    // 세션이 일하는 중이고 Claude 세션(중계 훅이 끼워 넣음)일 때만 "끼워넣기"를 보인다.
-    $('now').hidden = !canInterject(target);
-    $('mode').className = target?.watch?.active ? 'on' : 'off';
+    // Keep the working-session control in place during connection refresh;
+    // stale availability must not enable delivery or imply an idle turn.
+    $('now').hidden = !target || !['working', 'permission'].includes(target.status?.state) || (target.tool === 'codex' && target.watch?.configured !== true && target.watch?.steer !== true);
+    $('now').disabled = !canInterject(target);
+    $('now').title = canInterject(target) ? '작업 중인 세션에 끼워넣기' : target?.watch?.control === 'checking' ? '끼워넣기 연결 확인 중입니다' : '끼워넣기 연결을 확인하지 못했습니다. 일반 보내기는 가능합니다';
+    renderImages();
+    $('mode').className = target?.watch?.active ? 'on' : 'inactive';
     $('mode').textContent = !target
-      ? '등록된 세션이 없습니다.'
+      ? sessionNotice()
       : target.watch?.via === 'queue'
-        ? `${target.name}에게 전달 요청을 보냅니다.`
+        ? `${target.name}에게 전달 요청을 보냅니다.${target.watch.control === 'disconnected' ? ' 끼워넣기·회수 연결이 끊겨 있습니다. 일반 보내기는 가능합니다.' : target.watch.control === 'not_loaded' ? ' 이 세션의 끼워넣기·회수 연결은 확인되지 않았습니다.' : target.watch.control === 'checking' ? ' 끼워넣기·회수 연결 확인 중입니다.' : ''}`
       : target.watch?.handling
         ? `${target.name}이(가) 메시지를 처리하는 중입니다. 지금 보내도 처리가 끝나면 바로 받습니다.`
         : target.watch?.active
         ? `${target.name}에게 보냅니다. 바로 전달됩니다.`
         : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
+    if (target && sessionsState === 'error') $('mode').textContent += ' 세션 목록을 갱신하지 못했습니다. 자동으로 다시 확인합니다.';
     $('input').disabled = !target;
-    $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
+    $('input').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : sessionNotice();
     markSeenVisible();
+    rememberLayoutPosition();
     updateBadges();
     updateDraftsBtn();
     // 보관함은 담긴 글이나 세션 목록이 바뀔 때만 다시 그린다(작업 상태가 바뀔 때마다 새로 그리면 버벅이고 스크롤이 맨 위로 돌아간다).
     const dk = draftsKey + '|' + sessions.map((x) => x.id).join();
     if (showDrafts && dk !== draftsRenderedKey && !$('drafts').contains(root.activeElement)) renderDrafts(); // 고치는 중인 글은 다시 그리지 않는다
+    } finally { renderingTimelines = priorTimelines; renderingReferences = priorReferences; }
   }
 
   function updateBadges() {
@@ -1815,6 +2042,7 @@
   function markSeenVisible() {
     const box = $('msgs');
     if ($('panel').hidden || document.hidden || !sessionById(activeTab)) return;
+    const layout = rememberLayoutPosition();
     const limit = box.getBoundingClientRect().bottom + 4;
     let at = seen[activeTab] || '';
     for (const el of box.querySelectorAll('.msg.unread')) {
@@ -1828,6 +2056,7 @@
     if (!box.querySelector('.msg.unread')) box.querySelectorAll('.newline').forEach((el) => el.remove());
     renderTabs();
     updateBadges();
+    restoreLayoutPosition(layout);
   }
   $('msgs').addEventListener('scroll', markSeenVisible);
   function placeToBottom() {
@@ -1853,9 +2082,34 @@
   let messageGap = 0;
   let readingPositions = {};
   try { readingPositions = JSON.parse(sessionStorage.getItem('__uifb_positions') || '{}') || {}; } catch {}
+  let layoutPosition = null;
+  function rememberLayoutPosition() {
+    const box = $('msgs');
+    if ($('panel').hidden || !box.clientHeight || showDrafts || scrollToUnread) return null;
+    const top = box.getBoundingClientRect().top;
+    const row = [...box.querySelectorAll('.msg[data-id]')].find(el => el.getBoundingClientRect().bottom > top + 1);
+    const transform = row && getComputedStyle(row).transform;
+    messageGap = box.scrollHeight - box.scrollTop - box.clientHeight;
+    layoutPosition = { tab: activeTab, bottom: messageGap < 8, id: row?.dataset.id,
+      offset: row ? row.getBoundingClientRect().top - top - (transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42) : 0 };
+    return layoutPosition;
+  }
+  function restoreLayoutPosition(position = layoutPosition) {
+    const box = $('msgs');
+    if (!position || position.tab !== activeTab || $('panel').hidden || showDrafts || scrollToUnread) return;
+    if (position.bottom) box.scrollTop = box.scrollHeight;
+    else {
+      const row = position.id && box.querySelector(`.msg[data-id="${CSS.escape(position.id)}"]`);
+      if (!row) return;
+      const transform = getComputedStyle(row).transform;
+      box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top - (transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42) - position.offset;
+    }
+    rememberLayoutPosition();
+  }
+  $('msgs').addEventListener('scroll', rememberLayoutPosition);
   function rememberPosition() {
     const box = $('msgs');
-    if ($('panel').hidden || !activeTab || !box.clientHeight || showDrafts) return;
+    if ($('panel').hidden || !activeTab || !box.clientHeight || showDrafts || scrollToUnread) return;
     messageGap = box.scrollHeight - box.scrollTop - box.clientHeight;
     let id = 'bottom';
     if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) {
@@ -1908,30 +2162,124 @@
   let seenKey = '';
   // 읽음이 바뀌었을 때: 안 읽음 표시와 탭·버튼 개수만 고친다.
   function refreshUnread() {
+    const layout = rememberLayoutPosition();
     const byId = new Map(messages.map((m) => [String(m.id), m]));
     for (const el of $('msgs').querySelectorAll('.msg.unread')) { const m = byId.get(el.dataset.id); if (m && !isUnread(m)) el.classList.remove('unread'); }
     renderTabs();
     updateBadges();
     placeToBottom();
+    restoreLayoutPosition(layout);
   }
   // 확인이 3초보다 오래 걸리면(느린 폰 연결) 겹쳐 쌓이지 않게, 하던 확인이 있으면 그것을 기다린다.
   let polling = null;
+  let sessionsPolling = null;
+  let chatSnapshot = null;
   let pollStartedAt = 0;
-  function poll() {
-    return (polling ||= pollOnce().finally(() => { polling = null; }));
+  async function pollJson(url, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return await response.json();
+    } finally { clearTimeout(timer); }
+  }
+  async function pollSessions() {
+    const signature = () => JSON.stringify([sessionsState, sessions.map(x => [x.id, x.name, x.tool, x.compact, x.status?.state, x.watch?.active, x.watch?.handling, x.watch?.control, x.watch?.steer, x.watch?.cancel])]);
+    const before = signature();
+    const knownSessions = new Set(sessions.map(x => x.id));
+    try {
+      const ss = await pollJson('/__uifb/api/sessions');
+      if (!Array.isArray(ss.sessions) || ss.sessions.some(x => !x || typeof x.id !== 'string' || typeof x.name !== 'string')) throw new Error('Invalid sessions');
+      sessions = ss.sessions;
+      sessionsState = 'ready';
+    } catch { sessionsState = 'error'; }
+    if (signature() !== before && !((editing || holdEdit) && root.activeElement?.classList?.contains('edit'))) render();
+    if (sessionsState === 'ready' && sessions.some(x => !knownSessions.has(x.id))) pollTranscripts();
+  }
+  function poll(selectedOnly = false) {
+    const listing = (sessionsPolling ||= pollSessions().finally(() => { sessionsPolling = null; }));
+    const history = (polling ||= pollOnce().finally(() => { polling = null; }));
+    const transcriptsRead = selectedOnly ? listing.then(() => sessionById(activeTab) ? pollHistory(activeTab) : null) : pollTranscripts();
+    return Promise.all([listing, history, transcriptsRead]);
+  }
+  async function pollSnapshot(url, previous, field, timeout) {
+    const data = await pollJson(url + (url.includes('?') ? '&' : '?') + 'delta=1' + (previous?.version ? '&known=' + encodeURIComponent(previous.version) : ''), timeout);
+    if (data.delta !== true) return data;
+    try {
+      if (!previous || data.baseVersion !== previous.version || typeof data.version !== 'string' || !Array.isArray(data[field]) || !Array.isArray(data.order)) throw Error('Invalid delta base');
+      const key = id => { if (!['string', 'number'].includes(typeof id)) throw Error('Invalid delta ID'); return JSON.stringify(id); };
+      const rows = new Map(previous[field].map(m => [key(m.id), m]));
+      const updated = new Set();
+      for (const m of data[field]) { const id = key(m.id); if (updated.has(id)) throw Error('Duplicate update'); updated.add(id); rows.set(id, m); }
+      const seen = new Set(), items = data.order.map(id => { const k = key(id); if (seen.has(k) || !rows.has(k)) throw Error('Invalid delta order'); seen.add(k); return rows.get(k); });
+      if ([...updated].some(id => !seen.has(id))) throw Error('Unordered update');
+      const { delta, baseVersion, order, ...metadata } = data;
+      return { ...metadata, [field]: items };
+    } catch {
+      // Lost/rejected bases recover immediately; never merge against guessed history.
+      const full = await pollJson(url, timeout);
+      if (full.delta || full.unchanged) throw Error('Invalid full recovery');
+      return full;
+    }
+  }
+  function pollHistory(id) {
+    if (historyRequests.has(id)) return historyRequests.get(id);
+    const pending = (async () => {
+        try {
+          const previousVersion = historyVersions.get(id);
+          const data = await pollSnapshot('/__uifb/api/transcript?session=' + encodeURIComponent(id), historySnapshots.get(id), 'items', 30000);
+          if (data.unchanged === true && previousVersion && data.version === previousVersion && loadedHistories.has(id)) { historyErrors.delete(id); return true; }
+          if (Array.isArray(data.items)) {
+            const previous = transcripts[id], changed = !loadedHistories.has(id) || (typeof data.version === 'string' ? data.version !== previousVersion : JSON.stringify(previous) !== JSON.stringify(data.items));
+            historySnapshots.set(id, data);
+            transcripts[id] = JSON.parse(JSON.stringify(data.items));
+            loadedHistories.add(id); historyErrors.delete(id);
+            if (typeof data.version === 'string') historyVersions.set(id, data.version); else historyVersions.delete(id);
+            // The selected conversation must not wait for another session's history.
+            if (id === activeTab && changed) {
+              if (refs.length || $('input').value.match(MARK)) showReplyText();
+              if (!((editing || holdEdit) && root.activeElement?.classList?.contains('edit'))) render();
+            }
+            return true;
+          }
+          throw new Error('Invalid history');
+        } catch { historyErrors.add(id); if (id === activeTab && !loadedHistories.has(id)) render(); } // Keep the last history when one session cannot be read.
+        return false;
+    })().finally(() => { historyRequests.delete(id); });
+    historyRequests.set(id, pending);
+    return pending;
+  }
+  async function pollTranscripts() {
+    const ordered = [...sessions].sort((a, b) => Number(b.id === activeTab) - Number(a.id === activeTab));
+    const first = ordered.find(x => x.id === activeTab && !loadedHistories.has(x.id));
+    if (first) await pollHistory(first.id);
+    await Promise.all(ordered.filter(x => x !== first).map(x => pollHistory(x.id)));
+  }
+  async function readChatPoll() {
+    const data = await pollSnapshot('/__uifb/api/chat', chatSnapshot, 'messages');
+    if (data.unchanged === true) {
+      if (!chatSnapshot || data.version !== chatSnapshot.version) throw new Error('Unknown chat version');
+    } else {
+      if (!Array.isArray(data.messages)) throw new Error('Invalid chat');
+      chatSnapshot = typeof data.version === 'string' ? data : null;
+      if (!chatSnapshot) return data;
+    }
+    // UI optimistic changes must never mutate the retained server snapshot.
+    return JSON.parse(JSON.stringify(chatSnapshot));
   }
   async function pollOnce() {
     pollStartedAt = Date.now();
     try {
-      const [c, ss, dd, sv, pf, cp] = await Promise.all([
-        fetch('/__uifb/api/chat').then((r) => r.json()),
-        fetch('/__uifb/api/sessions').then((r) => r.json()),
-        fetch('/__uifb/api/drafts').then((r) => r.json()),
-        fetch('/__uifb/api/seen').then((r) => r.json()).catch(() => ({})),
-        fetch('/__uifb/api/prefs').then((r) => r.json()).catch(() => null),
-        fetch('/__uifb/api/compose').then((r) => r.json()).catch(() => null),
+      const [c, dd, sv, pf, cp] = await Promise.all([
+        readChatPoll(),
+        pollJson('/__uifb/api/drafts'),
+        pollJson('/__uifb/api/seen').catch(() => ({})),
+        pollJson('/__uifb/api/prefs').catch(() => null),
+        pollJson('/__uifb/api/compose').catch(() => null),
       ]);
       if (cp) { composed = cp; loadCompose(false); }
+      if (pf) positionsLoaded = true;
       if (pf && (!prefsReady || JSON.stringify(pf) !== JSON.stringify(prefs))) applyPrefs(pf);
       else if (!pf && !prefsReady) applyPrefs({});
       // 다른 화면에서 읽은 것을 가져온다(더 나중 시각만).
@@ -1940,6 +2288,7 @@
         if (typeof at === 'string' && (!seen[id] || at > seen[id])) { seen[id] = at; seenFromServer = true; }
       }
       messages = c.messages || [];
+      chatLoaded = true;
       for (const [id, saved] of savedMessages) {
         if (messages.some(m => m.id === id)) savedMessages.delete(id);
         else messages.push(saved);
@@ -1959,10 +2308,6 @@
         updateWorkBtn();
         if (workOpen && !$('wlist').contains(root.activeElement)) renderWork();
         if (showDrafts && !$('drafts').contains(root.activeElement)) renderDrafts();
-      }
-      sessions = ss.sessions || [];
-      for (const x of sessions) {
-        transcripts[x.id] = (await fetch('/__uifb/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
       }
       if (!refs.length) restoreReplyState();
       const input = $('input');
@@ -1985,13 +2330,13 @@
       if (fresh.length) saveSeen(fresh);
       if (seenFromServer) { try { localStorage.setItem('__uifb_seen', JSON.stringify(seen)); } catch {} }
       const all = timeline('all');
-      const k = JSON.stringify(delivered) + ':' + messages.filter((m) => m.queue).map((m) => m.id + m.queue.state).join() + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + all.filter((m) => m.from === 'peer' || m.cancelled || m.interject).map((m) => m.id + (m.session || '') + (m.to || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '')).join(',');
+      const k = (c.version || '') + ':' + JSON.stringify(delivered) + ':' + messages.filter((m) => m.queue).map((m) => m.id + m.queue.state).join() + ':' + drafts.filter((d) => d.hold || d.fromMsg).map((d) => d.id + d.to + (d.hold ? 'h' : '') + d.text.length).join() + ':' + trash.filter((d) => d.fromMsg).length + ':' + (holdEdit?.id || '') + ':' + folded.has(HOLD_FOLD) + ':' + JSON.stringify(flows()) + ':' + all.filter((m) => m.from === 'peer' || m.from === 'automation' || m.cancelled || m.interject).map((m) => m.id + (m.automationId || '') + (m.session || '') + (m.to || '') + (m.peerMethod || '') + (m.peerSourceTool || '') + (m.peerTargetTool || '') + (m.peerSourceHost || '') + (m.peerTargetHost || '') + (m.readAt ? 'r' : '') + (m.cancelled ? 'c' : '') + (m.interject ? 'i' : '')).join() + ':' + all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.watch?.control || '') + (x.watch?.steer ? 's' : '')).join(',');
       // 작업 중 표시의 글(지금 하는 일, "N분째")만 바뀐 것은 그 줄만 고친다. 도구를 쓸 때마다 대화창 전체를 다시 그리면 폰에서 버벅인다.
       const sk = sessions.map((x) => (x.status?.detail || '') + (x.status?.state === 'working' ? typingClock(x.id, x.status).minutes : '')).join(',');
       // 말풍선에서 고치는 중에는 다시 그리지 않는다(입력칸이 새로 만들어지면 키보드가 닫힌다).
       // 읽음(seen)만 바뀐 것은 다시 그리지 않고 표시만 고친다(스크롤하며 읽을 때마다 전체를 다시 그리면 화면이 얼고 스크롤이 튄다).
       const seenK = JSON.stringify(seen);
-      if (k !== key && !((editing || holdEdit) && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; seenKey = seenK; render(); }
+      if ((k !== key || (scrollToUnread && chatLoaded && positionsLoaded && loadedHistories.has(activeTab))) && !((editing || holdEdit) && root.activeElement?.classList?.contains('edit'))) { key = k; statusKey = sk; seenKey = seenK; render(); }
       else {
         if (seenK !== seenKey) { seenKey = seenK; refreshUnread(); }
         if (sk !== statusKey) { statusKey = sk; updateTyping(); }
@@ -2022,6 +2367,26 @@
     if (open) { autoGrow($('input')); if (!touchScreen()) $('input').focus(); }
   };
   // 모바일 키보드가 올라오면 iOS는 화면 전체를 밀어 올려 대화창 아래로 앱이 비친다. 보이는 영역(visualViewport)에 창을 맞춘다.
+  let overlayDiagnosticTimer = null, overlayDiagnosticAt = 0, overlayDiagnosticCount = 0;
+  function recordOverlayGeometry(reason) {
+    if (CFG.context !== 'workbench' || innerWidth > 767) return;
+    clearTimeout(overlayDiagnosticTimer);
+    overlayDiagnosticTimer = setTimeout(() => {
+      const p = $('panel'), v = window.visualViewport, now = Date.now();
+      if (!v || p.hidden || p.classList.contains('picking') || document.hidden || now - overlayDiagnosticAt < 3000 || overlayDiagnosticCount >= 20) return;
+      overlayDiagnosticAt = now; overlayDiagnosticCount++;
+      const r = p.getBoundingClientRect(), round = x => Math.round(x);
+      const payload = {
+        kind: 'mobile-overlay', reason,
+        viewport: { left: round(v.offsetLeft), top: round(v.offsetTop), width: round(v.width), height: round(v.height) },
+        panel: { left: round(r.left), top: round(r.top), width: round(r.width), height: round(r.height) },
+        covered: r.left <= v.offsetLeft + 1 && r.top <= v.offsetTop + 1 && r.right >= v.offsetLeft + v.width - 1 && r.bottom >= v.offsetTop + v.height - 1,
+        locks: { open: document.documentElement.hasAttribute('data-uifb-open'), html: getComputedStyle(document.documentElement).overflow, body: getComputedStyle(document.body).overflow },
+        scrollY: round(scrollY), focused: !!root.activeElement,
+      };
+      fetch('/__uifb/api/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
+    }, 200);
+  }
   function fitPanel() {
     const vv = window.visualViewport, p = $('panel');
     if (!vv || p.hidden || innerWidth > 767 || p.classList.contains('picking')) {
@@ -2031,9 +2396,14 @@
     }
     p.style.setProperty('top', vv.offsetTop + 'px', 'important');
     p.style.setProperty('height', vv.height + 'px', 'important');
+    recordOverlayGeometry('viewport-adjusted');
   }
   window.visualViewport?.addEventListener('resize', fitPanel);
   window.visualViewport?.addEventListener('scroll', fitPanel);
+  // 화면 복원 때 viewport resize가 오지 않아도 이전 패널 높이를 남기지 않는다.
+  window.addEventListener('pageshow', fitPanel);
+  $('msgs').addEventListener('scroll', () => recordOverlayGeometry('conversation-scroll'), { passive: true });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { fitPanel(); recordOverlayGeometry('visible-again'); } });
 
   // 찍을 화면: 'app'(대화창을 숨기고 앱을 찍음) 또는 'widget'(대화창만 보이고 그 안을 찍음). 한 번에 하나만 보인다.
   let pickTarget = 'app';
@@ -2457,6 +2827,95 @@
   } catch {}
 
   function canInterject(session) { return !!session && (session.tool !== 'codex' || session.watch?.steer === true) && ['working', 'permission'].includes(session.status?.state); }
+  function selectedImages(id = activeTab) { return Array.isArray(stagedImages[id]) ? stagedImages[id] : []; }
+  function saveImages() { try { localStorage.setItem('__uifb_images', JSON.stringify(stagedImages)); } catch {} }
+  function renderImages() {
+    const preview = $('image-preview');
+    $('attach').disabled = !sessionById(activeTab) || uploadingImages.size > 0 || pendingComposers.has(activeTab);
+    $('attach').textContent = uploadingImages.has(activeTab) ? imageStages.get(activeTab) || '올리는 중' : '사진';
+    const key = JSON.stringify([activeTab, selectedImages(), pendingComposers.has(activeTab)]);
+    if (key === imagePreviewKey) return;
+    imagePreviewKey = key; preview.replaceChildren();
+    for (const a of selectedImages()) {
+      const one = document.createElement('span'), img = document.createElement('img'), remove = document.createElement('button');
+      if (!/^\/__uifb\/api\/chat-images\/[0-9a-f-]{36}$/.test(a.url || '')) continue;
+      img.src = a.url + '?thumbnail=1'; img.onerror = () => { img.onerror = null; img.src = a.url; }; img.alt = a.name || '첨부 사진'; remove.type = 'button'; remove.textContent = '×';
+      remove.setAttribute('aria-label', '사진 첨부 취소: ' + img.alt); remove.disabled = pendingComposers.has(activeTab);
+      remove.onclick = () => { const focused = root.activeElement === remove; stagedImages[activeTab] = selectedImages().filter(x => x.id !== a.id); saveImages(); renderImages(); if (focused) $('attach').focus(); };
+      const link = document.createElement('a'); link.href = a.url; link.target = '_blank'; link.rel = 'noopener'; link.append(img);
+      one.append(link, remove); preview.append(one);
+    }
+  }
+  const imageBytes = bytes => bytes < 1024 ? bytes + ' B' : bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / 1024 / 1024).toFixed(2) + ' MB';
+  async function prepareImage(file) {
+    const heic = /^image\/hei[cf](?:-sequence)?$/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+    let original = file;
+    if (heic) {
+      const { convertHeic } = await import('/__uifb/api/heic-convert.mjs').catch(() => { throw new Error('사진 변환기를 불러오지 못했습니다. 글과 기존 첨부는 그대로입니다.'); });
+      original = await convertHeic(file);
+    }
+    const image = new Image(), canvas = document.createElement('canvas');
+    let timer;
+    try {
+      image.src = await new Promise((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('사진 파일을 읽지 못했습니다.')); reader.readAsDataURL(original);
+      });
+      await Promise.race([image.decode(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('사진을 읽지 못했습니다. 다른 사진을 선택해 주세요.')), 15000); })]);
+      clearTimeout(timer);
+      if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 64000000) throw new Error('사진 해상도가 너무 큽니다. 더 작은 사진을 선택해 주세요.');
+      const encode = (max, quality) => {
+        const scale = Math.min(1, max / Math.max(image.naturalWidth, image.naturalHeight));
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('사진 미리보기를 만들지 못했습니다.')), 'image/jpeg', quality));
+      };
+      const blob = await encode(1600, .8), thumbnail = await encode(320, .72);
+      const compressed = blob.size < original.size ? new File([blob], original.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) : original;
+      return { original, compressed, thumbnail, heic, sourceBytes: file.size };
+    } finally { clearTimeout(timer); image.removeAttribute('src'); canvas.width = 1; canvas.height = 1; }
+  }
+  function chooseImageQuality(prepared) {
+    const dialog = $('image-quality'), options = $('image-quality-options'); options.replaceChildren(); dialog.returnValue = '';
+    prepared.forEach((item, index) => {
+      const field = document.createElement('fieldset'), legend = document.createElement('legend');
+      legend.textContent = item.original.name; field.append(legend);
+      if (item.heic) { const note = document.createElement('p'); note.textContent = 'HEIC ' + imageBytes(item.sourceBytes) + ' → 원본 크기의 JPG로 변환해 전송합니다. 원본 HEIC 파일은 변경하지 않습니다.'; field.append(note); }
+      for (const [value, text, file] of [['original', item.heic ? '원본 크기 · JPG 변환' : '원본', item.original], ['compressed', item.compressed === item.original ? '압축 · 용량 감소 없음' : '압축 · JPG', item.compressed]]) {
+        const label = document.createElement('label'), input = document.createElement('input'); input.type = 'radio'; input.name = 'quality-' + index; input.value = value; input.checked = value === 'original';
+        label.append(input, document.createTextNode(text + ' · ' + imageBytes(file.size))); field.append(label);
+      }
+      options.append(field);
+    });
+    return new Promise(resolve => {
+      dialog.addEventListener('close', () => { resolve(dialog.returnValue === 'upload' ? prepared.map((item, index) => item[options.querySelector('input[name="quality-' + index + '"]:checked').value]) : null); }, { once: true });
+      dialog.showModal();
+    });
+  }
+  $('attach').onclick = () => $('image-file').click();
+  $('image-file').onchange = async () => {
+    const target = activeTab, files = [...$('image-file').files];
+    if (!target || !files.length) return;
+    if (files.length + selectedImages(target).length > 4) { toast('사진은 한 번에 4장까지 첨부할 수 있습니다.'); $('image-file').value = ''; return; }
+    uploadingImages.add(target); renderImages();
+    try {
+      const prepared = [];
+      for (const file of files) {
+        if (file.size > 8 * 1024 * 1024) throw new Error('사진은 한 장에 8MB까지 첨부할 수 있습니다.');
+        imageStages.set(target, '미리보기 준비'); renderImages(); prepared.push(await prepareImage(file));
+      }
+      const uploads = await chooseImageQuality(prepared);
+      if (!uploads) return;
+      for (const [index, upload] of uploads.entries()) {
+        imageStages.set(target, '올리는 중'); renderImages();
+        const r = await fetch('/__uifb/api/chat-images?name=' + encodeURIComponent(upload.name), { method: 'POST', headers: { 'Content-Type': upload.type }, body: upload });
+        const image = await r.json(); if (!r.ok) throw new Error(image.error || '사진을 올리지 못했습니다.');
+        stagedImages[target] = [...selectedImages(target), image]; saveImages();
+        const thumb = await fetch('/__uifb/api/chat-images?thumbnailFor=' + image.id, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: prepared[index].thumbnail });
+        if (!thumb.ok) throw new Error('사진은 첨부됐지만 작은 미리보기를 저장하지 못했습니다. 확대 사진과 글은 그대로입니다.');
+      }
+    } catch (error) { toast(error.message || '사진을 올리지 못했습니다. 글은 그대로 유지됩니다.'); }
+    finally { uploadingImages.delete(target); imageStages.delete(target); $('image-file').value = ''; renderImages(); }
+  };
   let interjectNext = false, sideNext = false;
   $('now').onclick = () => { interjectNext = true; $('form').requestSubmit(); };
   // 입력칸이 비었으면 곁질문 묶음 목록을 열고 닫는다(#2097).
@@ -2469,12 +2928,17 @@
     e.preventDefault();
     const interject = interjectNext, side = sideNext;
     interjectNext = sideNext = false;
-    const text = $('input').value.trim();
+    const typedText = $('input').value.trim();
+    const pictures = selectedImages().slice();
+    const text = typedText || (pictures.length ? '첨부한 사진을 확인해 주세요.' : '');
     if (!text || !sessionById(activeTab)) return;
+    if (uploadingImages.has(activeTab)) { toast('사진 업로드가 끝나면 보내 주세요.'); return; }
+    if (side && pictures.length) { toast('사진은 보내기 또는 끼워넣기로 전송해 주세요.'); return; }
     const target = activeTab;
     if (pendingComposers.has(target)) return;
     const kind = (side ? 'side:' : 'chat:') + target;
-    const body = { from: 'user', text, cid: cidFor(kind, text), to: target, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...withQuotes(text), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
+    const sendKey = text + (pictures.length ? '\n' + pictures.map(a => a.id).join(',') : '');
+    const body = { from: 'user', text, cid: cidFor(kind, sendKey), ...(pictures.length ? { attachments: pictures.map(a => a.id) } : {}), to: target, context: CFG.context, round: CFG.round, device: deviceNow(), ...(interject ? { interject: true } : {}), ...withQuotes(text), ...(CFG.pick ? { where: where || { url: here() } } : {}) };
     if (pendingCids.has(body.cid)) return;
     if (!side) body.ack = 'stored';
     // 서버가 받은 뒤에 입력칸을 비운다. 못 보내면 글은 입력칸에 남고, 단추를 다시 누르면 된다.
@@ -2495,9 +2959,10 @@
         if (side) { sideOpen[target] = saved.sideGroup; delete sideNew[target]; } // 새 묶음이면 그 묶음을 펼친다
         rememberMessages([saved]);
         pendingCids.delete(body.cid);
-        doneCid(kind, text);
+        doneCid(kind, sendKey);
+        stagedImages[target] = selectedImages(target).filter(a => !pictures.some(p => p.id === a.id)); saveImages();
         sentTexts.set(target + '\n' + text, Date.now());
-        if (activeTab === target && $('input').value.trim() === text) {
+        if (activeTab === target && $('input').value.trim() === typedText) {
           $('input').value = ''; autoGrow($('input')); clearTimeout(composeT); composeT = null; saveCompose(target, '');
           revertAdjust(); where = null; $('where').hidden = true; saveWhere(); setReply(null);
         } else if (activeTab !== target && composed[target]?.text?.trim() === text) saveCompose(target, '');
@@ -2511,7 +2976,7 @@
       } finally {
         clearTimeout(abortT);
         pendingCids.delete(body.cid);
-        pendingComposers.delete(target);
+        pendingComposers.delete(target); renderImages();
       }
     });
   };
@@ -3278,9 +3743,9 @@
   async function sendDrafts(ids) {
     const out = await draftsApi({ action: 'send', ids, combine: true, device: deviceNow() });
     const sent = out?.sent || [];
-    if (sent.length) toast(`✓ ${ids.length}개 보냄 → ${nameOf(sent[0].to)}`);
     ids.forEach((id) => checked.delete(id));
     setDraftsView(false); // 보관함에서 보내면(하나든 분류·고른 것 전부든) 닫고 대화에서 보낸 글을 본다(#1881, #1883)
+    if (sent.length) toast(`✓ ${ids.length}개 보냄 → ${nameOf(sent[0].to)}`);
   }
 
   function updateWorkBtn() {
@@ -3290,34 +3755,82 @@
   }
   const workReply = id => { try { return localStorage.getItem('__uifb_work_reply_' + id) || ''; } catch { return ''; } };
   function keepWorkReply(id, value) { try { value ? localStorage.setItem('__uifb_work_reply_' + id, value) : localStorage.removeItem('__uifb_work_reply_' + id); } catch {} }
+  let selectedWork = null;
+  const workFolds = new Map();
+  const workOriginalObserver = new ResizeObserver(entries => {
+    for (const { target } of entries) {
+      const button = target.nextElementSibling;
+      if (button?.hasAttribute('data-work-expand')) button.hidden = !target.classList.contains('expanded') && target.scrollHeight <= target.clientHeight + 1;
+    }
+  });
   function renderWork() {
-    const box = $('wlist'); box.textContent = '';
+    const box = $('wlist'), scrollTop = box.scrollTop; box.textContent = ''; workOriginalObserver.disconnect();
     $('wtitle').textContent = `진행·확인 ${workItems.filter(d => d.work.state !== 'done').length}개`;
     if (!workItems.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
       empty.textContent = '보관한 요청을 맡겨 주세요. 진행 상태와 확인할 내용이 여기에 남습니다.';
       box.append(empty); return;
     }
+    if (selectedWork !== null && !workItems.some(d => d.id === selectedWork)) selectedWork = null;
+    const labelOf = (w, fallback) => w.answer?.decision === 'approved' && w.state === 'review' ? '확인됨 · 담당 세션의 마무리 대기' : fallback;
+    if (selectedWork !== null) {
+      const back = document.createElement('button'); back.type = 'button'; back.className = 'workback'; back.textContent = '← 전체 요청';
+      back.onclick = () => { const id = selectedWork; selectedWork = null; renderWork(); box.querySelector(`[data-work-open="${id}"]`)?.focus(); };
+      box.append(back);
+    }
     for (const [state, label] of [['review', '확인 요청'], ['working', '진행 중'], ['done', '완료']]) {
-      const list = workItems.filter(d => d.work.state === state);
+      const list = workItems.filter(d => d.work.state === state && (selectedWork === null || d.id === selectedWork));
       if (!list.length) continue;
-      const group = document.createElement(state === 'done' ? 'details' : 'section'); group.className = 'workgroup';
-      const heading = document.createElement(state === 'done' ? 'summary' : 'h3');
-      heading.textContent = `${label} ${list.length}개`; group.append(heading);
+      const foldedGroup = state === 'done' && selectedWork === null;
+      const group = document.createElement(foldedGroup ? 'details' : 'section'); group.className = 'workgroup';
+      const heading = document.createElement(foldedGroup ? 'summary' : 'h3');
+      if (selectedWork === null) { heading.textContent = `${label} ${list.length}개`; group.append(heading); }
       for (const d of list) {
+        if (selectedWork === null) {
+          const row = document.createElement('button'); row.type = 'button'; row.className = 'worklist-row'; row.dataset.workOpen = d.id;
+          const title = document.createElement('span'); title.className = 'worklist-title'; title.textContent = d.text;
+          const meta = document.createElement('span'); meta.className = 'worklist-meta'; meta.textContent = `#${d.id} · ${nameOf(d.work.actor)}${d.work.answer?.decision === 'approved' && state === 'review' ? ' · 확인됨' : ''}`;
+          const body = document.createElement('span'); body.className = 'worklist-body'; body.append(title, meta);
+          const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); arrow.setAttribute('viewBox', '0 0 16 16'); arrow.setAttribute('aria-hidden', 'true');
+          arrow.innerHTML = '<path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
+          row.append(body, arrow);
+          row.onclick = () => { selectedWork = d.id; renderWork(); box.scrollTop = 0; box.querySelector('.workback').focus(); };
+          group.append(row); continue;
+        }
         const w = d.work, card = document.createElement('article'); card.className = 'draft workcard'; card.dataset.workId = d.id;
+        const title = document.createElement('p'); title.className = 'worklist-title workrequest-text'; title.id = `work-request-${d.id}`; title.textContent = d.text;
+        const expand = document.createElement('button'); expand.type = 'button'; expand.hidden = true; expand.dataset.workExpand = d.id; expand.setAttribute('aria-controls', title.id);
+        const setExpanded = open => {
+          title.classList.toggle('expanded', open); expand.textContent = open ? '접기' : '더 보기'; expand.setAttribute('aria-expanded', String(open));
+          if (open) expand.hidden = false;
+          workFolds.set(`${d.id}:request`, open);
+        };
+        setExpanded(workFolds.get(`${d.id}:request`) ?? false);
+        expand.onclick = () => setExpanded(!title.classList.contains('expanded'));
         const meta = document.createElement('p'); meta.className = 'meta';
-        meta.textContent = `${nameOf(w.actor)} · ${w.answer?.decision === 'approved' && state === 'review' ? '확인됨 · 담당 세션의 마무리 대기' : label}`;
-        const original = document.createElement('p'); original.textContent = d.text;
-        card.append(meta, original);
-        if (w.note) { const note = document.createElement('p'); note.textContent = w.note; card.append(note); }
+        meta.textContent = `#${d.id} · ${nameOf(w.actor)} · ${labelOf(w, label)}`;
+        card.append(title, expand, meta);
+        const section = (title, text, fold = false, open = false) => {
+          const area = document.createElement(fold ? 'details' : 'section'); area.className = 'worksection';
+          const heading = document.createElement(fold ? 'summary' : 'h4'); heading.textContent = title; area.append(heading);
+          if (fold) {
+            const key = `${d.id}:${title}`; area.open = workFolds.get(key) ?? open;
+            area.ontoggle = () => workFolds.set(key, area.open);
+          }
+          if (text) for (const paragraph of text.split(/\n\s*\n/)) {
+            const p = document.createElement('p'); p.textContent = paragraph; area.append(p);
+          }
+          card.append(area); return area;
+        };
+        if (w.note) section('확인할 내용', w.note, true, true);
         if (state === 'review' && !w.answer) {
+          const response = section('내 의견');
           const input = document.createElement('textarea'); input.rows = 3; input.maxLength = 4000;
           input.setAttribute('aria-label', `요청 ${d.id} 확인 의견`); input.placeholder = '수정할 내용이나 확인 의견'; input.value = workReply(d.id);
           input.oninput = () => keepWorkReply(d.id, input.value);
           const acts = document.createElement('div'); acts.className = 'acts';
           for (const [decision, text] of [['approved', '확인했어요'], ['changes', '수정 요청']]) {
-            const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
+            const button = document.createElement('button'); button.type = 'button'; button.textContent = text; button.className = decision === 'approved' ? 'work-approve' : 'work-change';
             button.onclick = () => withBusy(button, async () => {
               if (decision === 'changes' && !input.value.trim()) { toast('수정할 내용을 적어 주세요'); input.focus(); return; }
               const kind = `work:${d.id}:${w.revision}:${decision}`, reply = input.value.trim(), cid = cidFor(kind, reply || decision);
@@ -3341,14 +3854,18 @@
             });
             acts.append(button);
           }
-          card.append(input, acts);
-        } else if (w.answer) { const answer = document.createElement('p'); answer.textContent = `내 답: ${w.answer.text || (w.answer.decision === 'approved' ? '확인했어요' : '수정 요청')}`; card.append(answer); }
+          response.append(input, acts);
+        } else if (w.answer) { section('내 답변', w.answer.text || (w.answer.decision === 'approved' ? '확인했어요' : '수정 요청')); }
         group.append(card);
       }
       box.append(group);
     }
+    const original = box.querySelector('.workrequest-text');
+    if (original) workOriginalObserver.observe(original);
+    box.scrollTop = scrollTop;
   }
   function setWorkView(on) {
+    if (on && !workOpen) selectedWork = null;
     if (on) { setDraftsView(false); if (pagesOpen) setPagesView(false); }
     const focused = $('wsheet').contains(root.activeElement);
     workOpen = on; $('wsheet').hidden = !on; updateWorkBtn();
@@ -3362,12 +3879,18 @@
 
   // 시트는 보관함 버튼 줄 바로 위에 붙는다. 입력칸이 커지면 따라 올라간다.
   function placeSheet() {
-    if (workOpen) $('wsheet').style.bottom = Math.round($('panel').getBoundingClientRect().bottom - $('composeRow').getBoundingClientRect().top) + 'px';
+    if (workOpen) {
+      const panel = $('panel').getBoundingClientRect(), compose = $('composeRow').getBoundingClientRect(), header = $('panel').querySelector('header').getBoundingClientRect();
+      $('wsheet').style.bottom = Math.round(panel.bottom - compose.top) + 'px';
+      const height = Math.max(0, Math.round(compose.top - header.bottom - 8)) + 'px';
+      $('wsheet').style.maxHeight = height; $('wsheet').style.height = height;
+    }
     if (!showDrafts) return;
     const p = $('panel').getBoundingClientRect();
     $('dsheet').style.bottom = Math.round(p.bottom - $('composeRow').getBoundingClientRect().top) + 'px';
   }
-  new ResizeObserver(placeSheet).observe($('form'));
+  const sheetResizeObserver = new ResizeObserver(placeSheet);
+  sheetResizeObserver.observe($('form')); sheetResizeObserver.observe($('panel'));
   let sheetLabel = null; // null 이면 전체, '' 이면 미분류, 그 밖에는 그 분류만
   // 보관함 창에서 하던 것(열린 분류, 체크 표시, 새 분류 이름 칸에 쓰던 글)도 이 기기에 남겨 새로고침 뒤 되살린다.
   const sheetState = () => { try { return JSON.parse(localStorage.getItem('__uifb_sheet') || '{}'); } catch { return {}; } };
@@ -3392,7 +3915,7 @@
 
   // 목록 창(#1886·#1899): 서버가 준 공통 틀 { title, empty, items: [{ title, href, status: { text, tone }, meta: [], hidden, actions: [{ label, url, body, toast }] }], port } 을 그대로 그린다.
   // 무엇의 목록인지(지금은 비교 페이지)와 문구·단추는 서버가 정한다. 대화창은 틀만 안다.
-  let pagesOpen = false, showHiddenPages = false, pagesData = { items: [] };
+  let pagesOpen = false, showHiddenPages = false, pagesData = { items: [] }, linksData = { items: [] };
   function listHref(href) {
     if (CFG.context === 'review') return href;
     // 앱 화면에서는 목록을 준 서버(비교 페이지 서버) 주소로 연다. tailnet(https, 포트 없음)으로 들어왔으면 그 서버는 8443(tailscale serve 약속).
@@ -3402,13 +3925,39 @@
   function renderPages() {
     const box = $('plist');
     box.textContent = '';
+    const note = document.createElement('p'); note.className = 'empty';
+    note.textContent = '로컬 주소는 이 컴퓨터에서, 원격 주소는 기존 접속 권한으로 열 수 있어요.';
+    box.append(note);
+    const reviewAddresses = [];
+    for (const service of linksData.items || []) {
+      const card = document.createElement('section'); card.className = 'page project-link';
+      const isReview = service.title === '비교 페이지 서버' || service.title === '비교 페이지';
+      if (!isReview) { const title = document.createElement('strong'); title.textContent = service.title; card.append(title); }
+      if (service.description) { const description = document.createElement('small'); description.textContent = service.description; card.append(description); }
+      for (const link of service.links || []) {
+        let url; try { url = new URL(link.href); } catch { continue; }
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
+        const a = document.createElement('a'); a.href = url.href; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.textContent = link.label;
+        const address = document.createElement('span'); address.textContent = url.href; a.append(address); card.append(a);
+      }
+      if (isReview) reviewAddresses.push(card); else box.append(card);
+    }
+    if (!linksData.items?.length) {
+      const p = document.createElement('p'); p.className = 'empty';
+      p.textContent = linksData.failed ? '프로젝트 주소를 불러오지 못했어요. 창을 다시 열어 주세요.' : '등록된 프로젝트 주소가 없어요.';
+      box.append(p);
+    }
+    if (linksData.checkedAt) { const p = document.createElement('small'); p.textContent = '주소 확인: ' + new Date(linksData.checkedAt).toLocaleString('ko-KR'); box.append(p); }
+    const heading = document.createElement('h3'); heading.className = 'link-heading'; heading.textContent = '비교 페이지'; box.append(heading);
+    box.append(...reviewAddresses);
     const all = pagesData.items || [];
     const list = all.filter((x) => showHiddenPages || !x.hidden);
     const nh = all.filter((x) => x.hidden).length;
-    $('ptitle').textContent = `${pagesData.title || '목록'} ${all.length - nh}개`;
+    $('ptitle').textContent = '프로젝트 링크';
     $('phid').textContent = showHiddenPages ? '숨긴 것 감추기' : `숨긴 것 보기${nh ? ` (${nh})` : ''}`;
     $('phid').hidden = !nh && !showHiddenPages;
-    if (!list.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = pagesData.empty || '비어 있습니다.'; box.append(p); return; }
+    if (!list.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = pagesData.failed ? '비교 페이지 목록에 연결되지 않았어요. 별도 서버가 실행 중인지 확인해 주세요.' : pagesData.empty || '비어 있습니다.'; box.append(p); return; }
     for (const x of list) {
       const d = document.createElement('div');
       d.className = 'page' + (x.hidden ? ' hid' : '');
@@ -3447,7 +3996,10 @@
     $('psheet').hidden = !on;
     if (!on) return;
     $('psheet').style.bottom = Math.round($('panel').getBoundingClientRect().bottom - $('composeRow').getBoundingClientRect().top) + 'px';
-    pagesData = await fetch('/__uifb/api/pages').then((r) => r.json()).catch(() => ({ items: [] }));
+    [pagesData, linksData] = await Promise.all([
+      pollJson('/__uifb/api/pages').catch(() => ({ items: [], failed: true })),
+      pollJson('/__uifb/api/project-links').catch(() => ({ items: [], failed: true })),
+    ]);
     renderPages();
   }
   $('pagesBtn').onclick = () => setPagesView(!pagesOpen);
@@ -3539,6 +4091,7 @@
 
   // 보류하기: 대화창 맨 아래에 잠깐 대기. 보관함 담기: 바로 보관함(완전 나중).
   async function saveLater(toDrafts) {
+    if (selectedImages().length || uploadingImages.has(activeTab)) { toast('첨부 사진은 보내기로 전송해 주세요. 보류·보관함 첨부는 아직 지원하지 않습니다.'); return; }
     const text = $('input').value.trim();
     if (!text || !sessionById(activeTab)) return;
     const target = activeTab, label = draftLabel;
@@ -3604,6 +4157,8 @@
     if (prefs.tab && prefs.tab !== activeTab && sessionById(prefs.tab) && Date.now() - tabSetAt > 5000 && Date.now() - typedAt > 3000 && !composeT) switchTab(prefs.tab);
   }
   function switchTab(id) {
+    clearTimeout(posT);
+    rememberPosition();
     flushCompose();
     setTimeout(() => viewing(), 0); // 보고 있는 탭이 바뀐 것을 서버에 알린다(다른 세션 작업 중 알림을 고르는 데 씀)
     if (id !== activeTab) setReply(null);
@@ -3615,6 +4170,7 @@
     try { localStorage.setItem('__uifb_tab', activeTab); } catch {}
     render();
     loadCompose(true);
+    if (sessionById(id)) pollHistory(id);
   }
   addEventListener('resize', () => applyPrefs(prefs));
   $('grip').addEventListener('pointerdown', (e) => {
@@ -3813,19 +4369,24 @@
   };
   showNotif();
 
-  // 홈 화면에 설치한 앱에는 브라우저의 새로고침이 없어 ↻ 단추를 둔다. 위젯이 새로 바뀌면 알림으로도 알려 준다.
-  // 새로고침: 대화창 머리말과, 대화창을 닫았을 때 여는 단추 아래(화면 전체를 새로 읽는다).
-  // 누르면 바로 돌기 시작해서 새로고침 중임을 보인다(화면이 다시 뜰 때까지 돈다).
-  // 직접 누른 새로고침도 세션이 부른 새로고침과 같은 "새로 고치는 중" 안내를 띄운다.
-  const reloadNow = (b) => {
-    b.classList.add('reloading');
-    flushCompose();
-    $('reloadCover').querySelector('span').textContent = '대화창을 새로 고치는 중이에요 · 잠시 손대지 마세요';
-    $('reloadCover').hidden = false;
-    requestAnimationFrame(() => setTimeout(() => location.reload(), 300));
+  // 대화 새로고침은 앱 문서를 다시 열지 않고 대화·세션만 다시 조회한다.
+  let refreshingChat = false;
+  const reloadNow = async () => {
+    if (refreshingChat) return;
+    refreshingChat = true;
+    const buttons = [$('reload'), $('rbtn')];
+    buttons.forEach(b => { b.classList.add('reloading'); b.setAttribute('aria-busy', 'true'); });
+    try {
+      await Promise.all([polling, sessionsPolling, historyRequests.get(activeTab)]);
+      await poll(true);
+    }
+    finally {
+      refreshingChat = false;
+      buttons.forEach(b => { b.classList.remove('reloading'); b.removeAttribute('aria-busy'); });
+    }
   };
-  $('reload').onclick = () => reloadNow($('reload'));
-  $('rbtn').onclick = () => reloadNow($('rbtn'));
+  $('reload').onclick = reloadNow;
+  $('rbtn').onclick = reloadNow;
   let modalMount = null;
   const sheetOffers = new Map();
   const restoreStyle = (el, value) => value === null ? el.removeAttribute('style') : el.setAttribute('style', value);
@@ -4105,9 +4666,9 @@
   }
   navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'uifb-open-tab') openTabFromNotice(e.data.session); });
   navigator.serviceWorker?.getRegistrations?.().then((rs) => rs.forEach((r) => r.update().catch(() => {}))).catch(() => {}); // 알림 서비스 워커가 바뀌었으면 새 판으로
+  if (wasOpen && $('panel').hidden) $('btn').click();
   poll().then(() => {
     restoreReplyState();
-    if (wasOpen && $('panel').hidden) $('btn').click();
     const m = /#uifb-tab=([^&]+)/.exec(location.hash);
     if (m) { openTabFromNotice(decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname + location.search); }
     restoreSheetState();

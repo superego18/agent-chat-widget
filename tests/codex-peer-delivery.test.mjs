@@ -14,8 +14,8 @@ function fixture(t, { previousTerminals = [] } = {}) {
   const target = { ...source, sessionId: 'target', name: 'Target', path: path.join(root, 'target.jsonl'), orca: { terminal: 'term_new', previousTerminals } };
   for (const s of [source, target]) fs.writeFileSync(path.join(root, 'sessions', s.sessionId + '.json'), JSON.stringify(s));
   const at = seconds => new Date(Date.parse('2026-10-30T00:00:00Z') + seconds * 1000).toISOString();
-  const send = (literal, seconds, { accepted = true, terminal = 'term_new', sender = source } = {}) => {
-    const cmd = `orca terminal send --terminal ${terminal} --text ${literal} --enter --json`;
+  const send = (literal, seconds, { accepted = true, terminal = 'term_new', sender = source, executable = 'orca' } = {}) => {
+    const cmd = `${executable} terminal send --terminal ${terminal} --text ${literal} --enter --json`;
     const records = [{ timestamp: at(seconds), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd }) } }];
     if (accepted) records.push({ timestamp: at(seconds + 1), type: 'event_msg', payload: { type: 'item_completed', item: {
       type: 'CommandExecution', command: ['powershell.exe', '-Command', cmd], exit_code: 0, started_at_ms: Date.parse(at(seconds)),
@@ -39,6 +39,15 @@ test('accepted delayed sends can cover one combined input, without changing text
   assert.equal(items[0].text, 'First report\nSecond report');
   assert.equal(items[0].peerSends.length, 2);
   assert.equal(f.read()[0].from, 'peer', 'all send evidence persists across re-reading');
+});
+
+test('literal single-quoted PowerShell executable paths retain proven peer provenance', t => {
+  const f = fixture(t);
+  f.send("'Actual send 한글'", 0, { executable: "& 'C:/Users/fixture/AppData/Local/Programs/orca/resources/bin/orca.exe'" });
+  f.receive('actual', 'Actual send 한글', 2);
+  assert.equal(f.read()[0].from, 'peer');
+  assert.equal(f.read()[0].session, f.source.sessionId);
+  assert.equal(f.read()[0].id, 'xactual');
 });
 
 test('historical handles are valid only before their recorded end time', t => {
@@ -110,4 +119,28 @@ test('consumed evidence stays reserved if the native rollout no longer includes 
   fs.writeFileSync(f.target.path, '');
   f.receive('owner', 'Already delivered', 3);
   assert.deepEqual(f.read().map(x => x.from), ['peer', 'user']);
+});
+
+test('old peer bubbles gain a method only from the same proof, without consuming it again',t=>{
+  const f=fixture(t);f.send("'Old verified message'",0);f.receive('original','Old verified message',2);
+  const file=path.join(f.root,'transcript-history',f.target.sessionId+'.json');
+  assert.equal(f.read()[0].peerMethod,'terminal');
+  const saved=JSON.parse(fs.readFileSync(file,'utf8'));delete saved.items[0].peerMethod;
+  fs.writeFileSync(file,JSON.stringify(saved));
+  f.receive('owner-repeat','Old verified message',3);
+  const after=f.read();assert.equal(after.find(x=>x.id==='xoriginal').peerMethod,'terminal');
+  assert.equal(after.find(x=>x.id==='xowner-repeat').from,'user');
+  const retained=JSON.parse(fs.readFileSync(file,'utf8'));delete retained.items[0].peerMethod;
+  fs.writeFileSync(file,JSON.stringify(retained));fs.writeFileSync(f.source.path,'');
+  f.receive('wake-cache','Owner text',4);
+  assert.equal(f.read().find(x=>x.id==='xoriginal').peerMethod,undefined,'no inference from peer ID spelling or text when evidence is absent');
+});
+
+test('provider snapshots survive later registration changes without rewriting historical identity',t=>{
+  const f=fixture(t);f.send("'Provider proof'",0);f.receive('original','Provider proof',2);
+  const before=f.read()[0];assert.equal(before.peerSourceTool,'codex');assert.equal(before.peerTargetTool,'codex');
+  const file=path.join(f.root,'sessions',f.source.sessionId+'.json');
+  fs.writeFileSync(file,JSON.stringify({...f.source,tool:'claude'}));
+  f.receive('later','Owner input',3);
+  assert.equal(f.read().find(x=>x.id==='xoriginal').peerSourceTool,'codex');
 });

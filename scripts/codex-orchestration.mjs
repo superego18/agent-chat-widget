@@ -187,36 +187,90 @@ function* documents(text) {
   }
 }
 
+function orchestrationCommand(cmd) {
+  return typeof cmd === 'string' && /(?:^|[;\r\n])\s*(?:&\s*)?(?:'[^'\r\n]*[\\/]orca(?:-dev|-ide)?\.(?:exe|cmd)'|"[^"\r\n]*[\\/]orca(?:-dev|-ide)?\.(?:exe|cmd)"|orca(?:-dev|-ide)?(?:\.(?:exe|cmd))?)\s+orchestration\s+(?:check|task-create|worker-start|worker-show|dispatch|dispatch-show)\b/.test(cmd);
+}
+const fields = (value, keys) => Object.fromEntries(keys.filter(k => value?.[k] !== undefined).map(k => [k, value[k]]));
+// Keep only fields used to prove transport identity; mailbox bodies are neither
+// displayed as native input nor retained in the background provenance index.
+export function projectOrchestrationRecord(record) {
+  const item = record.type === 'event_msg' && record.payload?.type === 'item_completed' && record.payload.item;
+  if (item?.type !== 'CommandExecution' || item.exit_code !== 0 || !Array.isArray(item.command) || !orchestrationCommand(item.command.at(-1))) return null;
+  const receipts = [];
+  for (const value of documents(item.aggregated_output || '')) {
+    const r = value.ok === true && value.result;
+    if (!r || typeof r !== 'object') continue;
+    const result = fields(r, ['deliveryId', 'count', 'runId', 'dispatchId', 'taskId', 'stage']);
+    if (Array.isArray(r.messages)) result.messages = r.messages.map(m => fields(m, ['id', 'from_handle', 'to_handle', 'created_at', 'from']));
+    if (Array.isArray(r.effects)) result.effects = r.effects.map(e => fields(e, ['kind', 'id', 'state']));
+    if (r.task) result.task = fields(r.task, ['id', 'run_id', 'spec', 'created_by_terminal_handle']);
+    if (r.dispatch) result.dispatch = fields(r.dispatch, ['id', 'taskId', 'task_id', 'runId', 'assigneeHandle']);
+    if (Object.keys(result).length) receipts.push({ ok: true, result });
+  }
+  if (!receipts.length) return null;
+  return { timestamp: record.timestamp, type: 'event_msg', payload: { type: 'item_completed', item: {
+    type: 'CommandExecution', command: item.command, exit_code: item.exit_code, aggregated_output: receipts.map(x => JSON.stringify(x)).join('\n'),
+  } } };
+}
+
 export function readOrchestrationEvidence(root, target, context = createEvidenceContext()) {
   const registry = readEvidenceRegistry(root, context), results = [];
+  let complete = registry.complete;
   for (const session of registry.sessions) {
-    const source = readEvidenceRecords(root, session, context);
-    if (!source.complete) continue;
-    for (const { record } of source.rows) {
+    const source = context.peerSources ? context.peerSources.read(session) : readEvidenceRecords(root, session, context);
+    if (!source.complete) { complete = false; continue; }
+    // Spend the bounded receipt budget on current deliveries, not the first
+    // historical checks in a long-lived session. Existing proven history stays.
+    for (const { record } of [...source.rows].reverse()) {
       const item = record.type === 'event_msg' && record.payload?.type === 'item_completed' && record.payload.item;
       if (item?.type !== 'CommandExecution' || item.exit_code !== 0 || !Array.isArray(item.command)) continue;
       const cmd = item.command.at(-1);
-      if (typeof cmd !== 'string' || !/(?:^|[;\r\n])\s*(?:&\s*)?(?:"[^"\r\n]*[\\/]orca(?:-dev|-ide)?\.(?:exe|cmd)"|orca(?:-dev|-ide)?(?:\.(?:exe|cmd))?)\s+orchestration\s+(?:check|task-create|worker-start|worker-show|dispatch|dispatch-show)\b/.test(cmd)) continue;
+      if (!orchestrationCommand(cmd)) continue;
       for (const value of documents(item.aggregated_output || '')) if (value.ok === true && value.result) {
         const receipt = { result: value.result, cmd, at: record.timestamp };
         if (takeEvidenceReceipt(context, source.key, receipt)) results.push({ ...receipt, session });
       }
     }
   }
-  return { key: digest(JSON.stringify(results)), sessions: registry.sessions, results, target, complete: registry.complete };
+  results.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return { key: digest(JSON.stringify([results, complete])), sessions: registry.sessions, results, target, complete };
+}
+function literalOption(cmd, name, valuePattern) {
+  return new RegExp(`--${name}\\s+(['"]?)(${valuePattern})\\1(?=\\s|$)`).exec(cmd)?.[2];
+}
+function mailboxWake(text) {
+  const parts = text.split(/\r?\n[ \t]*\r?\n/).map(part => /^You have (\d+) orchestration messages?\. Run `orca orchestration check(?: --run (run_[\w-]+))?`\.$/.exec(part));
+  if (parts.some(p => !p) || parts.some(p => p[2] !== parts[0][2])) return null;
+  return { count: parts.reduce((n, p) => n + Number(p[1]), 0), run: parts[0][2] };
 }
 export function matchOrchestrationInput(evidence, text, at, used) {
   if (evidence.complete === false) return [];
   const { results, sessions, target } = evidence;
-  const wrap = (session, id, time) => ({ id: `orca:${id}`, session: session.sessionId, fromName: session.name, at: time });
-  const wake = /^You have (\d+) orchestration messages?\. Run `orca orchestration check(?: --run (run_[\w-]+))?`\.$/.exec(text);
+  const wrap = (session, id, time, method) => ({ id: `orca:${id}`, session: session.sessionId, fromName: session.name, tool: session.tool, at: time, method });
+  const wake = mailboxWake(text);
   if (wake) {
     for (const receipt of results) {
-      if (receipt.session.sessionId !== target.sessionId || !receipt.result.deliveryId || !Array.isArray(receipt.result.messages)) continue;
+      if (receipt.session.sessionId !== target.sessionId || !Array.isArray(receipt.result.messages) || !/\borchestration\s+check\b/.test(receipt.cmd)) continue;
       const age = Date.parse(receipt.at) - Date.parse(at), messages = receipt.result.messages;
-      if (age < 0 || age > 60_000 || messages.length !== Number(wake[1]) || (wake[2] && wake[2] !== receipt.result.runId)) continue;
-      const terminal = /--terminal\s+(term_[\w-]+)/.exec(receipt.cmd)?.[1];
+      const run = receipt.result.runId || literalOption(receipt.cmd, 'run', 'run_[\\w-]+');
+      if (age < 0 || age > 60_000 || messages.length !== wake.count || (wake.run && wake.run !== run)) continue;
+      const terminal = literalOption(receipt.cmd, 'terminal', 'term_[\\w-]+');
+      if (/--terminal\b/.test(receipt.cmd) && !terminal) continue;
       if (terminal && !bound(target, terminal, at)) continue;
+      if (!receipt.result.deliveryId) {
+        // Current Orca returns a compact mailbox projection. Its successful
+        // check in this exact provider proves observation, not a send timestamp.
+        // Never synthesize missing delivery IDs, destinations or creation times.
+        if (!messages.length || messages.some(m => !/^msg_[\w-]+$/.test(m.id || '') ||
+          !/^term_[\w-]+$/.test(m.from || '') || bound(target, m.from, at) || m.from === terminal)) continue;
+        if (new Set(messages.map(m => m.id)).size !== messages.length) continue;
+        const senders = messages.map(m => sessions.filter(s => s.sessionId !== target.sessionId && bound(s, m.from, at)));
+        if (senders.some(s => s.length > 1)) continue;
+        const sender = senders.every(s => s.length === 1 && s[0].sessionId === senders[0][0]?.sessionId) ? senders[0][0] : { name: '다른 세션' };
+        const matched = messages.map(m => wrap(sender, m.id, receipt.at, 'mailbox'));
+        if (matched.every(m => !used.has(m.id))) return matched;
+        continue;
+      }
       const senders = messages.map(m => {
         if (!m.id || Date.parse(m.created_at) > Date.parse(at) || !Number.isFinite(Date.parse(m.created_at))) return null;
         if (!bound(target, m.to_handle, at) && m.to_handle !== `dispatch:${receipt.result.dispatchId}` && m.to_handle !== `run:${receipt.result.runId}`) return null;
@@ -226,7 +280,7 @@ export function matchOrchestrationInput(evidence, text, at, used) {
       });
       if (senders.some(s => !s)) continue;
       const sender = senders.every(s => s.sessionId && s.sessionId === senders[0].sessionId) ? senders[0] : { name: '다른 세션' };
-      const matched = messages.map(m => wrap(sender, m.id, m.created_at));
+      const matched = messages.map(m => wrap(sender, m.id, m.created_at, 'mailbox'));
       if (matched.every(m => !used.has(m.id))) return matched;
     }
   }
@@ -247,14 +301,14 @@ export function matchOrchestrationInput(evidence, text, at, used) {
       const taskSpec = results.find(r => r.session.sessionId === receipt.session.sessionId && r.result.task?.id === taskId && r.result.task.created_by_terminal_handle === coordinator)?.result.task.spec;
       const acceptedSpec = typeof literal === 'string' ? literal.replaceAll("''", "'") : taskSpec;
       if (age >= -60_000 && age <= 86_400_000 && typeof acceptedSpec === 'string' && acceptedSpec.trim() === spec && bound(target, terminal, at) && accepted.effects?.some(e => e.kind === 'dispatch_input' && e.id === terminal && e.state === 'accepted')) {
-        const matched = wrap(receipt.session, dispatchId, receipt.at);
+        const matched = wrap(receipt.session, dispatchId, receipt.at, 'dispatch');
         if (!used.has(matched.id)) return [matched];
       }
     }
     const task = receipt.result.task, age = Date.parse(at) - Date.parse(receipt.at);
     if (age < 0 || age > 86_400_000 || task?.id !== taskId || task.spec?.trim() !== spec || task.created_by_terminal_handle !== coordinator || !bound(receipt.session, coordinator, at)) continue;
     if (!results.some(r => r.session.sessionId === receipt.session.sessionId && r.result.dispatch?.id === dispatchId && (r.result.dispatch.taskId || r.result.dispatch.task_id) === taskId && r.result.dispatch.runId === task.run_id && bound(target, r.result.dispatch.assigneeHandle, at))) continue;
-    const matched = wrap(receipt.session, dispatchId, receipt.at);
+    const matched = wrap(receipt.session, dispatchId, receipt.at, 'dispatch');
     if (!used.has(matched.id)) return [matched];
   }
   return [];

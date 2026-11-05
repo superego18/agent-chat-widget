@@ -120,9 +120,9 @@ test('세션이 보낸 마크다운 표는 표로 보인다 (#1812)', async () =
   } finally { srv.stop(); }
 });
 
-test('이전 대화 더 보기: 120개씩 더 그리고 보던 메시지 자리를 지키며, 탭을 바꾸거나 다시 열면 120개로 돌아간다', async () => {
+test('이전 대화 더 보기: 120개씩 확장하고 탭 전환·재열기 후 읽던 위치를 복원한다', async () => {
   const messages = Array.from({ length: 300 }, (_, i) => ({ id: i + 1, from: i % 2 ? 'agent' : 'user', to: A, session: A, text: `글 ${i + 1}`, at: iso((300 - i) * 60_000) }));
-  const srv = await startServer(makeDir({ messages, delivered: Object.fromEntries(messages.map((m) => [m.id, m.at])) }));
+  const srv = await startServer(makeDir({ messages, delivered: { _at: Object.fromEntries(messages.map((m) => [m.id, m.at])) } }));
   try {
     const { w, ctx } = await openWidget(srv);
     const count = () => w.eval((r) => r.querySelectorAll('#msgs .msg').length);
@@ -139,15 +139,30 @@ test('이전 대화 더 보기: 120개씩 더 그리고 보던 메시지 자리�
     await w.click('#more');
     assert.equal(await count(), 300);
     assert.equal(await w.eval((r) => !!r.getElementById('more')), false, '다 보이면 단추가 없다');
+    const readingAnchor = () => w.eval(r => {
+      const box = r.getElementById('msgs'), top = box.getBoundingClientRect().top;
+      const row = [...box.querySelectorAll('.msg[data-id]')].find(el => el.getBoundingClientRect().bottom > top + 1);
+      return { id: row.dataset.id, offset: row.getBoundingClientRect().top - top };
+    });
+    const assertReadingAnchor = async expected => {
+      const actual = await w.eval((r, id) => {
+        const box = r.getElementById('msgs'), row = box.querySelector(`.msg[data-id="${id}"]`);
+        return row ? row.getBoundingClientRect().top - box.getBoundingClientRect().top : null;
+      }, expected.id);
+      assert.ok(actual !== null && Math.abs(actual - expected.offset) < 2, JSON.stringify({ expected, actual }));
+      assert.ok((await count()) >= 120 && (await count()) < 300, '복원할 위치는 포함하고 불필요한 전체 기록은 다시 그리지 않는다');
+    };
+    const tabAnchor = await readingAnchor();
     await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[1].click());
     await w.eval((r) => r.querySelectorAll('#tabs .chipbtn')[0].click());
     await w.idle(200);
-    assert.equal(await count(), 120, '탭을 바꾸면 120개로');
+    await assertReadingAnchor(tabAnchor);
     await w.click('#more');
+    const reopenAnchor = await readingAnchor();
     await w.click('#btn');
     await w.click('#btn');
     await w.idle(200);
-    assert.equal(await count(), 120, '다시 열면 120개로');
+    await assertReadingAnchor(reopenAnchor);
     await ctx.close();
   } finally { srv.stop(); }
 });
@@ -219,7 +234,7 @@ test('Codex 답에도 답장 단추가 있고, 답장하면 원문이 Codex 에 
   fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), tool: 'codex', path: roll }));
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'uifb-bin-'));
   const log = path.join(bin, 'args.json');
-  const fake = `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`;
+  const fake = `#!/usr/bin/env node\nconst args=process.argv.slice(2); if(args[0]==='queue') require('fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(args));\n`;
   fs.writeFileSync(path.join(bin, 'codex'), fake, { mode: 0o755 });
   // Windows 에서는 npm 설치 모양(codex.cmd 옆의 node_modules/@openai/codex/bin/codex.js)을 찾아 node 로 바로 부른다.
   if (process.platform === 'win32') {
@@ -242,7 +257,9 @@ test('Codex 답에도 답장 단추가 있고, 답장하면 원문이 Codex 에 
     await w.type(v + '이거 다시');
     await w.click('#form button[type="submit"]');
     for (let i = 0; i < 40 && !fs.existsSync(log); i++) await new Promise((r) => setTimeout(r, 100));
-    const msg = JSON.parse(fs.readFileSync(log, 'utf8')).at(-1);
+    const args = JSON.parse(fs.readFileSync(log, 'utf8'));
+    assert.deepEqual(args.slice(0, 4), ['queue', '--thread', B, '--message']);
+    const msg = args.at(-1);
     assert.match(msg, /이거 다시/);
     assert.match(msg, /답장 대상 \[xmsg_1\] 에이전트: 코덱스 답/);
     await ctx.close();

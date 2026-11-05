@@ -13,17 +13,29 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import zlib from 'node:zlib';
 import { readQueuePickups } from './codex-pickup.mjs';
-import { steerCodex } from './codex-steer.mjs';
-import { readCodexHistory, readStoredHistory } from './transcript-store.mjs';
+import { createCodexStatusReader } from './codex-status.mjs';
+import { createPeerSourceIndex } from './codex-peer-index.mjs';
+import { steerCodex, queueCodexImages } from './codex-steer.mjs';
+import { createChatImageStore, MAX_IMAGE_BYTES } from './chat-images.mjs';
+import { readCodexHistory, readStoredHistory, readClaudeQuestionHistory } from './transcript-store.mjs';
 import { cancelCodexQueued } from './codex-cancel.mjs';
-import { createRpcCleanupOwner } from './codex-rpc.mjs';
+import { createRpcCleanupOwner, withCodexRpc } from './codex-rpc.mjs';
+import { createCodexControlReader } from './codex-control.mjs';
+import { createCodexQuestionBridge } from './codex-questions.mjs';
 import { createEvidenceContext } from './codex-orchestration.mjs';
+import { createPollDeltas } from './poll-delta.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
 import { readJsonSafe, writeJsonAtomic, adjustText, ADJUST_KEYS, formatMessage, quoteLines, interruptedSince } from './chat-format.mjs';
 
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 // 위젯 파일. 요청마다 새로 읽으므로 고치면 열린 화면도 새로고침만으로 바뀐다.
 const SHARED = {
+  '/api/heic-convert.mjs': ['heic-convert.mjs', 'text/javascript; charset=utf-8'],
+  '/api/heic-worker.mjs': ['heic-worker.mjs', 'text/javascript; charset=utf-8'],
+  '/api/heic-codec-1.6.7.mjs': ['heic-codec-1.6.7.mjs', 'text/javascript; charset=utf-8'],
+  '/api/heic-codec.LICENSE.txt': ['heic-codec.LICENSE.txt', 'text/plain; charset=utf-8'],
+  '/api/heic-codec.GPL.txt': ['heic-codec.GPL.txt', 'text/plain; charset=utf-8'],
+  '/api/heic-codec.NOTICE.txt': ['heic-codec.NOTICE.txt', 'text/plain; charset=utf-8'],
   '/__uifb/widget.js': ['app-widget.js', 'text/javascript; charset=utf-8'],
   '/__uifb/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
   '/__uifb/icon-180.png': ['icon-180.png', 'image/png'],
@@ -33,9 +45,22 @@ const SHARED = {
 const MAX_BODY = 256 * 1024;
 const NOT_MINE = Symbol('not mine');
 
-export function createChatHandler({ root, auth = { key: null }, queueSpawn = spawn, queueTimeoutMs = 15000, steerSend = steerCodex, cancelSend = cancelCodexQueued }) {
+export function createChatHandler({ root, auth = { key: null }, queueSpawn = spawn, queueTimeoutMs = 15000, steerSend = steerCodex, cancelSend = cancelCodexQueued, readControl, imageSend = queueCodexImages, questionSend }) {
 if (!Number.isFinite(queueTimeoutMs) || queueTimeoutMs <= 0) throw new Error('queueTimeoutMs must be positive');
 const cleanupOwner = createRpcCleanupOwner();
+const questionBridge = questionSend || createCodexQuestionBridge({ root, command: process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, cleanupOwner });
+const images = createChatImageStore(root);
+const control = createCodexControlReader({ read: readControl || (() => withCodexRpc(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, async call => {
+  const ids = []; let cursor;
+  do {
+    const page = await call('thread/loaded/list', cursor ? { cursor } : {});
+    if (!Array.isArray(page.data) || page.data.some(id => typeof id !== 'string')) throw new Error('invalid_loaded_threads');
+    ids.push(...page.data); cursor = page.nextCursor;
+  } while (cursor);
+  return ids;
+}, { timeoutMs: queueTimeoutMs, cleanupOwner })) });
+const peerSources = createPeerSourceIndex();
+const evidenceContext = () => Object.assign(createEvidenceContext(), { peerSources });
 const ownedTimers = new Set();
 let closing = false, shutdownPromise;
 const ownedTimeout = (fn, ms) => {
@@ -56,12 +81,18 @@ function shutdown() {
   closing = true;
   for (const timer of ownedTimers) { clearTimeout(timer); clearInterval(timer); }
   ownedTimers.clear();
-  Promise.all([cleanupOwner.shutdown(), ...queueRequests.values(), ...sideQueue.values()]).then(() => resolveShutdown(), rejectShutdown);
+  Promise.all([control.shutdown(), cleanupOwner.shutdown(), peerSources.shutdown(), ...queueRequests.values(), ...sideQueue.values()]).then(() => resolveShutdown(), rejectShutdown);
   return shutdownPromise;
 }
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
+}
+function acceptsGzip(req) {
+  return String(req.headers?.['accept-encoding'] || '').split(',').some(part => {
+    const [encoding, ...params] = part.trim().split(';'), q = params.find(x => /^\s*q=/i.test(x));
+    return encoding.toLowerCase() === 'gzip' && (!q || Number(q.split('=')[1]) > 0);
+  });
 }
 const chatFile = path.join(root, 'chat.json');
 const sessionsDir = path.join(root, 'sessions');
@@ -77,6 +108,28 @@ function readChat() {
 // Larger conversations are still returned in full, without retaining a cache.
 const POLL_CACHE_BYTES = 8 * 1024 * 1024;
 let pollChat, pollResponse;
+const transcriptResponses = new WeakMap();
+const pollDeltas = createPollDeltas();
+function sendTranscriptPoll(req, res, data, known, deltaScope) {
+  let response = transcriptResponses.get(data);
+  if (!response) {
+    const raw = JSON.stringify(data), version = createHash('sha256').update(raw).digest('hex');
+    response = { version, json: JSON.stringify({ ...data, version }), gzip: null };
+    if (Buffer.byteLength(response.json) <= POLL_CACHE_BYTES) transcriptResponses.set(data, response);
+  }
+  if (known === response.version) return send(res, 200, { version: response.version, unchanged: true });
+  const delta = deltaScope && pollDeltas(deltaScope, data, 'items', response.version, known);
+  if (delta) return sendPollDelta(req, res, delta);
+  if (!acceptsGzip(req)) return send(res, 200, response.json);
+  response.gzip ||= zlib.gzipSync(response.json, { level: 4 });
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  res.end(response.gzip);
+}
+function sendPollDelta(req, res, data) {
+  if (!acceptsGzip(req)) return send(res, 200, data);
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  res.end(zlib.gzipSync(JSON.stringify(data), { level: 4 }));
+}
 function chatVersion() {
   try {
     const s = fs.statSync(chatFile);
@@ -93,17 +146,21 @@ function readPollChat() {
     return chat;
   } catch { return { messages: [] }; }
 }
-function sendChatPoll(req, res) {
+function sendChatPoll(req, res, known, deltaRequested) {
   const chat = readPollChat();
   // Pickups can change without chat.json changing; always observe them first.
   const delivered = readDelivered(chat), deliveredKey = JSON.stringify(delivered);
   let response = pollResponse;
   if (response?.chat !== chat || response.deliveredKey !== deliveredKey) {
-    const json = JSON.stringify({ ...chat, delivered });
-    response = { chat, deliveredKey, json, gzip: null };
+    const payload = { ...chat, delivered }, version = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    const json = JSON.stringify({ ...payload, version });
+    response = { chat, deliveredKey, json, version, gzip: null };
     pollResponse = Buffer.byteLength(json) <= POLL_CACHE_BYTES ? response : null;
   }
-  if (!/\bgzip\b/.test(req.headers?.['accept-encoding'] || '')) return send(res, 200, response.json);
+  if (known === response.version) return send(res, 200, { version: response.version, unchanged: true });
+  const delta = deltaRequested && pollDeltas('chat', { ...chat, delivered }, 'messages', response.version, known);
+  if (delta) return sendPollDelta(req, res, delta);
+  if (!acceptsGzip(req)) return send(res, 200, response.json);
   response.gzip ||= zlib.gzipSync(response.json, { level: 6 });
   res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
   res.end(response.gzip);
@@ -124,7 +181,8 @@ function queueWatch(session) {
     (process.env.PATH || '').split(path.delimiter).some(dir => {
       try { fs.accessSync(path.join(dir, 'codex'), fs.constants.X_OK); return true; } catch { return false; }
     });
-  return { active: configured, configured, via: 'queue', handlesDone: true, steer: configured && typeof WebSocket === 'function', cancel: configured && typeof WebSocket === 'function',
+  const observed = configured && typeof WebSocket === 'function' ? control.snapshot(session.sessionId) : { available: false, state: 'disconnected' };
+  return { active: configured, configured, via: 'queue', handlesDone: true, steer: observed.available, cancel: observed.available, control: observed.state,
     agent: session.agent || session.name, session: session.sessionId };
 }
 
@@ -283,39 +341,11 @@ function notifyStatus(s, prev) {
 // Codex 세션 상태: Codex 에는 hook-relay 훅이 없어서, 대화 기록(rollout)의 마지막 턴 표시로 읽는다.
 // task_started 뒤에 task_complete·turn_aborted 가 없으면 작업 중(하는 일은 그 뒤 마지막 도구), 있으면 쉬는 중.
 // 승인 대기는 대화 기록에 남지 않아 알 수 없다. 대화 기록이 마지막으로 바뀐 시각을 at 으로 적어 "오래 멈춤"이 실제로 멈췄을 때만 울리게 한다.
-function codexToolLabel(name = '') {
-  if (/^(exec|exec_command|shell|local_shell)$/.test(name)) return '명령 실행 중';
-  if (name === 'apply_patch') return '파일 수정 중';
-  if (name === 'read_file') return '파일 읽는 중';
-  if (name.startsWith('mcp__')) return `${name.split('__')[1]} 도구 사용 중`;
-  return name ? `${name} 사용 중` : '생각하는 중';
-}
-function codexStatus(file) {
-  try {
-    const st = fs.statSync(file);
-    const len = Math.min(st.size, 512 * 1024);
-    const fd = fs.openSync(file, 'r');
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, st.size - len);
-    fs.closeSync(fd);
-    let tool = '';
-    for (const l of buf.toString('utf8').split('\n').reverse()) {
-      if (!l.includes('"type"')) continue;
-      let o;
-      try { o = JSON.parse(l); } catch { continue; }
-      const t = o.payload?.type;
-      if (!tool && (t === 'function_call' || t === 'custom_tool_call')) tool = String(o.payload.name || '');
-      if (t === 'task_complete') return { state: 'idle', last: o.payload.last_agent_message || '', at: st.mtime.toISOString() };
-      if (t === 'turn_aborted') return { state: 'idle', at: st.mtime.toISOString() };
-      if (t === 'task_started') return { state: 'working', detail: codexToolLabel(tool), at: st.mtime.toISOString(), startedAt: o.timestamp };
-    }
-  } catch {}
-  return null;
-}
+const codexStatus = createCodexStatusReader();
 const codexSeen = new Map(); // 세션마다 마지막으로 본 대화 기록 상태(처음 본 상태는 알리지 않는다)
 const codexAnswered = new Map(); // 세션마다 답장 알림을 보낸 마지막 Codex 답 번호
 ownedInterval(() => {
-  const evidence = createEvidenceContext();
+  const evidence = evidenceContext();
   let files = [];
   try { files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json')); } catch {}
   // Receipt-evidence budgets must not restrict answer/status monitoring.
@@ -334,8 +364,7 @@ ownedInterval(() => {
         pushAll({ title: `${s.name || '세션'} 답장`, body: plainBody(m.text), tag: `uifb-${s.sessionId}`, session: s.sessionId }, 'answer');
       }
     }
-    const now = codexStatus(s.path);
-    if (!now) continue;
+    const now = codexStatus(s.path) || { state: 'unknown' };
     if (now.state === 'idle' && lastAns && answerPushed.has(lastAns)) now.lastPushed = true;
     const key = `${now.state}|${now.detail || ''}|${now.at}`, before = codexSeen.get(s.sessionId);
     if (before === key) continue;
@@ -384,6 +413,9 @@ function addPeer(msg, text) {
   const chat = readChat();
   const peers = readPeers();
   const now = new Date().toISOString();
+  const method = ['message-tool', 'hook-relay'].includes(msg.peerMethod) ? { peerMethod: msg.peerMethod } : {};
+  const sourceTool = findSession(msg.session)?.tool, targetTool = findSession(msg.to)?.tool;
+  const tools = { ...(['claude', 'codex'].includes(sourceTool) ? { peerSourceTool: sourceTool } : {}), ...(['claude', 'codex'].includes(targetTool) ? { peerTargetTool: targetTool } : {}), ...(method.peerMethod === 'message-tool' && msg.peerSourceHost === 'cmux' ? { peerSourceHost: 'cmux' } : {}), ...(method.peerMethod === 'hook-relay' && msg.peerTargetHost === 'cmux' ? { peerTargetHost: 'cmux' } : {}) };
   if (sid(msg.to)) {
     // 받은 쪽: 10분 안에 같은 글을 보낸 기록이 있으면 그 기록에 받은 세션과 받은 시각을 적는다.
     const sent = chat.messages.findLast((m) => m.from === 'peer' && !m.readAt && m.text === text && Date.now() - Date.parse(m.at) < 10 * 60_000 && (!m.to || m.to === msg.to));
@@ -391,17 +423,23 @@ function addPeer(msg, text) {
     if (sent) {
       sent.to = msg.to;
       sent.readAt = now;
+      if (!sent.peerMethod) Object.assign(sent, method);
+      if (!sent.peerSourceTool && tools.peerSourceTool) sent.peerSourceTool = tools.peerSourceTool;
+      if (!sent.peerTargetTool && tools.peerTargetTool) sent.peerTargetTool = tools.peerTargetTool;
+      if (!sent.peerSourceHost && tools.peerSourceHost) sent.peerSourceHost = tools.peerSourceHost;
+      if (!sent.peerTargetHost && tools.peerTargetHost) sent.peerTargetHost = tools.peerTargetHost;
       if (sent.toName) peers[sent.toName] = msg.to;
       if (fromName && sent.session) peers[fromName] = sent.session;
       fs.writeFileSync(peersFile, JSON.stringify(peers, null, 2) + '\n');
     } else {
-      chat.messages.push({ id: chat.messages.length + 1, from: 'peer', text, at: now, to: msg.to, readAt: now, ...(fromName ? { fromName } : {}), ...(peers[fromName] ? { session: peers[fromName] } : {}) });
+      chat.messages.push({ id: chat.messages.length + 1, from: 'peer', ...method, ...tools, text, at: now, to: msg.to, readAt: now, ...(fromName ? { fromName } : {}), ...(peers[fromName] ? { session: peers[fromName] } : {}) });
     }
   } else {
     const toName = peerName(msg.toName);
-    const entry = { id: chat.messages.length + 1, from: 'peer', text, at: now, toName };
+    const entry = { id: chat.messages.length + 1, from: 'peer', ...method, ...tools, text, at: now, toName };
     if (sid(msg.session)) entry.session = msg.session;
     if (peers[toName]) entry.to = peers[toName];
+    if (entry.to) { const tool = findSession(entry.to)?.tool; if (['claude', 'codex'].includes(tool)) entry.peerTargetTool = tool; }
     chat.messages.push(entry);
   }
   writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
@@ -446,7 +484,9 @@ function cleanQuotes(q, below = Infinity) {
 function addChat(msg) {
   if (closing && msg.from === 'user') return null;
   const draft = msg.from === 'user' ? cleanDraft(msg.draft) : undefined;
-  const text = draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
+  let attachments;
+  try { attachments = msg.attachments === undefined ? [] : images.resolve(msg.attachments); } catch { return null; }
+  const text = (draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '') || (attachments.length ? '첨부한 사진을 확인해 주세요.' : '');
   if (text && msg.from === 'peer') return addPeer(msg, text);
   if (!text || !['user', 'agent', 'sub'].includes(msg.from)) return null; // sub: 세션의 서브에이전트가 돌려준 보고
   const chat = readChat();
@@ -454,6 +494,7 @@ function addChat(msg) {
   const cid = typeof msg.cid === 'string' ? msg.cid.slice(0, 80) : null;
   if (cid) { const dup = chat.messages.find((x) => x.cid === cid); if (dup) return dup; }
   const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
+  if (attachments.length) entry.attachments = attachments;
   if (cid) entry.cid = cid;
   if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
   if (msg.from === 'sub' && typeof msg.sub === 'string') entry.sub = msg.sub.slice(0, 40);
@@ -839,7 +880,7 @@ async function sendChatEntry(res, entry) {
 // 페이지 메시지를 실행 중인 Codex 세션에 넣는다. 쉬고 있으면 바로 새 턴이 시작되고, 작업 중이면 그 턴이 끝난 뒤 처리된다.
 // Pass arguments directly, including on Windows; shell shims can corrupt quotes and newlines.
 function referenceMessages(sessionId) {
-  const evidence = createEvidenceContext();
+  const evidence = evidenceContext();
   const outgoing = listSessions().filter(s => s.id !== sessionId)
     .flatMap(s => readTranscript(s.id, evidence).items.filter(m => m.from === 'peer' && m.session === sessionId));
   return [...readChat().messages, ...readTranscript(sessionId, evidence).items, ...outgoing];
@@ -856,10 +897,14 @@ function queueToCodex(session, entry) {
   // Outgoing native peer messages are stored in the recipient's transcript but shown in both tabs.
   const quotes = entry.quotes?.length || entry.replyTo ? quoteLines(entry, referenceMessages(session.sessionId)) : [];
   const text = `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] [uifb-receipt:${receipt}] ${entry.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`;
+  let imagePaths;
+  try { imagePaths = (entry.attachments || []).map(a => images.get(a.id).file); }
+  catch { const outcome = { state: 'failed', error: 'image_missing', attempt, receipt }; saveQueue(entry, outcome, attempt); return Promise.resolve(outcome); }
+  const imageOptions = { timeoutMs: queueTimeoutMs, clientUserMessageId: receipt, cleanupOwner, ...(imagePaths.length ? { imagePaths } : {}) };
   const delivery = entry.interject
-    ? Promise.resolve().then(() => steerSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, text, { timeoutMs: queueTimeoutMs, clientUserMessageId: receipt, cleanupOwner }))
+    ? Promise.resolve().then(() => steerSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, text, imageOptions))
       .catch(() => ({ ok: false, state: 'unknown', mode: 'steer', error: 'steer_failed' }))
-    : queueText(session, text);
+    : imagePaths.length ? imageSend(process.platform === 'win32' ? windowsQueueCommand() : { file: 'codex', prefix: [] }, session.sessionId, text, imageOptions) : queueText(session, text);
   const request = delivery
     .then((outcome) => {
       saveQueue(entry, { ...outcome, attempt, receipt }, attempt);
@@ -974,11 +1019,28 @@ function runSide(s, q, done) {
   child.stdin.end(prompt);
 }
 
-function readTranscript(id, evidence = createEvidenceContext()) {
+function readTranscript(id, evidence = evidenceContext()) {
   const session = findSession(id);
   if (!session) return { items: [] };
-  if (session.tool !== 'codex') return { ...readStoredHistory(root, id), via: 'hooks' };
+  if (session.tool !== 'codex') return { ...readClaudeQuestionHistory(root, session), via: 'hooks' };
   return readCodexHistory(root, session, evidence);
+}
+
+function projectLinks() {
+  const data = readJsonSafe(path.join(root, 'project-links.json'));
+  const items = (Array.isArray(data?.items) ? data.items : []).flatMap(item => {
+    if (typeof item?.title !== 'string' || !Array.isArray(item.links)) return [];
+    const links = item.links.flatMap(link => {
+      try {
+        const url = new URL(link.href);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
+          typeof link.label !== 'string' || !['local', 'remote'].includes(link.scope)) return [];
+        return [{ label: link.label, href: url.href, scope: link.scope }];
+      } catch { return []; }
+    });
+    return links.length ? [{ title: item.title, description: typeof item.description === 'string' ? item.description : '', links }] : [];
+  });
+  return { items, checkedAt: typeof data?.checkedAt === 'string' ? data.checkedAt : null };
 }
 
 function readWatchFile(name) {
@@ -1025,12 +1087,64 @@ function readReviewWatch(sessionKey, round) {
 
 function inner(req, res, url) {
   if (closing) return send(res, 503, { error: 'unavailable' });
+  if (url.pathname === '/api/question') {
+    if (req.method !== 'POST') return send(res, 405, { error: 'POST required' });
+    let body = '', oversized = false;
+    req.on('data', chunk => { body += chunk; if (body.length > MAX_BODY) { oversized = true; req.destroy(); } });
+    req.on('end', async () => {
+      if (oversized) return;
+      let input;
+      try { input = JSON.parse(body); } catch { return send(res, 400, { error: 'JSON 형식이 아닙니다.' }); }
+      if (!input || typeof input !== 'object' || !sid(input.session) || !/^[\w.-]{1,256}$/.test(input.itemId || '') || (input.submission !== undefined && (!input.submission || typeof input.submission !== 'object'))) return send(res, 400, { error: '등록된 세션과 질문이 필요합니다.' });
+      const session = findSession(input.session);
+      if (!session || session.sessionId !== input.session || typeof input.itemId !== 'string') return send(res, 400, { error: '등록된 세션과 질문이 필요합니다.' });
+      const question = readTranscript(session.sessionId).items?.find(m => m.nativeQuestion?.itemId === input.itemId && m.session === session.sessionId);
+      if (!question) return send(res, 409, { ok: false, state: 'stale', error: '답변할 원래 질문을 찾지 못했습니다.' });
+      if (question.nativeQuestion.tool === 'request_user_input_async') return send(res, 409, { ok: false, state: 'unsupported', error: '이 비동기 질문은 아직 원래 질문창의 답변 처리와 연결되지 않았습니다. Codex 전용 질문창에서 답해 주세요.' });
+      try {
+        const result = await questionBridge(session, input.itemId, input.submission);
+        send(res, result.ok ? 200 : result.state === 'invalid' ? 400 : 409, result);
+      } catch { send(res, 503, { ok: false, state: 'unavailable', error: '원래 질문창에 연결하지 못했습니다.' }); }
+    });
+    return;
+  }
+  if (url.pathname === '/api/chat-images' && req.method === 'POST') {
+    const thumbnailFor = url.searchParams.get('thumbnailFor'), limit = thumbnailFor ? 256 * 1024 : MAX_IMAGE_BYTES;
+    let chunks = [], bytes = 0, refused = false;
+    req.on('data', chunk => {
+      bytes += chunk.length;
+      if (bytes > limit) {
+        if (!refused) send(res, 413, { error: thumbnailFor ? '미리보기 용량이 너무 큽니다.' : '사진은 한 장에 8MB까지 첨부할 수 있습니다.' });
+        refused = true; chunks = []; return;
+      }
+      if (!refused) chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (refused) return;
+      try {
+        const data = Buffer.concat(chunks);
+        if (thumbnailFor && req.headers['content-type'] !== 'image/jpeg') throw new Error('미리보기는 JPG 형식이어야 합니다.');
+        send(res, 200, thumbnailFor ? images.saveThumbnail(thumbnailFor, data) : images.save(data, req.headers['content-type'], req.headers['x-image-name'] ? decodeURIComponent(req.headers['x-image-name']) : url.searchParams.get('name') || ''));
+      }
+      catch (error) { send(res, 400, { error: error.message }); }
+    });
+    return;
+  }
+  if (url.pathname.startsWith('/api/chat-images/') && req.method === 'GET') {
+    try {
+      const suffix = url.pathname.slice('/api/chat-images/'.length);
+      const image = url.searchParams.get('thumbnail') === '1' ? images.thumbnail(suffix) : images.get(suffix);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return send(res, 200, fs.readFileSync(image.file), image.mime);
+    } catch { return send(res, 404, { error: '사진을 찾지 못했습니다.' }); }
+  }
   // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 비교 페이지가 같은 파일을 쓴다.
   if (SHARED[url.pathname]) {
     const [file, type] = SHARED[url.pathname];
+    const bytes = fs.readFileSync(path.join(assetsDir, file)), gzip = file === 'app-widget.js' && acceptsGzip(req);
     // 서비스 워커는 /__uifb/ 아래 있지만 페이지 전체(/)를 맡게 한다(화면 요청은 가로채지 않고 알림만 띄운다).
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', ...(file === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}) });
-    return res.end(fs.readFileSync(path.join(assetsDir, file)));
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': file === 'heic-codec-1.6.7.mjs' ? 'private, max-age=31536000, immutable' : 'no-store', ...(file === 'app-widget.js' ? { Vary: 'Accept-Encoding' } : {}), ...(gzip ? { 'Content-Encoding': 'gzip' } : {}), ...(file === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}) });
+    return res.end(gzip ? zlib.gzipSync(bytes, { level: 4 }) : bytes);
   }
   if (url.pathname === '/api/watch') {
     return send(res, 200, readReviewWatch(url.searchParams.get('session') || '', url.searchParams.get('round') || ''));
@@ -1069,6 +1183,10 @@ function inner(req, res, url) {
   // 알림(웹 푸시): 공개 키 주기, 기기 구독 받기·빼기, 시험 보내기
   // 대화창 위젯 파일이 바뀌었는지(고친 시각). 홈 화면 앱처럼 새로고침이 없는 곳에서 새 버전을 알려 주는 데 쓴다.
   // r: 대화창 새로고침 번호. 세션이 위젯을 고친 뒤 원할 때 POST /api/reload-widgets 로 바꾸면, 열려 있는 대화창이 안내를 띄우고 새로고침한다.
+  if (url.pathname === '/api/project-links') {
+    if (req.method !== 'GET') return send(res, 405, { error: 'GET only' });
+    return send(res, 200, projectLinks());
+  }
   if (url.pathname === '/api/widget-version') return send(res, 200, { v: fs.statSync(path.join(assetsDir, 'app-widget.js')).mtimeMs, r: reloadToken });
   if (url.pathname === '/api/reload-widgets' && req.method === 'POST') { reloadToken = Date.now(); fs.writeFileSync(reloadFile, JSON.stringify({ r: reloadToken })); return send(res, 200, { ok: true, r: reloadToken }); }
   if (url.pathname === '/api/push-key') return send(res, 200, { publicKey: vapidKeys(root).publicKey });
@@ -1117,7 +1235,8 @@ function inner(req, res, url) {
   }
 
   if (url.pathname === '/api/transcript') {
-    return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
+    const session = url.searchParams.get('session') || '';
+    return sendTranscriptPoll(req, res, readTranscript(session), url.searchParams.get('known'), url.searchParams.get('delta') === '1' ? 'transcript:' + session : null);
   }
 
   // 진단 기록: 폰에서만 생기는 문제(초점이 엉뚱한 곳으로 가는 등)를 원인까지 보려고, 위젯이 그 순간 전후의 터치·초점 순서를 남긴다.
@@ -1397,7 +1516,7 @@ function inner(req, res, url) {
             if (!withdrawn.ok) {
               m.queue = withdrawn.state === 'unknown' ? { ...before, state: 'unknown', error: 'conversion_withdrawal_unknown' } : before;
               writeJsonAtomic(chatFile, chat);
-              return send(res, withdrawn.state === 'not_pending' ? 409 : 502, { error: '원래 대기 요청의 회수를 확인하지 못해 끼워넣지 않았습니다.' });
+              return send(res, withdrawn.state === 'not_pending' ? 409 : 502, { error: withdrawn.state === 'failed' ? 'Codex 제어 연결을 확인하지 못했습니다. 기존 메시지는 유지했고 중복 전송하지 않았습니다. 연결이 복구되면 다시 시도해 주세요.' : withdrawn.state === 'not_pending' ? '이미 받아 갔거나 대기 요청을 찾지 못해 변경하지 않았습니다. 답장·읽음 상태를 확인해 주세요.' : '회수 결과가 불확실해 끼워넣지 않았습니다. 중복될 수 있으니 같은 내용을 다시 보내지 마세요.' });
             }
             // Durable safe state if the process stops between withdrawal and steering.
             m.queue = { ...before, state: 'failed', mode: 'steer', error: 'conversion_not_submitted' };
@@ -1418,7 +1537,7 @@ function inner(req, res, url) {
   }
 
   if (url.pathname === '/api/chat') {
-    if (req.method === 'GET') return sendChatPoll(req, res);
+    if (req.method === 'GET') return sendChatPoll(req, res, url.searchParams.get('known'), url.searchParams.get('delta') === '1');
     if (req.method === 'POST') {
       let body = '';
       req.on('data', (chunk) => {

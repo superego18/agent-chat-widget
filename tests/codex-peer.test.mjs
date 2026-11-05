@@ -33,6 +33,8 @@ test('received Orca messages use peer styling only with a registered sender comm
   assert.equal(history.items[0].session, source.sessionId);
   assert.equal(history.items[0].to, target.sessionId);
   assert.equal(history.items[0].fromName, 'Source');
+  assert.equal(history.items[0].peerMethod, 'terminal');
+  assert.equal(history.items[0].peerSourceTool, 'codex');assert.equal(history.items[0].peerTargetTool, 'codex');
   assert.equal(history.items[0].id, 'xreceived', 'classification preserves message IDs');
   assert.equal(history.items[0].text, text);
   assert.equal(fs.readFileSync(target.path, 'utf8'), received.map(JSON.stringify).join('\n'), 'native history stays read-only');
@@ -71,6 +73,7 @@ for (const width of [390, 1440]) {
       assert.equal(style.background, 'rgb(255, 247, 237)');
       assert.equal(style.border, 'dashed');
       assert.ok(style.tag.includes('세션끼리'));
+      assert.ok(style.tag.includes('직접 전달'));
       await w.click('#tabs button[role="tab"]:first-child');
       await page.waitForFunction(() => [...document.querySelectorAll('*')].some(e => e.shadowRoot?.querySelector('.msg.peer.out')));
       assert.equal((await w.msgs()).filter(x => x.text === text).length, 1);

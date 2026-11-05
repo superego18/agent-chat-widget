@@ -1,0 +1,14 @@
+import{test,after}from'node:test';import assert from'node:assert/strict';import fs from'node:fs';import{getBrowser,closeBrowser}from'./helpers.mjs';
+after(closeBrowser);const source=fs.readFileSync(new URL('../assets/app-widget.js',import.meta.url),'utf8');
+const wake='You have 1 orchestration message. Run `orca orchestration check --run run_one`.';
+for(const width of[390,1440])test(`native mailbox notice format is distinct but never invents delivery proof at ${width}px`,async t=>{
+ const ctx=await(await getBrowser()).newContext({viewport:{width,height:844}});t.after(()=>ctx.close());const page=await ctx.newPage();
+ const rows=[{id:'xnotice',text:wake},{id:'xcombined',text:wake+'\n\n'+wake},{id:'xquote',text:'Owner quote: '+wake},{id:'xmixed',text:wake+'\n\nPlease explain this notice.'},{id:'xwrongrun',text:wake+'\n\n'+wake.replace('run_one','run_two')},{id:1,text:wake,context:'app',to:'active'},{id:'xother',text:'Ordinary terminal request'}].map(m=>({from:'user',context:'terminal',session:'active',at:'2026-11-05T00:00:00Z',...m}));
+ const before=JSON.stringify(rows);
+ await page.route('**/*',r=>{const u=new URL(r.request().url());if(u.pathname==='/')return r.fulfill({contentType:'text/html',body:'<!doctype html><meta name="viewport" content="width=device-width"><body>Fixture'});if(r.request().method()!=='GET')return r.fulfill({json:{}});return r.fulfill({json:u.pathname.endsWith('/sessions')?{sessions:[{id:'active',name:'Active',tool:'codex',status:{state:'idle'}}]}:u.pathname.endsWith('/chat')?{messages:rows,delivered:{}}:u.pathname.endsWith('/drafts')?{drafts:[],trash:[]}:u.pathname.endsWith('/transcript')?{items:[]}: {}});});
+ await page.goto('http://mailbox-notice.test/');await page.evaluate(()=>{localStorage.setItem('__uifb_tab','active');localStorage.setItem('__uifb_open:app','1');});await page.addScriptTag({content:source});await page.locator('.msg[data-id="xnotice"]').waitFor();
+ for(const id of['xnotice','xcombined']){const bubble=page.locator(`.msg[data-id="${id}"]`);assert.equal(await bubble.locator('.tag').textContent(),'Orca 확인 안내 · Codex · 전송 경로 미확인');const style=await bubble.evaluate(e=>({notice:e.classList.contains('mailbox-notice'),peer:e.classList.contains('peer'),background:getComputedStyle(e).backgroundColor,border:getComputedStyle(e).borderTopStyle}));assert.equal(style.notice,true);assert.equal(style.peer,false);assert.equal(style.background,'rgb(255, 247, 237)');assert.equal(style.border,'dashed');assert.equal(await bubble.locator('.route').count(),0);}
+ for(const id of['xquote','xmixed','xwrongrun','1','xother'])assert.equal(await page.locator(`.msg[data-id="${id}"]`).evaluate(e=>e.classList.contains('mailbox-notice')),false);
+ assert.equal(JSON.stringify(rows),before,'display classification must not rewrite message provenance');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+});

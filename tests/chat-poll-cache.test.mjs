@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 import { createChatHandler } from '../scripts/chat-handler.mjs';
 
 function fixture(t) {
@@ -14,15 +15,23 @@ function fixture(t) {
   fs.writeFileSync(deliveredFile, '{}');
   const handler = createChatHandler({ root });
   t.after(async () => { await handler.shutdown(); fs.rmSync(root, { recursive: true, force: true }); });
-  const get = (gzip = true) => {
+  const get = (gzip = true, known = '') => {
     let body, headers;
     handler.handle({ method: 'GET', headers: gzip ? { 'accept-encoding': 'gzip' } : {} }, {
       writeHead(status, h) { assert.equal(status, 200); headers = h; }, end(value) { body = value; }
-    }, new URL('http://fixture.invalid/api/chat'));
+    }, new URL('http://fixture.invalid/api/chat?known=' + known));
     return { data: JSON.parse(headers['Content-Encoding'] === 'gzip' ? zlib.gunzipSync(body).toString() : body), headers };
   };
   return { root, chatFile, deliveredFile, handler, get };
 }
+
+test('initial widget script is gzip compressed without changing source bytes', t => {
+  const f = fixture(t); let body, headers;
+  f.handler.handle({ method: 'GET', headers: { 'accept-encoding': 'gzip' } }, { writeHead(status,h) { assert.equal(status,200);headers=h; }, end(value) { body=value; } }, new URL('http://fixture/__uifb/widget.js'));
+  assert.equal(headers['Content-Encoding'],'gzip');
+  assert.deepEqual(zlib.gunzipSync(body),fs.readFileSync(fileURLToPath(new URL('../assets/app-widget.js',import.meta.url))));
+  assert.match(headers.Vary,/Accept-Encoding/);
+});
 
 test('unchanged chat polling reads history once and reuses gzip without losing plain JSON', t => {
   const f = fixture(t), read = fs.readFileSync, gzip = zlib.gzipSync;
@@ -35,6 +44,18 @@ test('unchanged chat polling reads history once and reuses gzip without losing p
   assert.equal(first.headers['Cache-Control'], 'no-store', 'browser freshness is unchanged');
   assert.equal(reads, 1, 'unchanged polling must not repeatedly read the full chat file');
   assert.equal(compressions, 1, 'unchanged polling must not repeatedly compress the full conversation');
+});
+
+test('conditional chat polling retains the full baseline and invalidates on delivered-only changes', t => {
+  const f = fixture(t), first = f.get().data;
+  assert.match(first.version || '', /^[a-f0-9]{64}$/);
+  assert.deepEqual(f.get(true, first.version).data, { version: first.version, unchanged: true });
+  assert.deepEqual(f.get(true, 'unknown').data, first);
+  fs.writeFileSync(f.deliveredFile, JSON.stringify({ _at: { 1: '2026-11-05T00:00:00Z' } }));
+  const changed = f.get(true, first.version).data;
+  assert.notEqual(changed.version, first.version);
+  assert.equal(changed.messages[0].text, 'Synthetic message');
+  assert.equal(changed.delivered._at[1], '2026-11-05T00:00:00Z');
 });
 
 test('new chat and delivered-only updates immediately invalidate the cached response', t => {

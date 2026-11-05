@@ -54,7 +54,7 @@ for (const width of [390, 1440]) {
         localStorage.setItem('__uifb_reply', JSON.stringify(st));
       }, 'x' + ids[0]);
       await page.reload();
-      await w.idle(1200);
+      await page.waitForFunction(id => [...document.querySelectorAll('*')].some(e => e.shadowRoot?.querySelector(`.msg[data-id="${id}"]`)), 'x' + ids[1]);
       assert.equal(await w.inputValue(), value, 'refresh preserves compact chips');
       assert.equal(await w.eval(r => r.querySelectorAll('#inback mark').length), 2);
       assert.equal(await w.eval(r => [...r.querySelectorAll('#reply .rref .go')].every(b => !b.hidden)), true, 'both native originals remain reachable');

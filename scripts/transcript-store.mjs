@@ -4,6 +4,9 @@ import { createHash } from 'node:crypto';
 import { adjustText, quoteLines, readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 import { readPeerSends, matchPeerInput } from './codex-peers.mjs';
 import { readOrchestrationEvidence, matchOrchestrationInput, createEvidenceContext } from './codex-orchestration.mjs';
+import { questionCalls, nativeQuestionEntries, codexQuestionReply } from './question-messages.mjs';
+import { readContinuationOrigins } from './continuation-origin.mjs';
+import { nativeDisplaySource, projectReviewedDisplay } from './native-display.mjs';
 
 const modifiedAt = file => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } };
 const fileOf = (root, id) => path.join(root, 'transcript-history', `${id}.json`);
@@ -72,11 +75,26 @@ const nativeMessages = new Map();
 const displayedHistories = new Map();
 let nativeRevision = 0;
 const identity = stat => `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
-function messageRecord(line) {
-  if (!/"type"\s*:\s*"message"/.test(line)) return null;
+function messageRecord(line, questions) {
+  if (/"type"\s*:\s*"UserMessage"/.test(line)) {
+    try {
+      const o = JSON.parse(line), p = o.payload, item = p?.item;
+      if (o.type === 'event_msg' && p?.type === 'item_completed' && item?.type === 'UserMessage' && typeof item.client_id === 'string' && Array.isArray(item.content)) {
+        const text = item.content.filter(c => c.type === 'text' && typeof c.text === 'string').map(c => c.text).join('\n').trim();
+        return { line: '', o: { timestamp: o.timestamp, type: o.type, payload: { type: p.type, thread_id: p.thread_id, turn_id: p.turn_id,
+          item: { type: item.type, client_id: item.client_id, textSHA256: createHash('sha256').update(text).digest('hex') } } } };
+      }
+    } catch {}
+  }
+  const knownAnswer = [...line.matchAll(/"tool_use_id"\s*:\s*"([^"\\]+)"/g)].some(m => questions.has(m[1])) ||
+    /"type"\s*:\s*"function_call_output"/.test(line) && [...line.matchAll(/"call_id"\s*:\s*"([^"\\]+)"/g)].some(m => questions.has(m[1]));
+  if (!/"type"\s*:\s*"message"|"name"\s*:\s*"(?:functions\.)?(?:request_user_input(?:_async)?|AskUserQuestion)"/.test(line) && !knownAnswer) return null;
   try {
     const o = JSON.parse(line);
-    return o.type === 'response_item' && o.payload?.type === 'message' && ['user', 'assistant'].includes(o.payload.role) ? { line, o } : null;
+    const calls = questionCalls(o);
+    for (const call of calls) questions.add(call.id);
+    return o.type === 'response_item' && (o.payload?.type === 'message' && ['user', 'assistant'].includes(o.payload.role) || o.payload?.type === 'function_call_output' && questions.has(o.payload.call_id)) || calls.length ||
+      o.type === 'user' && o.message?.content?.some?.(b => b.type === 'tool_result' && questions.has(b.tool_use_id)) ? { line, o } : null;
   } catch { return null; }
 }
 function readNativeMessages(file) {
@@ -103,10 +121,10 @@ function readNativeMessages(file) {
     if (!entry) entry = { identity: identity(stat), size: 0, tail: Buffer.alloc(0), rows: [], bytes: 0, revision: ++nativeRevision };
     const bytes = range(entry.size, stat.size - entry.size);
     const buffer = Buffer.concat([entry.tail, bytes]);
-    const rows = [...entry.rows];
+    const rows = [...entry.rows], questions = new Set(entry.questions || []);
     let cursor = 0, retained = entry.bytes, revision = entry.revision;
     for (let end; (end = buffer.indexOf(10, cursor)) !== -1;) {
-      const row = messageRecord(buffer.subarray(cursor, end).toString('utf8'));
+      const row = messageRecord(buffer.subarray(cursor, end).toString('utf8'), questions);
       if (row) { rows.push(row); retained += end - cursor; revision = ++nativeRevision; }
       cursor = end + 1;
     }
@@ -120,11 +138,11 @@ function readNativeMessages(file) {
       s.size === stat.size && s.mtimeMs !== stat.mtimeMs)) throw new Error('Native transcript changed during read');
     nativeMessages.delete(key);
     nativeMessages.set(key, { identity: identity(stat), size: stat.size, mtime: stat.mtimeMs, prefix, suffix,
-      rows, tail: Buffer.from(tail), bytes: retained, revision });
+      rows, questions, tail: Buffer.from(tail), bytes: retained, revision });
     while (nativeMessages.size > 16 || [...nativeMessages.values()].reduce((n, x) => n + x.bytes + x.tail.length, 0) > 64 * 1024 * 1024) nativeMessages.delete(nativeMessages.keys().next().value);
     // A valid final JSON line need not have a newline yet. Reparse it on append
     // so split UTF-8 and partial JSON never become permanently lost or duplicated.
-    const last = messageRecord(tail.toString('utf8'));
+    const last = messageRecord(tail.toString('utf8'), new Set(questions));
     return { rows: last ? [...rows, last] : rows,
       key: `${revision}:${last ? createHash('sha256').update(last.line).digest('hex') : ''}` };
   } catch (error) { nativeMessages.delete(key); throw error; }
@@ -133,29 +151,33 @@ function readNativeMessages(file) {
 
 // The widget owns a durable copy of displayed native messages, independent of the provider's rollout.
 export function readCodexHistory(root, session, context = createEvidenceContext()) {
+  const display = data => projectReviewedDisplay(root, session, data);
   const file = fileOf(root, session.sessionId);
   const saved = historyOf(file);
-  try { fs.statSync(session.path); } catch { return shortReferences(root, saved); }
+  try { fs.statSync(session.path); } catch { return display(shortReferences(root, saved)); }
+  let source;
+  try { source = readNativeMessages(session.path); } catch { return display(shortReferences(root, saved)); }
   // Receipt-source faults cannot bypass the healthy current transcript/fallback.
   let peers, orchestration;
-  try { peers = readPeerSends(root, session, context); }
+  try { peers = readPeerSends(root, session, context, source.rows); }
   catch { peers = { sends: new Map(), key: 'peer-incomplete' }; }
   try { orchestration = readOrchestrationEvidence(root, session, context); }
   catch { orchestration = { sessions: [], results: [], target: session, key: 'native-incomplete', complete: false }; }
   const inputs = widgetInputs(root, session);
   const chatKey = createHash('sha256').update(JSON.stringify([...inputs])).digest('hex');
   const cacheKey = 'history:' + path.resolve(file);
-  let source;
-  try { source = readNativeMessages(session.path); } catch { return shortReferences(root, saved); }
-  const key = `${session.path}:${source.key}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}`;
-  if (displayedHistories.get(cacheKey)?.key === key) return displayedHistories.get(cacheKey).data;
+  const origins = readContinuationOrigins(root, session, source.rows, source.key);
+  const key = `${session.path}:${source.key}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}:${origins.key}`;
+  if (displayedHistories.get(cacheKey)?.key === key) return display(displayedHistories.get(cacheKey).data);
   const items = new Map(saved.items.map(item => [item.id, item]));
+  const questions = nativeQuestionEntries(source.rows, session);
+  for (const item of questions.items) items.set(item.id, item);
   const usedSends = new Set(saved.items.flatMap(item => [item.peerSend, ...(item.peerSends || [])]).filter(Boolean));
   for (const { line, o } of source.rows) {
     const p = o.payload;
     if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
     const raw = (p.content || []).filter(b => ['input_text', 'output_text'].includes(b.type)).map(b => b.text).join('\n');
-    const text = (p.role === 'user' ? raw : raw
+    const text = (p.role === 'user' ? codexQuestionReply(raw.trim(), questions.calls, o.timestamp) || raw : raw
       .replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/g, '')
       .replace(/<(local-command-[a-z]+|command-[a-z]+)>[\s\S]*?<\/\1>/g, '')).trim();
     if (!text) continue;
@@ -164,19 +186,55 @@ export function readCodexHistory(root, session, context = createEvidenceContext(
       items.delete(id);
       continue;
     }
-    const previous = items.get(id);
+    const prior = items.get(id);
+    const previous = prior?.peerMethod === 'app-server-steer' && prior.text !== text ? undefined : prior;
+    const origin = origins.matches.get(p.id);
+    const textHash = origin || previous?.from === 'automation' ? createHash('sha256').update(text).digest('hex') : null;
+    const automation = previous?.from === 'peer' || previous?.from === 'automation' && previous.automationTextSHA256 !== textHash ? null
+      : origin || (previous?.from === 'automation' && previous.automationTextSHA256 === textHash ? {
+        from: 'automation', automationKind: previous.automationKind, automationId: previous.automationId,
+        automationProvider: previous.automationProvider, automationTransport: previous.automationTransport, automationTextSHA256: textHash,
+      } : null);
     if (previous?.peerSend) usedSends.add(previous.peerSend);
     for (const send of previous?.peerSends || []) usedSends.add(send);
-    let matched = p.role === 'user' && previous?.from !== 'peer' ? matchPeerInput(peers.sends, text, o.timestamp, usedSends) : [];
-    if (!matched.length && p.role === 'user' && previous?.from !== 'peer') matched = matchOrchestrationInput(orchestration, text, o.timestamp, usedSends);
+    let matched = !automation && p.role === 'user' && previous?.from !== 'peer' ? matchPeerInput(peers.sends, text, o.timestamp, usedSends, p.id) : [];
+    if (!automation && !matched.length && p.role === 'user' && previous?.from !== 'peer') matched = matchOrchestrationInput(orchestration, text, o.timestamp, usedSends);
+    let method = previous?.peerMethod;
+    let sourceTool = previous?.peerSourceTool, targetTool = previous?.peerTargetTool;
+    if (previous?.from === 'peer' && (!method || !sourceTool || !targetTool)) {
+      // Recheck only this exact bubble's already-consumed proof IDs. This adds
+      // a transport label, never reuses its receipt to classify another input.
+      const ownIds = new Set([previous.peerSend, ...(previous.peerSends || [])].filter(Boolean));
+      if (ownIds.size) {
+        const reserved = new Set(usedSends);
+        for (const proof of ownIds) reserved.delete(proof);
+        let evidence = matchPeerInput(peers.sends, text, o.timestamp, reserved, p.id);
+        if (!evidence.length) evidence = matchOrchestrationInput(orchestration, text, o.timestamp, reserved);
+        if (evidence.length === ownIds.size && evidence.every(x => ownIds.has(x.id))) {
+          method = evidence.every(x => x.method === evidence[0].method) ? evidence[0].method : undefined;
+          if (evidence.every(x => x.tool === evidence[0].tool)) sourceTool = evidence[0].tool;
+          targetTool = session.tool;
+        }
+      }
+    }
+    if (matched.length) {
+      method = matched.every(x => x.method === matched[0].method) ? matched[0].method : undefined;
+      sourceTool = matched.every(x => x.tool === matched[0].tool) ? matched[0].tool : undefined;
+      targetTool = session.tool;
+    }
     const sender = matched[0];
     const peer = previous?.from === 'peer' ? { from: 'peer', session: previous.session, to: previous.to, fromName: previous.fromName, peerSend: previous.peerSend, ...(previous.peerSends ? { peerSends: previous.peerSends } : {}) }
       : sender ? { from: 'peer', session: sender.session, to: session.sessionId, fromName: sender.fromName, peerSend: sender.id, peerSends: matched.map(x => x.id) } : {};
+    if (peer.from === 'peer' && method) peer.peerMethod = method;
+    if (peer.from === 'peer' && sourceTool) peer.peerSourceTool = sourceTool;
+    if (peer.from === 'peer' && targetTool) peer.peerTargetTool = targetTool;
     if (peer.peerSend) usedSends.add(peer.peerSend);
     for (const send of peer.peerSends || []) usedSends.add(send);
+    const nativeDisplay = !peer.from && !automation ? nativeDisplaySource(p, text) : undefined;
     items.set(id, { id, from: p.role === 'user' ? 'user' : 'agent', session: session.sessionId,
       context: 'terminal', agent: session.agent, text, at: o.timestamp,
-      ...peer,
+      ...peer, ...automation,
+      ...(nativeDisplay ? { nativeDisplay } : {}),
       ...(p.phase === 'commentary' ? { interim: true } : {}) });
   }
   const data = shortReferences(root, { items: [...items.values()].sort((a, b) => String(a.at).localeCompare(String(b.at))) });
@@ -185,8 +243,24 @@ export function readCodexHistory(root, session, context = createEvidenceContext(
   // Full conversation history must not evict the small native receipt cache.
   const bytes = Buffer.byteLength(JSON.stringify(data));
   displayedHistories.delete(cacheKey);
-  if (bytes <= 16 * 1024 * 1024) displayedHistories.set(cacheKey, { key: `${session.path}:${source.key}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}`, data, bytes });
+  if (bytes <= 16 * 1024 * 1024) displayedHistories.set(cacheKey, { key: `${session.path}:${source.key}:${modifiedAt(file)}:${peers.key}:${orchestration.key}:${chatKey}:${origins.key}`, data, bytes });
   while (displayedHistories.size > 16 || [...displayedHistories.values()].reduce((n, x) => n + x.bytes, 0) > 16 * 1024 * 1024) displayedHistories.delete(displayedHistories.keys().next().value);
+  return display(data);
+}
+
+// Claude's ordinary conversation still comes from hooks. Read only native
+// question-tool records here, including questions asked before this server ran.
+export function readClaudeQuestionHistory(root, session) {
+  const file = fileOf(root, session.sessionId), saved = historyOf(file);
+  let source;
+  try { source = readNativeMessages(session.path); } catch { return shortReferences(root, saved); }
+  const items = new Map(saved.items.map(item => [item.id, item]));
+  for (const item of nativeQuestionEntries(source.rows, session).items) items.set(item.id, item);
+  const data = shortReferences(root, { items: [...items.values()].sort((a, b) => String(a.at).localeCompare(String(b.at))) });
+  if (JSON.stringify(data) !== JSON.stringify(saved)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    writeJsonAtomic(file, data);
+  }
   return data;
 }
 

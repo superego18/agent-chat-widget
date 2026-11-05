@@ -81,11 +81,14 @@ for (const state of ['accepted', 'failed', 'unknown']) test(`pending ordinary in
   else if (state === 'unknown') assert.equal((await f.api('/api/chat-cancel', { id: sent.body.id })).status, 409, 'uncertain steering cannot pretend to be recalled');
 });
 
-for (const state of ['not_pending', 'unknown']) test(`failed withdrawal never steers the queued original: ${state}`, async t => {
+for (const state of ['not_pending', 'unknown', 'failed']) test(`failed withdrawal never steers the queued original: ${state}`, async t => {
   let steers = 0;
   const f = fixture(t, child => { queueMicrotask(() => child.emit('close', 0)); return child; }, { cancelSend: async () => ({ ok: false, state }), steerSend: async () => { steers++; return { ok: true, state: 'accepted' }; } });
   const sent = await f.api('/api/chat', message);
-  assert.equal((await f.api('/api/chat-interject', { id: sent.body.id, on: true })).status, state === 'unknown' ? 502 : 409);
+  const result = await f.api('/api/chat-interject', { id: sent.body.id, on: true });
+  assert.equal(result.status, state === 'not_pending' ? 409 : 502);
+  if (state === 'failed') assert.match(result.body.error, /Codex 제어 연결.*기존 메시지는 유지했고 중복 전송하지/);
+  assert.equal(f.read('chat.json').messages.length, 1);
   assert.equal(steers, 0); assert.equal(f.read('chat.json').messages[0].interject, undefined);
 });
 

@@ -21,6 +21,8 @@ export function formatMessage(m, all) {
   const lines = [];
   const dev = m.device === 'mobile' ? '·모바일' : m.device === 'desktop' ? '·데스크톱' : '';
   lines.push(`[${m.id}]${m.context === 'app' ? `[앱 화면${dev}]` : `[비교 페이지${dev}]`}${m.round ? `[${m.round}차]` : ''} ${m.text}`);
+  // Native Claude readers can open the same owner-local image files.
+  for (const a of m.attachments || []) if (a.localPath) lines.push(`    첨부 사진(이미지 읽기 도구로 확인): ${a.localPath}`);
   if (m.resendOf) lines.push(`    [${m.resendOf}]을(를) 사용자가 고쳐 다시 보낸 메시지`);
   lines.push(...quoteLines(m, all));
   // 보관함에서 온 글은 본문에 저장 당시 위치가 이미 있으므로 다시 적지 않는다.
@@ -40,7 +42,7 @@ export function quoteLines(m, all) {
   for (const q of qs) {
     const orig = all.find((x) => x.id === q.id);
     if (!orig) continue;
-    const who = orig.from === 'user' ? '사용자' : orig.from === 'peer' ? '세션끼리' : orig.from === 'sub' ? '서브에이전트' : '에이전트';
+    const who = orig.from === 'user' ? '사용자' : orig.from === 'automation' ? '자동 안내' : orig.from === 'peer' ? '세션끼리' : orig.from === 'sub' ? '서브에이전트' : '에이전트';
     const label = (m.quotes?.length ? `[${q.refer ? '📎' : '↩'}#${q.id}] ` : '') + (q.refer ? '참고로 붙인 메시지(답장 아님)' : '답장 대상');
     if (q.quote) lines.push(`    ${label} [${orig.id}] ${who} 메시지 중 이 부분: "${q.quote}"`);
     else lines.push(`    ${label} [${orig.id}] ${who}: ${orig.text.replace(/\s+/g, ' ').slice(0, 200)}`);

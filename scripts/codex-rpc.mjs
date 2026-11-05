@@ -65,6 +65,15 @@ export async function withCodexRpc(command, operation, { spawnImpl = spawn, time
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(cleanupObservationMs) || cleanupObservationMs < 0) throw new Error('rpc_invalid_deadline');
   let child, socket, ws, server, sequence = 0, settled = false, aborted = false, rejectAbort;
   const pending = new Map();
+  const serverRequests = new Map(), listeners = new Set();
+  const incoming = {
+    requests: serverRequests,
+    listen(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    respond(id, result) {
+      if (aborted || !serverRequests.has(id)) throw new Error('request_not_pending');
+      ws.send(JSON.stringify({ id, result }));
+    },
+  };
   const interruption = new Promise((_, reject) => { rejectAbort = reject; });
   const lost = () => {
     if (settled || aborted) return;
@@ -121,6 +130,12 @@ export async function withCodexRpc(command, operation, { spawnImpl = spawn, time
       ws.addEventListener('close', lost);
       ws.addEventListener('message', event => {
         let message; try { message = JSON.parse(event.data); } catch { return; }
+        if (Object.hasOwn(message, 'method')) {
+          if (Object.hasOwn(message, 'id')) serverRequests.set(message.id, message);
+          if (message.method === 'serverRequest/resolved') serverRequests.delete(message.params?.requestId);
+          for (const fn of listeners) fn(message);
+          return;
+        }
         if (Object.hasOwn(message, 'method') || (!Object.hasOwn(message, 'result') && !Object.hasOwn(message, 'error'))) return;
         const request = pending.get(message.id); if (!request) return;
         pending.delete(message.id);
@@ -130,7 +145,7 @@ export async function withCodexRpc(command, operation, { spawnImpl = spawn, time
     });
     await call('initialize', { clientInfo: { name: 'ui_feedback_widget', version: '1.0.0' }, capabilities: { experimentalApi: true } });
     ws.send(JSON.stringify({ method: 'initialized' }));
-    return operation(call);
+    return operation(call, incoming);
   };
   try { return await Promise.race([run(), interruption]); }
   finally {

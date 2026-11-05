@@ -1,0 +1,84 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import { createChatHandler } from '../scripts/chat-handler.mjs';
+import { createCodexStatusReader } from '../scripts/codex-status.mjs';
+
+const line = (type, extra = {}) => JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type, ...extra } }) + '\n';
+test('long Codex turn remains working past 512KiB, then completes, aborts and invalidates replaced history', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-status-'));
+  const file = path.join(root, 'rollout.jsonl'), id = 'synthetic';
+  fs.mkdirSync(path.join(root, 'sessions'));
+  fs.writeFileSync(path.join(root, 'sessions', id + '.json'), JSON.stringify({ sessionId: id, tool: 'codex', path: file }));
+  fs.writeFileSync(path.join(root, 'status-' + id + '.json'), JSON.stringify({ state: 'working', at: '2020-01-01T00:00:00Z' }));
+  fs.writeFileSync(file, line('task_started') + line('tool_output', { text: 'x'.repeat(600 * 1024) }));
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const handler = createChatHandler({ root });
+  t.after(async () => { await handler.shutdown(); fs.rmSync(root, { recursive: true, force: true }); });
+  const status = () => {
+    let body;
+    handler.handle(Object.assign(new EventEmitter(), {method:'GET'}), {writeHead(n) { assert.equal(n, 200); }, end(b) {body=JSON.parse(b);}}, new URL('http://fixture/api/sessions'));
+    return body.sessions.find(s => s.id === id).status;
+  };
+  t.mock.timers.tick(2000);
+  assert.equal(status().state, 'working', 'cold start must find the lifecycle outside the short tail');
+  fs.appendFileSync(file, line('tool_output', { text: 'y'.repeat(600 * 1024) }));
+  t.mock.timers.tick(2000);
+  assert.equal(status().state, 'working', 'activity without another lifecycle retains the actual turn');
+  fs.appendFileSync(file, line('task_complete'));
+  t.mock.timers.tick(2000); assert.equal(status().state, 'idle');
+  fs.appendFileSync(file, line('task_started') + line('turn_aborted'));
+  t.mock.timers.tick(2000); assert.equal(status().state, 'idle');
+  fs.appendFileSync(file, line('task_started'));
+  t.mock.timers.tick(2000); assert.equal(status().state, 'working');
+  fs.renameSync(file, file + '.old'); fs.writeFileSync(file, line('tool_output'));
+  t.mock.timers.tick(2000); assert.equal(status().state, 'unknown', 'replacement cannot inherit working');
+  fs.writeFileSync(file, line('task_started'));
+  t.mock.timers.tick(2000); assert.equal(status().state, 'working');
+  fs.truncateSync(file, 0);
+  t.mock.timers.tick(2000); assert.equal(status().state, 'unknown', 'truncation cannot retain working');
+  fs.appendFileSync(file, line('task_started'));
+  t.mock.timers.tick(2000); assert.equal(status().state, 'working');
+  fs.unlinkSync(file);
+  t.mock.timers.tick(2000); assert.equal(status().state, 'unknown', 'missing source cannot retain working');
+});
+
+test('incremental status reads preserve partial UTF-8 and do not rescan old tool output', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-status-reader-')), file = path.join(root, 'native.jsonl');
+  t.after(() => fs.rmSync(root, {recursive:true, force:true}));
+  const read = createCodexStatusReader();
+  fs.writeFileSync(file, line('task_started') + line('tool_output', {text:'x'.repeat(2 * 1024 * 1024)}));
+  assert.equal(read(file).state, 'working');
+  let bytesRead = 0;
+  const original = fs.readSync;
+  t.mock.method(fs, 'readSync', (...args) => { const n = original(...args); bytesRead += n; return n; });
+  const call = Buffer.from(JSON.stringify({type:'response_item', payload:{type:'function_call',name:'read_file',arguments:'한글'}}));
+  const split = call.indexOf(Buffer.from('글')) + 1;
+  fs.appendFileSync(file, call.subarray(0, split));
+  assert.equal(read(file).detail, '생각하는 중', 'partial JSON must not invent an event');
+  fs.appendFileSync(file, call.subarray(split));
+  assert.equal(read(file).detail, '파일 읽는 중', 'complete record without newline is visible');
+  fs.appendFileSync(file, '\n' + line('task_complete'));
+  assert.equal(read(file).state, 'idle');
+  assert.equal(read(file).state, 'idle');
+  assert.ok(bytesRead < 100 * 1024, `append/unchanged reads must stay small: ${bytesRead}`);
+  fs.appendFileSync(file, line('tool_output'));
+  assert.equal(read(file).state, 'idle', 'tool output after completion cannot reopen the turn');
+});
+
+test('same-size rewrite and truncate-regrow cannot reuse the preceding lifecycle', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-status-rewrite-')), file = path.join(root, 'native.jsonl');
+  t.after(() => fs.rmSync(root, {recursive:true, force:true}));
+  const read = createCodexStatusReader(), started = line('task_started');
+  fs.writeFileSync(file, started); assert.equal(read(file).state, 'working');
+  fs.writeFileSync(file, line('unrecognized').padEnd(started.length, ' '));
+  assert.equal(read(file).state, 'unknown');
+  fs.writeFileSync(file, started); assert.equal(read(file).state, 'working');
+  fs.writeFileSync(file, line('tool_output', {text:'x'.repeat(10000)}));
+  assert.equal(read(file).state, 'unknown');
+  fs.appendFileSync(file, line('turn_aborted')); assert.equal(read(file).state, 'idle');
+  fs.appendFileSync(file, line('task_started')); assert.equal(read(file).state, 'working');
+});

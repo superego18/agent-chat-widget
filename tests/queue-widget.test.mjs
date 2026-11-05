@@ -9,6 +9,18 @@ const source = fs.readFileSync(process.env.UIFB_TEST_SOURCE || new URL('../asset
 const session = { id: 'test-thread', name: 'Test session', tool: 'codex', watch: { active: false, via: 'queue' }, status: { state: 'unknown' } };
 const entry = (state) => ({ id: 1, from: 'user', to: session.id, text: 'Synthetic request', cid: 'test-message', context: 'app', at: new Date().toISOString(), queue: { state } });
 
+test('390px shows disconnected controls honestly and refreshes when connection recovers', async t => {
+  const target = { ...session, watch: { active: true, via: 'queue', control: 'disconnected', steer: false, cancel: false }, status: { state: 'working' } };
+  const { page } = await open(t, 390, [entry('accepted')], target);
+  assert.equal(await page.locator('#now').isHidden(), true);
+  assert.match(await page.locator('#mode').textContent(), /연결이 끊겨/);
+  assert.equal(await page.locator('#input').isEnabled(), true, 'ordinary send stays available');
+  target.watch = { ...target.watch, control: 'connected', steer: true, cancel: true };
+  await page.route('**/__uifb/api/sessions', route => route.fulfill({ json: { sessions: [target] } }));
+  await page.locator('#now').waitFor({ state: 'visible' });
+  assert.doesNotMatch(await page.locator('#mode').textContent(), /연결이 끊겨/);
+});
+
 for (const failure of ['timeout', 'connection']) test(`a lost stored acknowledgement reports uncertainty rather than a definite send failure: ${failure}`, async t => {
   const { page, store } = await open(t, 390);
   await page.clock.install();

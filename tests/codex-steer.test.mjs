@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PassThrough, Duplex, Writable } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import bundle from 'playwright-core/lib/utilsBundle';
-import { steerCodex } from '../scripts/codex-steer.mjs';
+import { steerCodex, queueCodexImages } from '../scripts/codex-steer.mjs';
 import { cancelCodexQueued } from '../scripts/codex-cancel.mjs';
 import { createRpcCleanupOwner, withCodexRpc } from '../scripts/codex-rpc.mjs';
 import { spawn } from 'node:child_process';
@@ -11,7 +11,7 @@ import { once } from 'node:events';
 const WebSocketServer = bundle.wsServer;
 const steerTest = (name, fn) => test(name, { skip: typeof WebSocket !== 'function' && 'Steering requires Node 22+ native WebSocket' }, fn);
 
-function fixture(t, { loaded = ['target'], nextLoaded, turn = { id: 'turn_active', status: 'inProgress' }, steerError, disconnectAt, queuePages = [], deleted = true, collidingRequest = false } = {}) {
+function fixture(t, { loaded = ['target'], nextLoaded, turn = { id: 'turn_active', status: 'inProgress' }, steerError, disconnectAt, queuePages = [], deleted = true, collidingRequest = false, question } = {}) {
   const server = new WebSocketServer({ noServer: true }), requests = [], children = [];
   t.after(() => server.close());
   const spawnImpl = (file, args, options) => {
@@ -29,6 +29,7 @@ function fixture(t, { loaded = ['target'], nextLoaded, turn = { id: 'turn_active
           ws.on('error', () => {});
           ws.on('message', data => {
             const r = JSON.parse(data); requests.push(r); if (!r.id) return;
+            if (question && Object.hasOwn(r, 'result')) { ws.send(JSON.stringify({ method: 'serverRequest/resolved', params: { threadId: 'target', requestId: r.id } })); return; }
             if (collidingRequest) ws.send(JSON.stringify({ id: r.id, method: 'item/commandExecution/requestApproval', params: {} }));
             if (r.method === disconnectAt) { ws.terminate(); return; }
             let result;
@@ -38,6 +39,8 @@ function fixture(t, { loaded = ['target'], nextLoaded, turn = { id: 'turn_active
             else if (r.method === 'turn/steer') result = { turnId: turn.id };
             else if (r.method === 'thread/queue/list') result = { data: queuePages[r.params.cursor ? 1 : 0] || [], nextCursor: !r.params.cursor && queuePages.length > 1 ? 'next' : null };
             else if (r.method === 'thread/queue/delete') result = { deleted };
+            else if (r.method === 'thread/queue/add') result = { queuedSubmission: { id: 'image-queued' } };
+            else if (r.method === 'thread/resume' && question) { ws.send(JSON.stringify(question)); result = {}; }
             ws.send(JSON.stringify({ id: r.id, ...(r.method === 'turn/steer' && steerError ? { error: { code: -32600, message: steerError } } : { result }) }));
           });
         });
@@ -45,8 +48,42 @@ function fixture(t, { loaded = ['target'], nextLoaded, turn = { id: 'turn_active
     socket.on('data', receiveHeaders);
     return child;
   };
-  return { requests, children, cancel: receipt => cancelCodexQueued({ file: 'codex', prefix: [] }, 'target', receipt, { spawnImpl, timeoutMs: 1000 }), send: (text = '한글🙂 "quote"\nnext') => steerCodex({ file: 'codex', prefix: [] }, 'target', text, { spawnImpl, timeoutMs: 1000, clientUserMessageId: 'receipt-one' }) };
+  return { requests, children, rpc: fn => withCodexRpc({ file: 'codex', prefix: [] }, fn, { spawnImpl, timeoutMs: 1000 }), images: imagePaths => queueCodexImages({ file: 'codex', prefix: [] }, 'target', 'image prompt', { spawnImpl, timeoutMs: 1000, clientUserMessageId: 'image-receipt', imagePaths }), cancel: receipt => cancelCodexQueued({ file: 'codex', prefix: [] }, 'target', receipt, { spawnImpl, timeoutMs: 1000 }), send: (text = '한글🙂 "quote"\nnext', imagePaths) => steerCodex({ file: 'codex', prefix: [] }, 'target', text, { spawnImpl, timeoutMs: 1000, clientUserMessageId: 'receipt-one', imagePaths }) };
 }
+
+steerTest('native question responses use server request IDs and observe matching resolution over real WebSocket framing', async t => {
+  const question = { id: 501, method: 'item/tool/requestUserInput', params: { threadId: 'target', itemId: 'call_question' } };
+  const f = fixture(t, { question });
+  await f.rpc(async (call, incoming) => {
+    await call('thread/resume', { threadId: 'target', excludeTurns: true });
+    assert.deepEqual(incoming.requests.get(501), question);
+    const closed = new Promise(resolve => {
+      const stop = incoming.listen(m => { if (m.method === 'serverRequest/resolved' && m.params.requestId === 501) { stop(); resolve(); } });
+    });
+    incoming.respond(501, { answers: { q1: { answers: ['Selected'] } } });
+    await closed;
+    assert.equal(incoming.requests.size, 0);
+    assert.throws(() => incoming.respond(501, {}), /request_not_pending/);
+  });
+  assert.deepEqual(f.requests.find(r => Object.hasOwn(r, 'result')), { id: 501, result: { answers: { q1: { answers: ['Selected'] } } } });
+  assert(f.children.every(c => c.stdin.destroyed));
+});
+
+steerTest('image queue and steer carry localImage input without shell interpolation or text-only fallback', async t => {
+  const f = fixture(t), file = 'C:/owned/사진 "one".png';
+  assert.equal((await f.images([file])).state, 'accepted');
+  assert.deepEqual(f.requests.find(r => r.method === 'thread/queue/add').params.input, [{ type: 'text', text: 'image prompt' }, { type: 'localImage', path: file }]);
+  await f.send('image steer', [file]);
+  assert.deepEqual(f.requests.find(r => r.method === 'turn/steer').params.input, [{ type: 'text', text: 'image steer' }, { type: 'localImage', path: file }]);
+  assert.ok(f.children.every(c => c.stdin.destroyed));
+});
+
+steerTest('lost image queue acknowledgement is unknown and never triggers a second submission', async t => {
+  const f = fixture(t, { disconnectAt: 'thread/queue/add' });
+  assert.equal((await f.images(['/owned/image.png'])).state, 'unknown');
+  assert.equal(f.requests.filter(r => r.method === 'thread/queue/add').length, 1);
+  assert.ok(!f.requests.some(r => r.method === 'turn/start'));
+});
 
 const receipt = '11111111-1111-4111-8111-111111111111';
 steerTest('server requests with a colliding ID never resolve client RPC responses', async t => {

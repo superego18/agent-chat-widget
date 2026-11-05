@@ -1,0 +1,75 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { createChatHandler } from '../scripts/chat-handler.mjs';
+import { createChatImageStore, MAX_IMAGE_BYTES } from '../scripts/chat-images.mjs';
+import { formatMessage } from '../scripts/chat-format.mjs';
+
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWZkAAAAASUVORK5CYII=', 'base64');
+
+test('small previews are owned separately and never replace provider image bytes', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-thumb-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createChatImageStore(root), image = store.save(png, 'image/png', 'original.png');
+  const thumb = Buffer.from([255,216,255,224,1,2,3]);
+  assert.throws(() => store.saveThumbnail('../outside', thumb));
+  assert.throws(() => store.saveThumbnail(image.id, Buffer.from('not JPEG')));
+  assert.throws(() => store.saveThumbnail(image.id, Buffer.alloc(256 * 1024 + 1)));
+  const updated = store.saveThumbnail(image.id, thumb);
+  assert.equal(updated.thumbnailUrl, image.url + '?thumbnail=1');
+  assert.deepEqual(fs.readFileSync(store.thumbnail(image.id).file), thumb);
+  assert.deepEqual(fs.readFileSync(store.resolve([image.id])[0].localPath), png);
+  assert.throws(() => store.saveThumbnail(image.id, Buffer.from([255,216,255,225])));
+  assert.deepEqual(fs.readFileSync(store.thumbnail(image.id).file), thumb);
+});
+test('image IDs resolve only owned files; formats, size and traversal fail closed', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-images-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createChatImageStore(root);
+  const image = store.save(png, 'image/png', '../../screenshot.png');
+  assert.deepEqual(fs.readFileSync(store.get(image.id).file), png);
+  assert.ok(store.get(image.id).file.startsWith(path.join(root, 'chat-images') + path.sep));
+  assert.throws(() => store.get('../private.json'));
+  assert.throws(() => store.save(Buffer.from('<svg/>'), 'image/svg+xml', 'evil.svg'));
+  assert.throws(() => store.save(Buffer.from('<html>'), 'image/png', 'fake.png'));
+  assert.throws(() => store.save(Buffer.alloc(MAX_IMAGE_BYTES + 1), 'image/png', 'large.png'));
+  assert.throws(() => store.resolve([image.id, image.id]));
+  assert.throws(() => store.resolve(['outside']));
+});
+
+test('actual upload/chat/preview persists image-only messages and sends owned image input, never caller paths', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-image-api-'));
+  fs.mkdirSync(path.join(root, 'sessions'));
+  const id = '11111111-1111-4111-8111-111111111111', calls = [];
+  fs.writeFileSync(path.join(root, 'sessions', id + '.json'), JSON.stringify({ sessionId: id, tool: 'codex', name: 'Synthetic' }));
+  const handler = createChatHandler({ root, readControl: async () => [id], imageSend: async (...args) => { calls.push(args); return { ok: true, state: 'accepted' }; } });
+  const server = http.createServer((req, res) => { if (!handler.handle(req, res, new URL(req.url, 'http://fixture'))) { res.writeHead(404); res.end(); } });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => { await handler.shutdown(); await new Promise(r => server.close(r)); fs.rmSync(root, { recursive: true, force: true }); });
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const uploaded = await fetch(base + '/api/chat-images', { method: 'POST', headers: { 'Content-Type': 'image/png', 'X-Image-Name': encodeURIComponent('screenshot.png') }, body: png }).then(r => r.json());
+  const preview = await fetch(base + '/api/chat-images/' + uploaded.id);
+  assert.equal(preview.headers.get('content-type'), 'image/png');
+  assert.equal(preview.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), png);
+  const thumb = Buffer.from([255,216,255,224,1,2,3]);
+  const thumbnailPost = await fetch(base + '/api/chat-images?thumbnailFor=' + uploaded.id, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: thumb });
+  assert.equal(thumbnailPost.status, 200);
+  const thumbnail = await thumbnailPost.json();
+  assert.equal(thumbnail.id, uploaded.id);
+  assert.deepEqual(Buffer.from(await (await fetch(base + '/api/chat-images/' + uploaded.id + '?thumbnail=1')).arrayBuffer()), thumb);
+  const post = body => fetch(base + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const body = { from: 'user', to: id, text: '', attachments: [uploaded.id], cid: 'image-only' };
+  const result = await (await post(body)).json();
+  assert.equal(result.attachments[0].id, uploaded.id);
+  assert.equal(result.queue.state, 'accepted');
+  assert.deepEqual(fs.readFileSync(calls[0][3].imagePaths[0]), png);
+  assert.equal((await post({ ...body, attachments: ['../private'], cid: 'bad' })).status, 400);
+  await post(body);
+  assert.equal(calls.length, 1, 'retrying the stored CID never duplicates native delivery');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'chat.json'))).messages.length, 1);
+  assert.ok(formatMessage(result, [result]).some(line => line.includes(calls[0][3].imagePaths[0])), 'Claude reader receives the owned image path');
+});

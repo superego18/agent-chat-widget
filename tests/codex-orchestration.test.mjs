@@ -7,7 +7,34 @@ import { readCodexHistory } from '../scripts/transcript-store.mjs';
 import { matchOrchestrationInput, createEvidenceContext, readEvidenceRegistry, readEvidenceRecords,
   readOrchestrationEvidence, takeEvidenceReceipt, evidenceCacheSnapshot, EVIDENCE_LIMITS } from '../scripts/codex-orchestration.mjs';
 import { readPeerSends } from '../scripts/codex-peers.mjs';
+import { createPeerSourceIndex } from '../scripts/codex-peer-index.mjs';
 import { A, B, makeDir, startServer, openWidget, closeBrowser } from './helpers.mjs';
+
+test('literal PowerShell path and long history retain verified orchestration wake provenance', async t => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'widget-orca-wake-'));
+  fs.mkdirSync(path.join(root,'sessions'));
+  const source={sessionId:'source',tool:'codex',name:'Source',path:path.join(root,'source.jsonl'),orca:{terminal:'term_source'}};
+  const target={sessionId:'target',tool:'codex',name:'Target',path:path.join(root,'target.jsonl'),orca:{terminal:'term_target'}};
+  for(const s of [source,target])fs.writeFileSync(path.join(root,'sessions',s.sessionId+'.json'),JSON.stringify(s));
+  fs.writeFileSync(source.path,'');
+  const at=new Date().toISOString(),text='You have 1 orchestration message. Run `orca orchestration check`.';
+  const wake={timestamp:at,type:'response_item',payload:{id:'actual-wake',type:'message',role:'user',content:[{type:'input_text',text}]}};
+  const done={timestamp:at,type:'event_msg',payload:{type:'item_completed',item:{type:'CommandExecution',command:['powershell','-Command',"& 'C:/Programs/Orca/orca.exe' orchestration check --terminal term_target --json"],exit_code:0,aggregated_output:JSON.stringify({ok:true,result:{deliveryId:'delivery_actual',count:1,messages:[{id:'msg_actual',from_handle:'term_source',to_handle:'term_target',created_at:at,body:'Private synthetic body must not be retained in provenance index'}]}})}}};
+  const older=Array.from({length:18},(_,n)=>{const old=structuredClone(done);old.timestamp=new Date(Date.parse(at)-(3600-n)*1000).toISOString();const value=JSON.parse(old.payload.item.aggregated_output);value.result.deliveryId='old_delivery_'+n;old.payload.item.aggregated_output=JSON.stringify(value);return old;});
+  fs.writeFileSync(target.path,[...older,{timestamp:at,type:'response_item',payload:{type:'function_call_output',output:'x'.repeat(1024*1024)}},wake,done].map(JSON.stringify).join('\n')+'\n');
+  const original=fs.readFileSync(target.path),index=createPeerSourceIndex();
+  t.after(async()=>{await index.shutdown();fs.rmSync(root,{recursive:true,force:true});});
+  let item;
+  for(let n=0;n<100;n++){
+    item=readCodexHistory(root,target,Object.assign(createEvidenceContext(),{peerSources:index})).items.find(x=>x.id==='xactual-wake');
+    if(item?.from==='peer')break;
+    await new Promise(r=>setTimeout(r,10));
+  }
+  assert.equal(item.from,'peer');assert.equal(item.session,'source');assert.equal(item.to,'target');
+  assert.equal(item.peerMethod,'mailbox');
+  assert.equal(item.text,text);assert.deepEqual(fs.readFileSync(target.path),original);
+  assert.equal(JSON.stringify(index.read(target).rows).includes('Private synthetic body'),false,'mailbox bodies are not cached as provenance');
+});
 
 test('accepted worker-start receipts prove the exact native task without separate task/show calls', () => {
   const source = { sessionId: 'source', name: 'Coordinator', orca: { terminal: 'term_source' } }, target = { sessionId: 'target', orca: { terminal: 'term_target' } };
@@ -37,6 +64,28 @@ test('verified mailbox delivery labels unregistered and mixed senders without gu
   assert.deepEqual(match({ ...receipt, result: { ...receipt.result, messages: messages.map(m => ({ ...m, from_handle: m.to_handle })) } }), [], 'a mailbox address cannot be its own peer');
 });
 
+test('compact mailbox receipts use real observation and sender identity without invented old fields', () => {
+  const source={sessionId:'source',name:'Source',orca:{terminal:'term_source'}},target={sessionId:'target',orca:{terminal:'term_target'}};
+  const text='You have 1 orchestration message. Run `orca orchestration check --run run_one`.';
+  const at='2026-11-04T00:00:00Z';
+  const receipt={session:target,cmd:"& 'C:/Programs/Orca/orca.exe' orchestration check --run run_one --json",at:'2026-11-04T00:00:05Z',result:{messages:[{id:'msg_compact',from:'term_source'}]}};
+  const match=(r=receipt,input=text,used=new Set())=>matchOrchestrationInput({sessions:[source,target],target,results:[r]},input,at,used);
+  assert.equal(match()[0].session,'source');assert.equal(match()[0].at,receipt.at);
+  assert.deepEqual(match(receipt,'Owner comment\n'+text),[]);
+  assert.deepEqual(match(receipt,text,new Set(['orca:msg_compact'])),[]);
+  for(const cmd of [receipt.cmd.replace('run_one','run_other'),receipt.cmd+' --terminal term_foreign',receipt.cmd+" --terminal 'term_foreign'",receipt.cmd+' --terminal $foreign'])assert.deepEqual(match({...receipt,cmd}),[]);
+  assert.deepEqual(match({...receipt,at:'2026-11-04T00:02:00Z'}),[]);
+  assert.deepEqual(match({...receipt,result:{messages:[{id:'msg_compact',from:'term_target'}]}}),[]);
+  assert.deepEqual(match({...receipt,result:{messages:[{id:'msg_compact'}]}}),[]);
+  const unknown=match({...receipt,result:{messages:[{id:'msg_compact',from:'term_unregistered'}]}});
+  assert.equal(unknown[0].session,undefined);assert.equal(unknown[0].fromName,'다른 세션');
+  const pair={...receipt,result:{messages:[{id:'msg_one',from:'term_source'},{id:'msg_two',from:'term_source'}]}};
+  assert.equal(match(pair,text+'\n\n'+text).length,2,'combined native wake input can be covered by the exact mailbox count');
+  assert.deepEqual(match(pair,text+'\n\nOwner addition'),[]);
+  assert.deepEqual(match(pair,text+'\n\n'+text.replace('run_one','run_other')),[]);
+  assert.deepEqual(match({...pair,result:{messages:[pair.result.messages[0],pair.result.messages[0]]}},text+'\n\n'+text),[]);
+});
+
 test('verified Orca dispatches and mailbox wakes are peer messages, preserving native IDs', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-orchestration-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -61,6 +110,7 @@ test('verified Orca dispatches and mailbox wakes are peer messages, preserving n
   const history = readCodexHistory(root, target);
   assert.deepEqual(history.items.map(x => x.from), ['peer', 'peer', 'user', 'user', 'user']);
   for (const item of history.items.slice(0, 2)) { assert.equal(item.session, 'source'); assert.equal(item.to, 'target'); assert.equal(item.fromName, 'Coordinator'); }
+  assert.deepEqual(history.items.slice(0,2).map(x=>x.peerMethod),['dispatch','mailbox']);
   assert.deepEqual(history.items.map(x => x.id), ['xtask', 'xwake', 'xowner', 'xforged', 'xunproved']);
   assert.equal(history.items[0].text, preamble);
   const unchanged = fs.readFileSync(target.path, 'utf8');
@@ -91,17 +141,19 @@ test('a verified mailbox receipt recolors the existing native bubble in the mobi
     Object.assign(s, { tool: 'codex', path: path.join(root, id + '.jsonl'), orca: { terminal: i ? 'term_target' : 'term_source' } });
     fs.writeFileSync(file, JSON.stringify(s)); fs.writeFileSync(s.path, ''); return s;
   });
-  const text = 'You have 1 orchestration message. Run `orca orchestration check`.';
+  const notice = 'You have 1 orchestration message. Run `orca orchestration check --run run_one`.';
+  const text = notice + '\n\n' + notice;
   fs.writeFileSync(sessions[1].path, JSON.stringify({ timestamp: '2026-10-30T00:00:01Z', type: 'response_item', payload: { id: 'wake', type: 'message', role: 'user', content: [{ type: 'input_text', text }] } }));
   const srv = await startServer(root); let ctx;
   try {
     const opened = await openWidget(srv, { tab: B }); ctx = opened.ctx;
     const { w, page } = opened;
     assert.match((await w.msgs()).find(x => x.id === 'xwake').cls, /\buser\b/);
-    fs.appendFileSync(sessions[1].path, '\n' + JSON.stringify({ timestamp: '2026-10-30T00:00:02Z', type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', command: ['pwsh', '-Command', 'orca orchestration check --terminal term_target --json'], exit_code: 0, aggregated_output: JSON.stringify({ ok: true, result: { deliveryId: 'delivery_one', count: 1, messages: [{ id: 'msg_one', from_handle: 'term_source', to_handle: 'term_target', created_at: '2026-10-30T00:00:00Z' }] } }) } } }));
+    fs.appendFileSync(sessions[1].path, '\n' + JSON.stringify({ timestamp: '2026-10-30T00:00:02Z', type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', command: ['pwsh', '-Command', "& 'C:/Programs/Orca/orca.exe' orchestration check --run run_one --json"], exit_code: 0, aggregated_output: JSON.stringify({ ok: true, result: { messages: [{ id: 'msg_one', from: 'term_source' }, { id: 'msg_two', from: 'term_source' }] } }) } } }));
     await page.waitForFunction(() => [...document.querySelectorAll('*')].some(e => e.shadowRoot?.querySelector('.msg.peer.in[data-id="xwake"]')), null, { timeout: 8000 });
     const style = await w.eval(r => { const el = r.querySelector('.msg[data-id="xwake"]'); return { background: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderStyle, tag: el.querySelector('.tag').textContent }; });
     assert.equal(style.background, 'rgb(255, 247, 237)'); assert.equal(style.border, 'dashed'); assert.ok(style.tag.includes('세션끼리'));
+    assert.ok(style.tag.includes('수신함 알림'));
     assert.equal((await w.msgs()).filter(x => x.id === 'xwake').length, 1);
   } finally { await ctx?.close(); await closeBrowser(); srv.stop(); }
 });

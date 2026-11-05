@@ -118,7 +118,7 @@ try {
     // 다른 세션이 보낸 메시지를 받았으면 알린다. 서버가 보낸 쪽 기록과 맞춰 "받음"을 적는다.
     for (const m of text.matchAll(/<cross-session-message\b([^>]*)>([\s\S]*?)<\/cross-session-message>/g)) {
       const fromName = /from-name="([^"]*)"/.exec(m[1])?.[1] || '';
-      if (m[2].trim()) await post(port, { from: 'peer', to: session.sessionId, fromName, text: m[2].trim() });
+      if (m[2].trim()) await post(port, { from: 'peer', peerMethod: 'hook-relay', ...(process.env.CMUX_SURFACE_ID ? { peerTargetHost: 'cmux' } : {}), to: session.sessionId, fromName, text: m[2].trim() });
     }
     // 서브에이전트가 끝나며 돌려준 보고는 사용자 글이 아니라 "서브에이전트" 메시지로 남긴다(#1948). 앞의 안내문은 떼고, 줄마다 붙은 들여쓰기를 걷는다.
     for (const m of text.matchAll(/<agent-message\b([^>]*)>([\s\S]*?)<\/agent-message>/g)) {
@@ -132,7 +132,7 @@ try {
     const peer = input.tool_name === 'SendMessage' && typeof ti.message === 'string' ? String(ti.to || '') : '';
     await post(port, { session: session.sessionId, state: 'working', detail: toolLabel(input.tool_name, ti), ...(peer ? { peer } : {}) }, 'status');
     // 세션끼리 보내는 메시지도 대화창에 남긴다(보낸 세션 기준).
-    if (peer) await post(port, { from: 'peer', session: session.sessionId, toName: peer, text: ti.message });
+    if (peer) await post(port, { from: 'peer', peerMethod: 'message-tool', ...(process.env.CMUX_SURFACE_ID ? { peerSourceHost: 'cmux' } : {}), session: session.sessionId, toName: peer, text: ti.message });
   }
 
   // 서브에이전트 안의 도구 훅(agent_id 가 있음)에는 넣지 않는다. 넣으면 메인 세션이 아니라 서브에이전트가 읽고 답해 버린다.

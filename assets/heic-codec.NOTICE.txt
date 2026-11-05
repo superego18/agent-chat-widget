@@ -1,0 +1,16 @@
+HEIC browser fallback
+
+heic-codec-1.6.7.mjs is the unmodified src/lib/libheif-without-unsafe-eval.js
+from heic-to 1.6.7, npm archive integrity verified before extraction.
+SHA256: 75aaf03816c22f8cf40dbcaeb22bee83f2e1c5da4b7417577a7883b296348734
+License: LGPL-3.0-or-later; complete upstream notice/license in heic-codec.LICENSE.txt.
+Source/package: https://www.npmjs.com/package/heic-to/v/1.6.7
+Corresponding source/build instructions: https://github.com/hoppergee/heic-to
+Embedded libheif:1.23.7, libde265:1.0.16, USE_UNSAFE_EVAL=0 (upstream build header).
+https://github.com/strukturag/libheif/tree/v1.23.7
+https://github.com/strukturag/libde265/tree/v1.0.16
+
+The separate heic-worker.mjs adapts heic-to's primary-image selection and free pattern.
+It decodes in a per-conversion owned worker and encodes JPEG through OffscreenCanvas.
+Both the codec and this worker are replaceable source files, served from the same origin.
+No runtime CDN request or third-party image upload is used.
