@@ -280,6 +280,7 @@
   #wsheet { --work-ink: #1c1b18; --work-muted: #5f5b52; --work-line: #e4e2dc; --work-soft: #f6f5f1; background: #fff; color: var(--work-ink); }
   #wsheet > .dhead { padding: 4px 16px; color: var(--work-ink); font-size: 16px; border-bottom: 1px solid var(--work-line); }
   #wsheet > .dhead button { min-height: 44px; font-size: 13px; color: var(--work-muted); }
+  #wtitle { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; font-size: 14px; }
   #wlist { padding: 0 16px 16px; gap: 8px; }
   .workgroup h3, .workgroup > summary { font-size: 12px; font-weight: 600; color: var(--work-muted); margin: 4px 0 0; line-height: 1.5; }
   .workgroup > summary { cursor: pointer; padding: 8px 0; }
@@ -1531,6 +1532,7 @@
     renderingTimelines = new Map(); renderingReferences = null;
     try {
     renderTabs();
+    updateWorkBtn();
     const box = $('msgs');
     const gapBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
     const nearBottom = gapBottom < 80;
@@ -3767,10 +3769,16 @@
     if (sent.length) toast(`✓ ${ids.length}개 보냄 → ${nameOf(sent[0].to)}`);
   }
 
+  const sessionWork = () => workItems.filter(d => d.to === activeTab);
+  let workSession = null;
   function updateWorkBtn() {
-    const pending = workItems.filter(d => d.work.state === 'review' && !d.work.answer).length;
+    const pending = sessionWork().filter(d => d.work.state === 'review' && !d.work.answer).length;
     $('workBtn').textContent = `진행·확인${pending ? ` ${pending}` : ''}`;
+    $('workBtn').setAttribute('aria-label', `${nameOf(activeTab)} 진행·확인, 확인 필요 ${pending}개`);
     $('workBtn').setAttribute('aria-pressed', String(workOpen));
+    if (workOpen && workSession !== activeTab) {
+      selectedWork = null; renderWork(); $('wlist').scrollTop = 0;
+    }
   }
   const workReply = id => { try { return localStorage.getItem('__uifb_work_reply_' + id) || ''; } catch { return ''; } };
   function keepWorkReply(id, value) { try { value ? localStorage.setItem('__uifb_work_reply_' + id, value) : localStorage.removeItem('__uifb_work_reply_' + id); } catch {} }
@@ -3783,14 +3791,16 @@
     }
   });
   function renderWork() {
+    const items = sessionWork(); workSession = activeTab;
     const box = $('wlist'), scrollTop = box.scrollTop; box.textContent = ''; workOriginalObserver.disconnect();
-    $('wtitle').textContent = `진행·확인 ${workItems.filter(d => d.work.state !== 'done').length}개`;
-    if (!workItems.length) {
+    $('wtitle').textContent = `${nameOf(activeTab)} · 진행·확인 ${items.filter(d => d.work.state !== 'done').length}개`;
+    $('wsheet').setAttribute('aria-label', `${nameOf(activeTab)} 진행·확인`);
+    if (!items.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
-      empty.textContent = '보관한 요청을 맡겨 주세요. 진행 상태와 확인할 내용이 여기에 남습니다.';
+      empty.textContent = activeTab ? `${nameOf(activeTab)} 대화에는 진행·확인할 요청이 없어요. 보관함에서 맡긴 요청이 여기에 모입니다.` : '대화 세션을 선택하면 진행 상태와 확인할 요청을 볼 수 있어요.';
       box.append(empty); return;
     }
-    if (selectedWork !== null && !workItems.some(d => d.id === selectedWork)) selectedWork = null;
+    if (selectedWork !== null && !items.some(d => d.id === selectedWork)) selectedWork = null;
     const labelOf = (w, fallback) => w.answer?.decision === 'approved' && w.state === 'review' ? '확인됨 · 담당 세션의 마무리 대기' : fallback;
     if (selectedWork !== null) {
       const back = document.createElement('button'); back.type = 'button'; back.className = 'workback'; back.textContent = '← 전체 요청';
@@ -3798,7 +3808,7 @@
       box.append(back);
     }
     for (const [state, label] of [['review', '확인 요청'], ['working', '진행 중'], ['done', '완료']]) {
-      const list = workItems.filter(d => d.work.state === state && (selectedWork === null || d.id === selectedWork));
+      const list = items.filter(d => d.work.state === state && (selectedWork === null || d.id === selectedWork));
       if (!list.length) continue;
       const foldedGroup = state === 'done' && selectedWork === null;
       const group = document.createElement(foldedGroup ? 'details' : 'section'); group.className = 'workgroup';
@@ -3808,7 +3818,8 @@
         if (selectedWork === null) {
           const row = document.createElement('button'); row.type = 'button'; row.className = 'worklist-row'; row.dataset.workOpen = d.id;
           const title = document.createElement('span'); title.className = 'worklist-title'; title.textContent = d.text;
-          const meta = document.createElement('span'); meta.className = 'worklist-meta'; meta.textContent = `#${d.id} · ${nameOf(d.work.actor)}${d.work.answer?.decision === 'approved' && state === 'review' ? ' · 확인됨' : ''}`;
+          const status = state === 'review' ? d.work.answer ? '답변 저장됨 · 마무리 대기' : '확인 필요' : label;
+          const meta = document.createElement('span'); meta.className = 'worklist-meta'; meta.textContent = `#${d.id} · ${status} · ${nameOf(d.work.actor)}`;
           const body = document.createElement('span'); body.className = 'worklist-body'; body.append(title, meta);
           const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); arrow.setAttribute('viewBox', '0 0 16 16'); arrow.setAttribute('aria-hidden', 'true');
           arrow.innerHTML = '<path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
