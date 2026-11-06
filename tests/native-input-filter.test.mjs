@@ -102,3 +102,47 @@ test('unrelated chat changes and queue status do not invalidate the native histo
   f.chat([{ ...entry, queue: { receipt, state: 'accepted' } }, { id: 8, from: 'agent', text: 'Agent response' }, { ...entry, id: 9, to: 'other', text: 'Another session request' }]);
   assert.equal(f.read(), before);
 });
+
+const imageMarkup = paths => paths.map((file, index) => `<image name=[Image #${index + 1}] path="${file}">\n</image>`).join('\n');
+const imageEntry = paths => ({id: 7, from: 'user', to: 'target', context: 'app', text: 'Synthetic photo question', at,
+  queue: {receipt}, attachments: paths.map(localPath => ({localPath}))});
+
+for (const paths of [['C:\\synthetic\\first.jpg', 'C:\\synthetic\\second.jpg'], ['/synthetic/photo.jpg']]) test(`photo echo with ${paths.length} known attachment paths is represented once`, t => {
+  const f = fixture(t), entry = imageEntry(paths);
+  f.chat([entry]);
+  const text = envelope(entry.text) + '\n' + imageMarkup(paths);
+  f.receive('photo', text);
+  const original = fs.readFileSync(f.session.path), chatBytes = fs.readFileSync(path.join(f.root, 'chat.json'));
+  assert.deepEqual(f.read(), [], 'the attachment-bearing chat bubble already represents this exact native input');
+  assert.deepEqual(fs.readFileSync(f.session.path), original);
+  assert.deepEqual(fs.readFileSync(path.join(f.root, 'chat.json')), chatBytes);
+});
+
+test('photo-like owner text is retained without exact body, receipt, ordered paths and complete image markup', t => {
+  const paths = ['/synthetic/photo.jpg'], entry = imageEntry(paths);
+  const exact = envelope(entry.text) + '\n' + imageMarkup(paths);
+  const variants = [exact + '\nNew owner question', exact.replace('/synthetic/photo.jpg', '/synthetic/other.jpg'),
+    exact.replace('Image #1', 'Image #2'), exact.replace('\n</image>', '\nOwner text</image>'),
+    exact.replace('Synthetic photo question', 'Different body'), exact.replace(receipt, '22222222-2222-4222-8222-222222222222')];
+  for (const text of variants) {
+    const f = fixture(t); f.chat([entry]); f.receive('owner', text);
+    assert.equal(f.read()[0]?.text, text);
+  }
+  for (const change of [{attachments: []}, {to: 'other'}, {at: '2026-10-31T00:00:02Z'}]) {
+    const f = fixture(t); f.chat([{...entry, ...change}]); f.receive('owner', exact);
+    assert.equal(f.read()[0]?.text, exact);
+  }
+  const f = fixture(t), twoPaths = ['/synthetic/first.jpg', '/synthetic/second.jpg'];
+  const reversed = envelope(entry.text) + '\n' + imageMarkup([...twoPaths].reverse());
+  f.chat([imageEntry(twoPaths)]); f.receive('reordered', reversed);
+  assert.equal(f.read()[0]?.text, reversed);
+});
+
+test('an old stored photo echo is hidden on proof arrival and recovered if that proof is removed', t => {
+  const paths = ['/synthetic/photo.jpg'], entry = imageEntry(paths), f = fixture(t);
+  const text = envelope(entry.text) + '\n' + imageMarkup(paths);
+  f.receive('stored-photo', text);
+  assert.equal(f.read()[0]?.text, text);
+  f.chat([entry]); assert.deepEqual(f.read(), []);
+  f.chat([]); assert.equal(f.read()[0]?.text, text);
+});

@@ -47,6 +47,10 @@ function widgetInputs(root, session) {
     const text = `[대화/피드백 · ${src}${m.round ? ` · ${m.round}차` : ''}] [uifb-receipt:${m.queue.receipt}] ${m.text}${quotes.length ? '\n' + quotes.join('\n') : ''}${where}`;
     if (!inputs.has(m.queue.receipt)) inputs.set(m.queue.receipt, []);
     inputs.get(m.queue.receipt).push({ text, at: m.at });
+    if (Array.isArray(m.attachments) && m.attachments.length && m.attachments.every(a => typeof a?.localPath === 'string' && a.localPath.length)) {
+      const images = m.attachments.map((a, i) => `<image name=[Image #${i + 1}] path="${a.localPath}">\n</image>`).join('\n');
+      inputs.get(m.queue.receipt).push({ text: text + '\n' + images, at: m.at });
+    }
   }
   return inputs;
 }
