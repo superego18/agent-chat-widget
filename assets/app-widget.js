@@ -168,12 +168,12 @@
   #image-quality .quality-actions { display: flex; justify-content: flex-end; gap: 8px; }
   #image-quality button { min-height: 44px; padding: 8px 16px; border: 1px solid #d4d2cd; border-radius: 8px; background: #f6f5f1; color: inherit; font: inherit; }
   #image-quality button[value=upload] { background: #1c1b18; color: #fff; }
-  .msg.sub .mbody, .msg.goal-context .mbody { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-  .msg.goal-context:not(.open) .mbody { display: none; }
-  .msg.goal-context .goal-heading { display: flex; align-items: center; gap: 6px; }
-  .msg.sub.open .mbody, .msg.goal-context.open .mbody { display: block; -webkit-line-clamp: unset; }
-  .msg.sub .subt, .msg.goal-context .subt:not([hidden]) { display: block; margin-top: 4px; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: #047857; cursor: pointer; }
-  .msg.goal-context .goal-heading .subt { margin-top: 0; flex-shrink: 0; }
+  .msg.sub .mbody, .msg.compact-notice .mbody { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .msg.compact-notice:not(.open) .mbody { display: none; }
+  .msg.compact-notice .notice-heading { display: flex; align-items: center; gap: 6px; }
+  .msg.sub.open .mbody, .msg.compact-notice.open .mbody { display: block; -webkit-line-clamp: unset; }
+  .msg.sub .subt, .msg.compact-notice .subt:not([hidden]) { display: block; margin-top: 4px; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: #047857; cursor: pointer; }
+  .msg.compact-notice .notice-heading .subt { margin-top: 0; flex-shrink: 0; }
   .msg.peer, .msg.automation, .msg.mailbox-notice { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
   .msg.automation { align-self: flex-end; }
   .msg.peer.in { align-self: flex-end; }
@@ -1622,7 +1622,9 @@
       if (mailboxNotice) d.classList.add('mailbox-notice');
       const nativeLabel = nativeSourceLabel(m);
       const goalContext = nativeLabel && m.nativeDisplay.kind === 'goal-context';
-      if (goalContext) { d.classList.add('goal-context'); d.classList.toggle('open', openSubs.has(m.id)); }
+      const compactNotice = !m.nativeQuestion && !m.attachments?.length && Boolean(nativeLabel || mailboxNotice || (m.from === 'automation' && m.automationKind === 'pipeline-continuation'));
+      if (goalContext) d.classList.add('goal-context');
+      if (compactNotice) { d.classList.add('compact-notice'); d.classList.toggle('open', openSubs.has(m.id)); }
       if (nativeLabel) d.classList.add(['orca-dispatch', 'pipeline-continuation'].includes(m.nativeDisplay.kind) ? 'native-dispatch' : 'native-internal');
       d.dataset.id = String(m.id);
       d.dataset.at = String(m.at);
@@ -1667,20 +1669,20 @@
         answer.onclick = () => openNativeQuestion(m, answer);
         body.after(answer);
       }
-      if (m.from === 'sub' || goalContext) {
-        // Goal 자동 문맥은 본문을 접고, 서브 보고는 앞 3줄을 보인다. 기존 펼치기/접기를 함께 쓴다.
+      if (m.from === 'sub' || compactNotice) {
+        // 반복 자동 안내는 본문을 접고, 서브 보고는 앞 3줄을 보인다. 기존 펼치기/접기를 함께 쓴다.
         const t = document.createElement('button');
         t.type = 'button';
         t.className = 'subt';
         t.setAttribute('aria-expanded', String(openSubs.has(m.id)));
         t.textContent = openSubs.has(m.id) ? '접기' : '펼치기';
-        t.hidden = !goalContext;
+        t.hidden = !compactNotice;
         t.onclick = () => { openSubs.has(m.id) ? openSubs.delete(m.id) : openSubs.add(m.id); render(); };
-        if (goalContext) {
-          const heading = document.createElement('span'); heading.className = 'goal-heading';
+        if (compactNotice) {
+          const heading = document.createElement('span'); heading.className = 'notice-heading';
           tag.before(heading); heading.append(tag, t);
         } else body.after(t);
-        requestAnimationFrame(() => { t.hidden = !(goalContext || openSubs.has(m.id) || body.scrollHeight > body.clientHeight + 1); });
+        requestAnimationFrame(() => { t.hidden = !(compactNotice || openSubs.has(m.id) || body.scrollHeight > body.clientHeight + 1); });
       }
       const oq = !m.quotes?.length && m.replyTo && quoteEl({ id: m.replyTo, quote: m.replyQuote, refer: m.refer }, m.id);
       if (oq) body.before(oq);
