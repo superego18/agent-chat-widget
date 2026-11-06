@@ -2138,6 +2138,13 @@
     clearTimeout(posT);
     posT = setTimeout(rememberPosition, 800);
   });
+  for (const type of ['wheel', 'touchmove']) $('msgs').addEventListener(type, () => {
+    if (!scrollToUnread) return;
+    // Direct reading input supersedes a saved anchor still waiting for history.
+    scrollToUnread = false;
+    rememberLayoutPosition();
+    rememberPosition();
+  }, { passive: true });
   addEventListener('pagehide', rememberPosition);
   document.addEventListener('visibilitychange', () => { if (document.hidden) rememberPosition(); });
   document.addEventListener('visibilitychange', markSeenVisible);
