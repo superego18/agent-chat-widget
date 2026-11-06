@@ -1034,7 +1034,7 @@
   const compactAt = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   function draftMeta(it) {
     const parts = [];
-    if (it.where?.url || it.where?.selector) parts.push('📍 ' + (it.where.url || '') + (it.where.text ? ` "${it.where.text}"` : ''));
+    if (it.where?.selector) parts.push('📍 ' + (it.where.text || it.where.selector));
     if (it.at) parts.push(compactAt(it.at) + ' 담음');
     if (it.round) parts.push(`${it.round}차`);
     if (it.device) parts.push(it.device === 'mobile' ? '모바일' : '데스크톱');
@@ -1633,7 +1633,7 @@
       const small = document.createElement('small');
       small.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
         new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
-        (m.where?.url && !m.draft ? ' · ' + m.where.url : '') + readMark(m);
+        (m.where?.selector && !m.draft ? ' · 📍 ' + (m.where.text || m.where.selector) : '') + readMark(m);
       const body = document.createElement('span');
       body.className = 'mbody';
       if (m.draft) renderDraftBody(body, m.draft, m.id);
