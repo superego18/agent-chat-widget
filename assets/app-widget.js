@@ -1577,11 +1577,11 @@
       box.append(p);
     }
     if (showTab !== activeTab) { showCount = PAGE; showTab = activeTab; }
-    if (scrollToUnread) {
-      const posId = (readingPositions[activeTab] ?? prefs.pos?.[activeTab] ?? '').split('@')[0];
-      const index = items.findIndex(m => String(m.id) === posId);
-      if (index >= 0) showCount = Math.max(showCount, items.length - index);
-    }
+    const preserveIds = scrollToUnread
+      ? [(readingPositions[activeTab] ?? prefs.pos?.[activeTab] ?? '').split('@')[0]]
+      : renderedTab === activeTab && !nearBottom ? anchors.map(anchor => anchor.id) : [];
+    const preserveIndex = items.findIndex(m => preserveIds.includes(String(m.id)));
+    if (preserveIndex >= 0) showCount = Math.max(showCount, items.length - preserveIndex);
     const oldestPin = Math.min(...pinsNow().map((id) => items.findIndex((m) => m.id === id)).filter((i) => i >= 0));
     if (Number.isFinite(oldestPin) && items.length - oldestPin > showCount) showCount = items.length - oldestPin; // 고정한 메시지는 대화 속에도 그려져 있어야 단추를 대신 누를 수 있다
     const shown = items.slice(-showCount);
