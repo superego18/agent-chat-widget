@@ -170,8 +170,10 @@
   #image-quality button[value=upload] { background: #1c1b18; color: #fff; }
   .msg.sub .mbody, .msg.goal-context .mbody { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   .msg.goal-context:not(.open) .mbody { display: none; }
+  .msg.goal-context .goal-heading { display: flex; align-items: center; gap: 6px; }
   .msg.sub.open .mbody, .msg.goal-context.open .mbody { display: block; -webkit-line-clamp: unset; }
   .msg.sub .subt, .msg.goal-context .subt:not([hidden]) { display: block; margin-top: 4px; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: #047857; cursor: pointer; }
+  .msg.goal-context .goal-heading .subt { margin-top: 0; flex-shrink: 0; }
   .msg.peer, .msg.automation, .msg.mailbox-notice { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
   .msg.automation { align-self: flex-end; }
   .msg.peer.in { align-self: flex-end; }
@@ -1674,7 +1676,10 @@
         t.textContent = openSubs.has(m.id) ? '접기' : '펼치기';
         t.hidden = !goalContext;
         t.onclick = () => { openSubs.has(m.id) ? openSubs.delete(m.id) : openSubs.add(m.id); render(); };
-        body.after(t);
+        if (goalContext) {
+          const heading = document.createElement('span'); heading.className = 'goal-heading';
+          tag.before(heading); heading.append(tag, t);
+        } else body.after(t);
         requestAnimationFrame(() => { t.hidden = !(goalContext || openSubs.has(m.id) || body.scrollHeight > body.clientHeight + 1); });
       }
       const oq = !m.quotes?.length && m.replyTo && quoteEl({ id: m.replyTo, quote: m.replyQuote, refer: m.refer }, m.id);

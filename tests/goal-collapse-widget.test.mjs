@@ -5,7 +5,7 @@ import {getBrowser, closeBrowser} from './helpers.mjs';
 
 after(closeBrowser);
 const source = fs.readFileSync(new URL('../assets/app-widget.js', import.meta.url), 'utf8');
-for (const width of [390, 1440]) test(`${width}px Goal context shows only disclosure until expanded and preserves other messages`, async t => {
+for (const width of [390, 1440]) test(`${width}px Goal disclosure sits beside its label and preserves body disclosure and other messages`, async t => {
   const ctx = await (await getBrowser()).newContext({viewport: {width, height: 844}});
   t.after(() => ctx.close());
   const page = await ctx.newPage(), errors = [];
@@ -28,11 +28,17 @@ for (const width of [390, 1440]) test(`${width}px Goal context shows only disclo
   assert.equal(await body.isVisible(), false);
   assert.equal(await body.evaluate(e => e.getBoundingClientRect().height), 0);
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(await toggle.evaluate(e => getComputedStyle(e).marginTop), '0px');
+  const labelRect = await row.locator('.tag').boundingBox(), toggleRect = await toggle.boundingBox();
+  assert(labelRect && toggleRect);
+  assert(labelRect.x + labelRect.width <= toggleRect.x + 1);
+  assert(Math.min(labelRect.y + labelRect.height, toggleRect.y + toggleRect.height) > Math.max(labelRect.y, toggleRect.y));
   await page.locator('.msg[data-id="xtwo"] .subt').waitFor({state: 'visible'});
   assert.equal(await toggle.textContent(), await page.locator('.msg[data-id="xsub"] .subt').textContent());
   fs.mkdirSync(new URL('../.local/', import.meta.url), {recursive: true});
-  await row.screenshot({path: new URL(`../.local/goal-button-only-${width}.png`, import.meta.url).pathname.replace(/^\/(?:([A-Za-z]):)/, '$1:')});
-  await toggle.click();
+  await row.screenshot({path: new URL(`../.local/goal-label-toggle-${width}.png`, import.meta.url).pathname.replace(/^\/(?:([A-Za-z]):)/, '$1:')});
+  await toggle.focus();
+  await page.keyboard.press('Enter');
   await row.locator('.subt[aria-expanded="true"]').waitFor();
   assert.equal(await body.isVisible(), true);
   assert.equal(await body.textContent(), long);
