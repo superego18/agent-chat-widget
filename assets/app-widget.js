@@ -3770,9 +3770,11 @@
   }
 
   const sessionWork = () => workItems.filter(d => d.to === activeTab);
+  const linkedWork = d => d.work.reviewTarget?.kind === 'development-workbench';
+  const needsWorkAttention = d => !linkedWork(d) && d.work.state !== 'done' && (d.work.state === 'review' || d.work.reviewRequired);
   let workSession = null;
   function updateWorkBtn() {
-    const pending = sessionWork().filter(d => d.work.state === 'review' && !d.work.answer).length;
+    const pending = sessionWork().filter(d => !linkedWork(d) && d.work.state === 'review' && !d.work.answer).length;
     $('workBtn').textContent = `진행·확인${pending ? ` ${pending}` : ''}`;
     $('workBtn').setAttribute('aria-label', `${nameOf(activeTab)} 진행·확인, 확인 필요 ${pending}개`);
     $('workBtn').setAttribute('aria-pressed', String(workOpen));
@@ -3793,7 +3795,7 @@
   function renderWork() {
     const items = sessionWork(); workSession = activeTab;
     const box = $('wlist'), scrollTop = box.scrollTop; box.textContent = ''; workOriginalObserver.disconnect();
-    $('wtitle').textContent = `${nameOf(activeTab)} · 진행·확인 ${items.filter(d => d.work.state !== 'done').length}개`;
+    $('wtitle').textContent = `${nameOf(activeTab)} · 확인·처리 대기 ${items.filter(needsWorkAttention).length}개`;
     $('wsheet').setAttribute('aria-label', `${nameOf(activeTab)} 진행·확인`);
     if (!items.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
@@ -3807,18 +3809,30 @@
       back.onclick = () => { const id = selectedWork; selectedWork = null; renderWork(); box.querySelector(`[data-work-open="${id}"]`)?.focus(); };
       box.append(back);
     }
-    for (const [state, label] of [['review', '확인 요청'], ['working', '진행 중'], ['done', '완료']]) {
-      const list = items.filter(d => d.work.state === state && (selectedWork === null || d.id === selectedWork));
+    const groups = [
+      ['attention', '확인·처리 대기', items.filter(needsWorkAttention)],
+      ['workbench', '현황판에서 확인', items.filter(linkedWork)],
+      ['progress', '기존 진행 기록', items.filter(d => !linkedWork(d) && d.work.state === 'working' && !d.work.reviewRequired)],
+      ['done', '완료', items.filter(d => !linkedWork(d) && d.work.state === 'done')],
+    ];
+    for (const [key, label, entries] of groups) {
+      const list = entries.filter(d => selectedWork === null || d.id === selectedWork);
       if (!list.length) continue;
-      const foldedGroup = state === 'done' && selectedWork === null;
-      const group = document.createElement(foldedGroup ? 'details' : 'section'); group.className = 'workgroup';
+      const foldedGroup = key !== 'attention' && selectedWork === null;
+      const group = document.createElement(foldedGroup ? 'details' : 'section'); group.className = 'workgroup'; group.dataset.workGroup = key;
+      if (foldedGroup) {
+        const foldKey = `${activeTab}:group:${key}`;
+        group.open = workFolds.get(foldKey) ?? false;
+        group.ontoggle = () => workFolds.set(foldKey, group.open);
+      }
       const heading = document.createElement(foldedGroup ? 'summary' : 'h3');
       if (selectedWork === null) { heading.textContent = `${label} ${list.length}개`; group.append(heading); }
       for (const d of list) {
+        const state = d.work.state;
         if (selectedWork === null) {
           const row = document.createElement('button'); row.type = 'button'; row.className = 'worklist-row'; row.dataset.workOpen = d.id;
           const title = document.createElement('span'); title.className = 'worklist-title'; title.textContent = d.text;
-          const status = state === 'review' ? d.work.answer ? '답변 저장됨 · 마무리 대기' : '확인 필요' : label;
+          const status = linkedWork(d) ? '현황판에서 확인' : state === 'review' ? d.work.answer ? '답변 저장됨 · 담당 처리 대기' : '확인 필요' : d.work.reviewRequired && state === 'working' ? '수정 요청 · 담당 처리 대기' : label;
           const meta = document.createElement('span'); meta.className = 'worklist-meta'; meta.textContent = `#${d.id} · ${status} · ${nameOf(d.work.actor)}`;
           const body = document.createElement('span'); body.className = 'worklist-body'; body.append(title, meta);
           const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); arrow.setAttribute('viewBox', '0 0 16 16'); arrow.setAttribute('aria-hidden', 'true');
@@ -3853,7 +3867,20 @@
           card.append(area); return area;
         };
         if (w.note) section('확인할 내용', w.note, true, true);
-        if (state === 'review' && !w.answer) {
+        if (linkedWork(d)) {
+          const reference = section('현황판에서 확인', '연결할 때 확인한 결과입니다. 최신 상태·질문·정식 검토는 현황판에서 확인해 주세요.');
+          let url;
+          try {
+            url = new URL(w.reviewTarget.url);
+            if (!(url.protocol === 'https:' || url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)) || url.username || url.password || url.hash || url.searchParams.get('item') !== w.reviewTarget.item || [...url.searchParams.keys()].some(key => key !== 'item')) url = null;
+          } catch {}
+          if (url) {
+            const link = document.createElement('a'); link.href = url.href; link.textContent = '현황판에서 확인'; link.target = '_blank'; link.rel = 'noopener noreferrer'; reference.append(link);
+          } else {
+            const notice = document.createElement('p'); notice.textContent = '연결 주소를 확인하지 못했어요. 담당 세션에 확인해 주세요.'; reference.append(notice);
+          }
+          if (w.answer) section('기존 내 답변', w.answer.text || (w.answer.decision === 'approved' ? '확인했어요' : '수정 요청'));
+        } else if (state === 'review' && !w.answer) {
           const response = section('내 의견');
           const input = document.createElement('textarea'); input.rows = 3; input.maxLength = 4000;
           input.setAttribute('aria-label', `요청 ${d.id} 확인 의견`); input.placeholder = '수정할 내용이나 확인 의견'; input.value = workReply(d.id);

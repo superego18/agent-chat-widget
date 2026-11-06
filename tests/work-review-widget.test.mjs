@@ -85,6 +85,10 @@ for (const [engine, width, theme] of [['chromium', 375, 'light'], ['chromium', 3
       assert.ok((await page.locator('[data-work-open="2"]').boundingBox()).height < 120, 'long request titles are compact');
       await page.locator('#wclose').focus(); await page.keyboard.press('Tab');
       assert.equal(await page.locator('[data-work-open="2"]').evaluate(el => el.getRootNode().activeElement === el), true, 'the first compact request is keyboard reachable');
+      const progress = page.locator('[data-work-group="progress"] > summary');
+      await page.keyboard.press('Tab');
+      assert.equal(await progress.evaluate(el => el.getRootNode().activeElement === el), true, 'ordinary progress is a separate collapsed record');
+      await page.keyboard.press('Enter');
       const otherRow = await page.locator('[data-work-open="3"]').boundingBox(), listBounds = await list.boundingBox();
       if (otherRow.y + otherRow.height > listBounds.y + listBounds.height) {
         const scroll = await list.evaluate(el => ({ top: el.scrollTop, overflow: getComputedStyle(el).overflowY, extent: el.scrollHeight - el.clientHeight }));
@@ -102,7 +106,7 @@ for (const [engine, width, theme] of [['chromium', 375, 'light'], ['chromium', 3
       await page.getByRole('button', { name: '← 전체 요청', exact: true }).click();
       assert.equal(await page.locator('[data-work-open="3"]').evaluate(el => el.getRootNode().activeElement === el), true);
       await page.keyboard.press('Tab');
-      const completed = page.locator('#wlist .workgroup > summary');
+      const completed = page.locator('#wlist [data-work-group="done"] > summary');
       assert.equal(await completed.evaluate(el => el.getRootNode().activeElement === el), true, 'keyboard navigation reaches the folded completed group');
       await page.keyboard.press('Enter'); await page.keyboard.press('Tab');
       assert.equal(await page.locator('[data-work-open="4"]').evaluate(el => el.getRootNode().activeElement === el), true);

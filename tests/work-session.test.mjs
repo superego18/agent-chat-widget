@@ -14,9 +14,10 @@ for (const [engine,width,theme] of [['chromium',390,'light'],['chromium',390,'da
   const names=['첫 대화','두 번째 대화','빈 대화'];
   for(let i=0;i<3;i++) fs.writeFileSync(path.join(root,'sessions',`synthetic-${i}.json`),JSON.stringify({sessionId:`synthetic-${i}`,tool:'claude',name:names[i]}));
   const entry=(id,to,state,answer)=>({id,to,text:`합성 요청 ${id}`,at,work:{actor:to,state,revision:answer?3:2,startedAt:at,updatedAt:at,note:'합성 확인 내용',...(answer?{answer:{decision:'approved',text:'기존 답변',at}}:{})}});
-  const drafts=[entry(1,'synthetic-0','review'),entry(2,'synthetic-0','review',true),entry(3,'synthetic-0','working'),entry(4,'synthetic-0','done'),entry(5,'synthetic-1','review'),entry(6,'synthetic-1','review')];
-  fs.writeFileSync(path.join(root,'drafts.json'),JSON.stringify({nextId:7,trash:[],drafts}));
-  const original=fs.readFileSync(path.join(root,'drafts.json'));
+  const linked=entry(7,'synthetic-0','review',true),correction=entry(8,'synthetic-0','working');
+  correction.work.reviewRequired=true;correction.work.answer={decision:'changes',text:'수정해 주세요',at};
+  const drafts=[entry(1,'synthetic-0','review'),entry(2,'synthetic-0','review',true),entry(3,'synthetic-0','working'),entry(4,'synthetic-0','done'),entry(5,'synthetic-1','review'),entry(6,'synthetic-1','review'),linked,correction];
+  fs.writeFileSync(path.join(root,'drafts.json'),JSON.stringify({nextId:9,trash:[],drafts}));
   const handler=createChatHandler({root});
   const server=http.createServer((req,res)=>{
    const url=new URL(req.url,'http://fixture.invalid');
@@ -28,6 +29,9 @@ for (const [engine,width,theme] of [['chromium',390,'light'],['chromium',390,'da
   try{
    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
    const base='http://127.0.0.1:'+server.address().port;
+   linked.work.reviewTarget={kind:'development-workbench',item:'linked-item',url:base+'/?item=linked-item',version:'connected-version'};
+   fs.writeFileSync(path.join(root,'drafts.json'),JSON.stringify({nextId:9,trash:[],drafts}));
+   const original=fs.readFileSync(path.join(root,'drafts.json'));
    browser=await(engine==='webkit'?webkit.launch({headless:true}):chromium.launch({channel:'chrome',headless:true}));
    const page=await browser.newPage({viewport:{width,height:900},colorScheme:theme});page.setDefaultTimeout(8000);
    const errors=[];page.on('pageerror',e=>errors.push({name:e.name,message:e.message}));
@@ -35,11 +39,26 @@ for (const [engine,width,theme] of [['chromium',390,'light'],['chromium',390,'da
    await page.addInitScript(()=>{localStorage.setItem('__uifb_tab','synthetic-0');localStorage.setItem('__uifb_open:app','1');});
    await page.goto(base);await page.locator('#panel').waitFor({state:'visible'});await page.locator('#workBtn').filter({hasText:/\d/}).waitFor();await page.locator('#workBtn').click();
    const ids=()=>page.locator('#wlist [data-work-open]').evaluateAll(rows=>rows.map(x=>x.dataset.workOpen));
-   assert.deepEqual(await ids(),['1','2','3','4'],'no other session requests in the compact list');
+   assert.deepEqual(await ids(),['1','2','8','7','3','4'],'no other session requests in the compact list');
+   assert.deepEqual(await page.locator('[data-work-group="attention"] [data-work-open]').evaluateAll(rows=>rows.map(x=>x.dataset.workOpen)),['1','2','8'],'unanswered, answered pending and requested correction remain the main obligations');
+   for(const key of ['workbench','progress','done'])assert.equal(await page.locator(`[data-work-group="${key}"]`).getAttribute('open'),null);
+   assert.match(await page.locator('[data-work-open="8"]').innerText(),/담당 처리 대기/);
    assert.equal(await page.locator('#workBtn').innerText(),'진행·확인 1');
    assert.match(await page.locator('#wtitle').innerText(),/첫 대화/);
    assert.match(await page.locator('[data-work-open="1"]').innerText(),/확인 필요/);
    assert.match(await page.locator('[data-work-open="2"]').innerText(),/답변 저장됨/);
+   await page.locator('[data-work-group="workbench"] > summary').focus();await page.keyboard.press('Enter');await page.keyboard.press('Tab');
+   assert.equal(await page.locator('[data-work-open="7"]').evaluate(el=>el.getRootNode().activeElement===el),true);
+   await page.keyboard.press('Enter');
+   const linkedCard=page.locator('[data-work-id="7"]');
+   assert.equal(await linkedCard.getByRole('button',{name:'확인했어요',exact:true}).count(),0);
+   assert.equal(await linkedCard.getByRole('textbox').count(),0);
+   assert.match(await linkedCard.innerText(),/연결할 때 확인한 결과/);
+   assert.match(await linkedCard.innerText(),/기존 답변/);
+   const link=linkedCard.getByRole('link',{name:'현황판에서 확인',exact:true});
+   assert.equal(await link.getAttribute('href'),base+'/?item=linked-item');
+   await link.focus();const popupPromise=page.waitForEvent('popup');await page.keyboard.press('Enter');const popup=await popupPromise;await popup.waitForURL(url=>url.origin===base&&url.searchParams.get('item')==='linked-item');await popup.waitForLoadState('domcontentloaded');assert.equal(new URL(popup.url()).searchParams.get('item'),'linked-item');await popup.close();
+   await page.getByRole('button',{name:'← 전체 요청',exact:true}).click();
    await page.locator('[data-work-open="1"]').click();
    await page.getByRole('textbox',{name:'요청 1 확인 의견'}).fill('첫 대화 의견 보존');
    await page.getByRole('tab',{name:names[1],exact:true}).click();

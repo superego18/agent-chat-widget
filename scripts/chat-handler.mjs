@@ -757,7 +757,67 @@ function sendDrafts(ids, combine, device) {
 }
 
 // 보관함 요청: add(새 항목) · update(글·받는 세션·위치 고치기) · delete · send
+const reviewBindingFields = ['project', 'task', 'item', 'sourceKey', 'version', 'candidate'];
+async function resolveWorkReview(binding) {
+  if (!binding || !reviewBindingFields.slice(0, 5).every(key => typeof binding[key] === 'string' && binding[key].trim() && binding[key].length <= 500) ||
+      !(binding.candidate === null || typeof binding.candidate === 'string' && binding.candidate.length > 0 && binding.candidate.length <= 500)) throw Error('binding');
+  const provider = readJsonSafe(path.join(root, 'project-links.json'))?.workReviewProvider;
+  if (provider?.kind !== 'development-workbench' || typeof provider.projectKey !== 'string' || !provider.projectKey || provider.projectKey !== binding.project) throw Error('provider');
+  const bootstrap = new URL(provider.url);
+  if (bootstrap.protocol !== 'http:' || !['127.0.0.1', '[::1]', 'localhost'].includes(bootstrap.hostname) || bootstrap.username || bootstrap.password || bootstrap.hash || bootstrap.search) throw Error('origin');
+  const publicUrl = new URL(provider.publicUrl);
+  if (!(publicUrl.protocol === 'https:' || publicUrl.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(publicUrl.hostname)) || publicUrl.username || publicUrl.password || publicUrl.hash || publicUrl.search) throw Error('public-url');
+  const signal = AbortSignal.timeout(5000);
+  const home = await fetch(bootstrap, { redirect: 'error', signal });
+  if (!home.ok) { await home.body?.cancel(); throw Error('bootstrap'); }
+  const cookie = home.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+  await home.body?.cancel();
+  const response = await fetch(new URL('/api/items', bootstrap.origin), { redirect: 'error', signal, headers: cookie ? { cookie } : {} });
+  if (!response.ok) { await response.body?.cancel(); throw Error('items'); }
+  const data = await response.json();
+  if (!Array.isArray(data.items)) throw Error('json');
+  const matches = data.items.filter(item => item.id === binding.item);
+  if (matches.length !== 1) throw Error('identity');
+  const item = matches[0];
+  if (item.source?.project !== binding.project || item.managedRecord?.id !== binding.task || item.sourceKey !== binding.sourceKey ||
+      item.version !== binding.version || item.managedRecord.candidate !== binding.candidate) throw Error('identity');
+  const url = new URL(publicUrl); url.searchParams.set('item', item.id);
+  return { item, url: url.href, provider: JSON.stringify(provider) };
+}
+async function bindWorkReview(req) {
+  const eligible = d => d && req.actor === d.to && findSession(req.actor) && d.work && d.work.state !== 'done' && req.revision === d.work.revision;
+  if (!eligible(readDrafts().drafts.find(d => d.id === req.id))) return { status: 409, body: { error: '담당 세션과 최신 요청을 확인해 주세요.' } };
+  let resolved;
+  try { resolved = await resolveWorkReview(req.binding); }
+  catch { return { status: 409, body: { error: '등록된 현황판의 연결 대상과 버전을 확인하지 못했습니다. 기존 기록은 바꾸지 않았습니다.' } }; }
+  // No store is held across external I/O. Rejoin the actual revision before writing.
+  const store = readDrafts(), d = store.drafts.find(d => d.id === req.id);
+  if (!eligible(d) || JSON.stringify(readJsonSafe(path.join(root, 'project-links.json'))?.workReviewProvider) !== resolved.provider) return { status: 409, body: { error: '연결을 확인하는 동안 요청이나 현황판 설정이 바뀌었습니다. 최신 요청을 확인해 주세요.' } };
+  const now = new Date().toISOString(), w = d.work;
+  w.reviewBindings = [...(w.reviewBindings || []), ...(w.reviewTarget ? [w.reviewTarget] : [])];
+  w.reviewTarget = { kind: 'development-workbench', ...Object.fromEntries(reviewBindingFields.map(key => [key, req.binding[key]])), url: resolved.url, observedAt: now, boundBy: req.actor, workRevision: w.revision };
+  w.revision++; w.updatedAt = now;
+  writeDrafts(store);
+  return { status: 200, body: d };
+}
+async function finishLinkedWork(req) {
+  const eligible = d => d && req.actor === d.to && findSession(req.actor) && d.work?.reviewTarget?.kind === 'development-workbench' && d.work.state !== 'done' && req.revision === d.work.revision;
+  const before = readDrafts().drafts.find(d => d.id === req.id);
+  if (!eligible(before)) return { status: 409, body: { error: '담당 세션과 최신 연결을 확인해 주세요.' } };
+  let resolved;
+  try { resolved = await resolveWorkReview(before.work.reviewTarget); }
+  catch { return { status: 409, body: { error: '현황판의 연결 버전을 확인하지 못했습니다. 최신 결과에 다시 연결해 주세요.' } }; }
+  if (resolved.item.status !== 'done' || resolved.item.managedRecord.state !== 'done' || typeof resolved.item.managedRecord.ownerReviewCid !== 'string' || !resolved.item.managedRecord.ownerReviewCid.trim()) return { status: 409, body: { error: '현황판의 정식 검토와 후속 처리가 아직 완료되지 않았습니다.' } };
+  const store = readDrafts(), d = store.drafts.find(d => d.id === req.id);
+  if (!eligible(d) || JSON.stringify(d.work.reviewTarget) !== JSON.stringify(before.work.reviewTarget) || JSON.stringify(readJsonSafe(path.join(root, 'project-links.json'))?.workReviewProvider) !== resolved.provider) return { status: 409, body: { error: '확인하는 동안 연결이나 현황판 설정이 바뀌었습니다. 최신 요청을 확인해 주세요.' } };
+  const now = new Date().toISOString();
+  d.work.state = 'done'; d.work.completedAt = now; d.work.updatedAt = now; d.work.revision++;
+  writeDrafts(store);
+  return { status: 200, body: d };
+}
 function handleDrafts(req) {
+  if (req.action === 'work-bind-review') return bindWorkReview(req);
+  if (req.action === 'work-finish' && readDrafts().drafts.find(d => d.id === req.id)?.work?.reviewTarget?.kind === 'development-workbench') return finishLinkedWork(req);
   const store = readDrafts();
   const ids = Array.isArray(req.ids) ? req.ids.filter(Number.isInteger) : [];
   if (['work-start', 'work-review', 'work-answer', 'work-finish'].includes(req.action)) {
@@ -776,7 +836,8 @@ function handleDrafts(req) {
       const w = d.work;
       if (!w) return fail(409, '아직 담당 세션이 가져가지 않은 항목입니다.');
       if (req.action === 'work-answer' && w.answer?.cid === req.cid && w.answer.revision === req.revision &&
-        w.revision === req.revision + 1 && w.answer.decision === req.decision && w.answer.text === answerText) return { status: 200, body: d };
+        (w.revision === req.revision + 1 || w.reviewTarget?.kind === 'development-workbench') && w.answer.decision === req.decision && w.answer.text === answerText) return { status: 200, body: d };
+      if (w.reviewTarget?.kind === 'development-workbench' && ['work-review', 'work-answer'].includes(req.action)) return { status: 409, body: { error: '연결된 정식 검토는 현황판에서 확인해 주세요. 기존 답변은 보존되어 있습니다.', reviewTarget: w.reviewTarget } };
       if (req.revision !== w.revision) return fail(409, '확인 내용이 바뀌었습니다. 최신 요청을 다시 확인해 주세요.');
       if (w.state === 'done') return fail(409, '이미 완료된 항목입니다.');
       if (req.action === 'work-review') {
@@ -1325,7 +1386,7 @@ function inner(req, res, url) {
         body += chunk;
         if (body.length > MAX_BODY) req.destroy();
       });
-      req.on('end', () => {
+      req.on('end', async () => {
         let r;
         try {
           r = JSON.parse(body);
@@ -1333,7 +1394,7 @@ function inner(req, res, url) {
           return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
         }
         try {
-          const out = handleDrafts(r);
+          const out = await handleDrafts(r);
           send(res, out.status, out.body);
         } catch { send(res, 503, { error: '저장 결과를 확인하지 못했습니다. 입력을 보존하고 상태를 확인해 주세요.' }); }
       });
