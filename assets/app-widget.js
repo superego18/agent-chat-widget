@@ -169,6 +169,7 @@
   #image-quality button { min-height: 44px; padding: 8px 16px; border: 1px solid #d4d2cd; border-radius: 8px; background: #f6f5f1; color: inherit; font: inherit; }
   #image-quality button[value=upload] { background: #1c1b18; color: #fff; }
   .msg.sub .mbody, .msg.goal-context .mbody { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .msg.goal-context .mbody { -webkit-line-clamp: 1; }
   .msg.sub.open .mbody, .msg.goal-context.open .mbody { display: block; -webkit-line-clamp: unset; }
   .msg.sub .subt, .msg.goal-context .subt:not([hidden]) { display: block; margin-top: 4px; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: #047857; cursor: pointer; }
   .msg.peer, .msg.automation, .msg.mailbox-notice { align-self: flex-start; background: #fff7ed; color: #431407; box-shadow: none; border: 1.5px dashed #f59e0b; }
