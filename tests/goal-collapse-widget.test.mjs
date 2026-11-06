@@ -5,7 +5,7 @@ import {getBrowser, closeBrowser} from './helpers.mjs';
 
 after(closeBrowser);
 const source = fs.readFileSync(new URL('../assets/app-widget.js', import.meta.url), 'utf8');
-for (const width of [390, 1440]) test(`${width}px Goal context folds to one line and preserves source and other messages`, async t => {
+for (const width of [390, 1440]) test(`${width}px Goal context shows only disclosure until expanded and preserves other messages`, async t => {
   const ctx = await (await getBrowser()).newContext({viewport: {width, height: 844}});
   t.after(() => ctx.close());
   const page = await ctx.newPage(), errors = [];
@@ -25,22 +25,29 @@ for (const width of [390, 1440]) test(`${width}px Goal context folds to one line
   await page.addScriptTag({content: source});
   const row = page.locator('.msg[data-id="xlong"]'), body = row.locator('.mbody'), toggle = row.locator('.subt');
   await toggle.waitFor({state: 'visible'});
-  const folded = await body.evaluate(e => ({height: e.clientHeight, line: parseFloat(getComputedStyle(e).lineHeight), scroll: e.scrollHeight, clamp: getComputedStyle(e).webkitLineClamp}));
-  assert.equal(folded.clamp, '1'); assert(folded.height <= folded.line + 1); assert(folded.scroll > folded.height);
+  assert.equal(await body.isVisible(), false);
+  assert.equal(await body.evaluate(e => e.getBoundingClientRect().height), 0);
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
   await page.locator('.msg[data-id="xtwo"] .subt').waitFor({state: 'visible'});
   assert.equal(await toggle.textContent(), await page.locator('.msg[data-id="xsub"] .subt').textContent());
   fs.mkdirSync(new URL('../.local/', import.meta.url), {recursive: true});
-  await row.screenshot({path: new URL(`../.local/goal-one-line-${width}.png`, import.meta.url).pathname.replace(/^\/(?:([A-Za-z]):)/, '$1:')});
+  await row.screenshot({path: new URL(`../.local/goal-button-only-${width}.png`, import.meta.url).pathname.replace(/^\/(?:([A-Za-z]):)/, '$1:')});
   await toggle.click();
   await row.locator('.subt[aria-expanded="true"]').waitFor();
+  assert.equal(await body.isVisible(), true);
   assert.equal(await body.textContent(), long);
   assert(await body.evaluate(e => e.clientHeight >= e.scrollHeight - 1));
   assert.equal(await row.locator('.tag').textContent(), '자동 문맥 · Codex · 목표 진행');
   await row.locator('.subt').click();
   await row.locator('.subt[aria-expanded="false"]').waitFor();
-  assert.equal(await body.evaluate(e => getComputedStyle(e).webkitLineClamp), '1');
-  assert.equal(await page.locator('.msg[data-id="xshort"] .subt').isVisible(), false);
+  assert.equal(await body.isVisible(), false);
+  const shortRow = page.locator('.msg[data-id="xshort"]');
+  assert.equal(await shortRow.locator('.mbody').isVisible(), false);
+  await shortRow.locator('.subt').click();
+  assert.equal(await shortRow.locator('.mbody').isVisible(), true);
+  assert.equal(await shortRow.locator('.mbody').textContent(), 'Short Goal');
+  await shortRow.locator('.subt').click();
+  assert.equal(await shortRow.locator('.mbody').isVisible(), false);
   for (const id of ['xowner', '1']) {
     assert.equal(await page.locator(`.msg[data-id="${id}"] .subt`).count(), 0);
     assert.equal(await page.locator(`.msg[data-id="${id}"] .mbody`).textContent(), long);
