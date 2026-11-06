@@ -2900,7 +2900,7 @@
       legend.textContent = item.original.name; field.append(legend);
       if (item.heic) { const note = document.createElement('p'); note.textContent = 'HEIC ' + imageBytes(item.sourceBytes) + ' → 원본 크기의 JPG로 변환해 전송합니다. 원본 HEIC 파일은 변경하지 않습니다.'; field.append(note); }
       for (const [value, text, file] of [['original', item.heic ? '원본 크기 · JPG 변환' : '원본', item.original], ['compressed', item.compressed === item.original ? '압축 · 용량 감소 없음' : '압축 · JPG', item.compressed]]) {
-        const label = document.createElement('label'), input = document.createElement('input'); input.type = 'radio'; input.name = 'quality-' + index; input.value = value; input.checked = value === 'original';
+        const label = document.createElement('label'), input = document.createElement('input'); input.type = 'radio'; input.name = 'quality-' + index; input.value = value; input.checked = value === 'compressed';
         label.append(input, document.createTextNode(text + ' · ' + imageBytes(file.size))); field.append(label);
       }
       options.append(field);

@@ -18,11 +18,13 @@ for(const width of [390,1440])test(`${width}px quality choices show actual sizes
   const buffer=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=2000;c.height=1000;const ctx=c.getContext('2d'),d=ctx.createImageData(c.width,c.height);let seed=42;for(let n=0;n<d.data.length;n+=4){seed=(Math.imul(seed,1664525)+1013904223)>>>0;const v=seed>>>24;d.data[n]=d.data[n+1]=d.data[n+2]=v;d.data[n+3]=255;}ctx.putImageData(d,0,0);return c.toDataURL('image/png').split(',')[1];}),'base64');
   const pick=()=>page.locator('#image-file').setInputFiles({name:'synthetic-photo.png',mimeType:'image/png',buffer});
   await pick();const dialog=page.getByRole('dialog',{name:'사진 화질 선택'});await dialog.waitFor();
+  assert.equal(await dialog.getByRole('radio',{name:/^압축/}).isChecked(),true);
+  await dialog.getByRole('radio',{name:/^원본/}).check();
   assert.equal(await dialog.getByRole('radio',{name:/^원본/}).isChecked(),true);
   const originalLabel=await dialog.getByRole('radio',{name:/^원본/}).evaluate(e=>e.parentElement.textContent);
   assert(originalLabel.includes((buffer.length/1024/1024).toFixed(2)+' MB'));
   await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal(uploads,0);assert.equal(await page.locator('#input').evaluate(e=>e.value),'Keep this draft');
-  await pick();await dialog.waitFor();await dialog.getByRole('radio',{name:/^압축/}).check();
+  await pick();await dialog.waitFor();assert.equal(await dialog.getByRole('radio',{name:/^압축/}).isChecked(),true);
   const compressedLabel=await dialog.getByRole('radio',{name:/^압축/}).evaluate(e=>e.parentElement.textContent);
   assert.equal(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+1),true);
   if(process.env.UIFB_SCREENSHOT_DIR){fs.mkdirSync(process.env.UIFB_SCREENSHOT_DIR,{recursive:true});await dialog.screenshot({path:path.join(process.env.UIFB_SCREENSHOT_DIR,width+'-quality.png')});}
